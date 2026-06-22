@@ -1,0 +1,36 @@
+{
+  "name": "atleast80-backend",
+  "version": "1.0.0",
+  "description": "Atleast80 API - Node.js + Express + MySQL",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "setup:db": "node scripts/setupDatabase.js",
+    "migrate": "node scripts/migrate.js",
+    "migrate:v2": "node scripts/migrateV2.js",
+    "migrate:v3": "node scripts/migrateV3.js",
+    "migrate:v4": "node scripts/migrateV4.js",
+    "migrate:v5": "node scripts/migrateV5.js",
+    "migrate:v6": "node scripts/migrateV6.js",
+    "migrate:v7": "node scripts/migrateV7.js",
+    "migrate:v8": "node scripts/migrateV8.js",
+    "migrate:v9": "node scripts/migrateV9.js",
+    "migrate:v10": "node scripts/migrateV10.js",
+    "cleanup:kitchens": "node scripts/cleanupKitchens.js",
+    "fix:http-urls": "node scripts/fixHttpMediaUrls.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.3",
+    "multer": "^2.1.1",
+    "mysql2": "^3.12.0"
+  }
+}
