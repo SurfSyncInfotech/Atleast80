@@ -6,7 +6,7 @@ export default function PageWrapper({ children, className, noNav = false, noPadd
       className={cn(
         "min-h-screen bg-cream",
         !noNav && "pb-20 md:pb-8",
-        !noPadding && "px-4 md:px-10 lg:px-16 xl:px-24",
+        !noPadding && "px-4 md:px-6",
         className
       )}
     >

@@ -104,7 +104,7 @@ export default function CheckoutPage() {
       </AnimatePresence>
 
       <div className="sticky top-0 z-40 bg-cream/95 backdrop-blur-md border-b border-gray-light/50">
-        <div className="px-4 md:px-10 py-3 flex items-center gap-3">
+        <div className="px-4 md:px-6 py-3 flex items-center gap-3">
           <button onClick={() => navigate(-1)} className="w-10 h-10 bg-white rounded-xl flex items-center justify-center cursor-pointer">
             <ArrowLeft size={20} />
           </button>
@@ -112,7 +112,7 @@ export default function CheckoutPage() {
         </div>
       </div>
 
-      <div className="px-4 md:px-10 mt-4 max-w-5xl mx-auto">
+      <div className="px-4 md:px-6 mt-4 max-w-5xl mx-auto">
         {error && (
           <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 font-nunito">
             {error}

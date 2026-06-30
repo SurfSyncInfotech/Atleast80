@@ -50,7 +50,7 @@ function cartReducer(state, action) {
 
 export function CartProvider({ children }) {
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { customerUser } = useAuth()
   const [cart, dispatch] = useReducer(cartReducer, [], loadCart)
 
   useEffect(() => {
@@ -58,10 +58,10 @@ export function CartProvider({ children }) {
   }, [cart])
 
   const requireCustomer = useCallback(() => {
-    if (user?.role === "customer") return true
+    if (customerUser) return true
     navigate("/login", { state: { from: window.location.pathname } })
     return false
-  }, [user, navigate])
+  }, [customerUser, navigate])
 
   const addItem = useCallback((item) => {
     if (!requireCustomer()) return false

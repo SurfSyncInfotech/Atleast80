@@ -49,7 +49,7 @@ export default function CartPage() {
     <div className="min-h-screen bg-cream pb-32 md:pb-8">
       {/* Header */}
       <div className="sticky top-0 z-40 bg-cream/95 backdrop-blur-md border-b border-gray-light/50">
-        <div className="px-4 md:px-10 lg:px-16 xl:px-24 py-3 flex items-center gap-3">
+        <div className="px-4 md:px-6 py-3 flex items-center gap-3">
           <button
             onClick={() => navigate(-1)}
             className="w-10 h-10 bg-white rounded-xl flex items-center justify-center cursor-pointer hover:bg-gray-light/50 transition-colors"
@@ -64,7 +64,7 @@ export default function CartPage() {
       </div>
 
       {/* Content */}
-      <div className="px-4 md:px-10 lg:px-16 xl:px-24 mt-6">
+      <div className="px-4 md:px-6 mt-6">
         <div className="md:grid md:grid-cols-[1fr_380px] md:gap-8">
           {/* Left column */}
           <div className="space-y-4">

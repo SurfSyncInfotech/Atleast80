@@ -9,6 +9,10 @@ import OnboardingPage from "./pages/OnboardingPage"
 import HomePage from "./pages/HomePage"
 import SearchPage from "./pages/SearchPage"
 import AboutPage from "./pages/AboutPage"
+import ContactPage from "./pages/ContactPage"
+import PrivacyPolicyPage from "./pages/PrivacyPolicyPage"
+import TermsOfServicePage from "./pages/TermsOfServicePage"
+import HygieneGuidelinesPage from "./pages/HygieneGuidelinesPage"
 import KitchenPage from "./pages/KitchenPage"
 import CartPage from "./pages/CartPage"
 import CheckoutPage from "./pages/CheckoutPage"
@@ -16,16 +20,26 @@ import OrderTrackingPage from "./pages/OrderTrackingPage"
 import LoginPage from "./pages/LoginPage"
 import SignupPage from "./pages/SignupPage"
 import ForgotPasswordPage from "./pages/ForgotPasswordPage"
-import ProfilePage from "./pages/ProfilePage"
+import ProfileLayout from "./pages/profile/ProfileLayout"
+import ProfileOverviewPage from "./pages/profile/ProfileOverviewPage"
+import ProfileAccountPage from "./pages/profile/ProfileAccountPage"
+import ProfileOrdersPage from "./pages/profile/ProfileOrdersPage"
+import KitchenOrdersPage from "./pages/kitchen/KitchenOrdersPage"
 import OrdersPage from "./pages/OrdersPage"
 import KitchenLoginPage from "./pages/kitchen/KitchenLoginPage"
 import KitchenSignupPage from "./pages/kitchen/KitchenSignupPage"
 import KitchenDashboardPage from "./pages/kitchen/KitchenDashboardPage"
 import KitchenMenuPage from "./pages/kitchen/KitchenMenuPage"
 import KitchenProfilePage from "./pages/kitchen/KitchenProfilePage"
+import KitchenBulkEnquiriesPage from "./pages/kitchen/KitchenBulkEnquiriesPage"
 import AdminLoginPage from "./pages/admin/AdminLoginPage"
 import AdminDashboardPage from "./pages/admin/AdminDashboardPage"
 import AdminFeaturedKitchensPage from "./pages/admin/AdminFeaturedKitchensPage"
+import AdminCustomersPage from "./pages/admin/AdminCustomersPage"
+import AdminAlertsPage from "./pages/admin/AdminAlertsPage"
+import AdminMenuPage from "./pages/admin/AdminMenuPage"
+import AdminHygienePage from "./pages/admin/AdminHygienePage"
+import AdminOrdersPage from "./pages/admin/AdminOrdersPage"
 
 const pagesWithBottomNav = ["/home", "/search", "/stories", "/orders", "/profile"]
 
@@ -45,6 +59,10 @@ function AppContent() {
           <Route path="/home" element={<HomePage />} />
           <Route path="/search" element={<SearchPage />} />
           <Route path="/about" element={<AboutPage />} />
+          <Route path="/contact" element={<ContactPage />} />
+          <Route path="/privacy" element={<PrivacyPolicyPage />} />
+          <Route path="/terms" element={<TermsOfServicePage />} />
+          <Route path="/hygiene-guidelines" element={<HygieneGuidelinesPage />} />
           <Route path="/stories" element={<HomePage />} />
           <Route path="/kitchen/login" element={<KitchenLoginPage />} />
           <Route path="/kitchen/signup" element={<KitchenSignupPage />} />
@@ -69,6 +87,22 @@ function AppContent() {
             element={
               <ProtectedRoute role="kitchen">
                 <KitchenProfilePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/kitchen/enquiries"
+            element={
+              <ProtectedRoute role="kitchen">
+                <KitchenBulkEnquiriesPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/kitchen/orders"
+            element={
+              <ProtectedRoute role="kitchen">
+                <KitchenOrdersPage />
               </ProtectedRoute>
             }
           />
@@ -109,10 +143,14 @@ function AppContent() {
             path="/profile"
             element={
               <ProtectedRoute role="customer">
-                <ProfilePage />
+                <ProfileLayout />
               </ProtectedRoute>
             }
-          />
+          >
+            <Route index element={<ProfileOverviewPage />} />
+            <Route path="account" element={<ProfileAccountPage />} />
+            <Route path="orders" element={<ProfileOrdersPage />} />
+          </Route>
 
           {/* Admin routes */}
           <Route path="/admin/login" element={<AdminLoginPage />} />
@@ -133,10 +171,50 @@ function AppContent() {
             }
           />
           <Route
+            path="/admin/alerts"
+            element={
+              <ProtectedRoute role="admin">
+                <AdminAlertsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/hygiene"
+            element={
+              <ProtectedRoute role="admin">
+                <AdminHygienePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/menu"
+            element={
+              <ProtectedRoute role="admin">
+                <AdminMenuPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/orders"
+            element={
+              <ProtectedRoute role="admin">
+                <AdminOrdersPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/admin/featured"
             element={
               <ProtectedRoute role="admin">
                 <AdminFeaturedKitchensPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/customers"
+            element={
+              <ProtectedRoute role="admin">
+                <AdminCustomersPage />
               </ProtectedRoute>
             }
           />

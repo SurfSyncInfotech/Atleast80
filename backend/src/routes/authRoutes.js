@@ -3,7 +3,13 @@ import bcrypt from "bcryptjs"
 import pool from "../config/db.js"
 import { signToken, authRequired, requireRole } from "../middleware/auth.js"
 import { fssaiLicenseUpload, getKitchenFileUrl } from "../middleware/upload.js"
-import { createOtp, getDemoOtp, checkOtp, consumeOtp } from "../utils/otpStore.js"
+import {
+  createAndSendOtp,
+  getDemoOtp,
+  checkOtp,
+  consumeOtp,
+} from "../utils/otpStore.js"
+import { normalizeIndianPhone, validateIndianPhone } from "../utils/phone.js"
 
 const router = Router()
 
@@ -52,7 +58,7 @@ router.get("/me", authRequired, async (req, res) => {
 router.post("/customer/register", async (req, res) => {
   const name = req.body.name?.toString().trim()
   const email = req.body.email?.toString().trim().toLowerCase()
-  const phone = req.body.phone?.toString().replace(/\D/g, "")
+  const phone = normalizeIndianPhone(req.body.phone)
   const password = req.body.password?.toString() || ""
 
   if (!name || name.length < 2) {
@@ -61,8 +67,9 @@ router.post("/customer/register", async (req, res) => {
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ message: "Enter a valid email address" })
   }
-  if (!phone || phone.length !== 10) {
-    return res.status(400).json({ message: "Phone number must be 10 digits" })
+  const phoneError = validateIndianPhone(phone)
+  if (phoneError) {
+    return res.status(400).json({ message: phoneError })
   }
   if (password.length < 6) {
     return res.status(400).json({ message: "Password must be at least 6 characters" })
@@ -81,7 +88,7 @@ router.post("/customer/register", async (req, res) => {
 
     const hash = await bcrypt.hash(password, 10)
     const [result] = await pool.query(
-      "INSERT INTO users (role, name, email, phone, password_hash) VALUES ('customer', ?, ?, ?, ?)",
+      "INSERT INTO users (role, name, email, phone, password_hash, phone_verified) VALUES ('customer', ?, ?, ?, ?, 0)",
       [name, email, phone, hash]
     )
 
@@ -128,6 +135,26 @@ router.post("/customer/login", async (req, res) => {
       return res.status(401).json({ message: "Invalid email or password" })
     }
 
+    if (!user.phone_verified) {
+      const phone = user.phone
+      const phoneError = phone ? validateIndianPhone(phone) : "No phone number on account"
+      if (phoneError) {
+        return res.status(400).json({ message: phoneError })
+      }
+
+      await createAndSendOtp(`login:${user.id}`, phone)
+
+      const payload = {
+        requiresOtp: true,
+        message: "OTP sent to your registered phone number",
+        phoneHint: `******${phone.slice(-4)}`,
+      }
+      const demoOtp = getDemoOtp()
+      if (demoOtp) payload.demoOtp = demoOtp
+
+      return res.json(payload)
+    }
+
     const token = signToken({ id: user.id, role: "customer" })
 
     res.json({
@@ -137,6 +164,59 @@ router.post("/customer/login", async (req, res) => {
     })
   } catch (error) {
     console.error("Customer login error:", error)
+    res.status(500).json({ message: "Login failed" })
+  }
+})
+
+router.post("/customer/login/verify-otp", async (req, res) => {
+  const email = req.body.email?.toString().trim().toLowerCase()
+  const password = req.body.password?.toString() || ""
+  const otp = req.body.otp?.toString().trim()
+
+  if (!email || !password) {
+    return res.status(400).json({ message: "Email and password are required" })
+  }
+  if (!otp || otp.length !== 4) {
+    return res.status(400).json({ message: "Enter the 4-digit OTP" })
+  }
+
+  try {
+    const [users] = await pool.query(
+      "SELECT * FROM users WHERE email = ? AND role = 'customer'",
+      [email]
+    )
+
+    if (users.length === 0) {
+      return res.status(401).json({ message: "Invalid email or password" })
+    }
+
+    const user = users[0]
+    if (!user.password_hash) {
+      return res.status(401).json({ message: "Please reset your password to continue" })
+    }
+
+    const valid = await bcrypt.compare(password, user.password_hash)
+    if (!valid) {
+      return res.status(401).json({ message: "Invalid email or password" })
+    }
+
+    if (!checkOtp(`login:${user.id}`, otp)) {
+      return res.status(401).json({ message: "Invalid or expired OTP" })
+    }
+
+    consumeOtp(`login:${user.id}`)
+    await pool.query("UPDATE users SET phone_verified = 1 WHERE id = ?", [user.id])
+    user.phone_verified = 1
+
+    const token = signToken({ id: user.id, role: "customer" })
+
+    res.json({
+      message: "Login successful",
+      token,
+      user: customerUser(user),
+    })
+  } catch (error) {
+    console.error("Customer login verify OTP error:", error)
     res.status(500).json({ message: "Login failed" })
   }
 })
@@ -163,13 +243,16 @@ router.post("/customer/forgot-password/send-otp", async (req, res) => {
       return res.status(400).json({ message: "No phone number linked to this account" })
     }
 
-    createOtp(`reset:${phone}`)
+    await createAndSendOtp(`reset:${phone}`, phone)
 
-    res.json({
+    const payload = {
       message: "OTP sent to your registered phone number",
       phoneHint: `******${phone.slice(-4)}`,
-      demoOtp: getDemoOtp(),
-    })
+    }
+    const demoOtp = getDemoOtp()
+    if (demoOtp) payload.demoOtp = demoOtp
+
+    res.json(payload)
   } catch (error) {
     console.error("Forgot password OTP error:", error)
     res.status(500).json({ message: "Failed to send OTP" })
@@ -217,7 +300,7 @@ router.post("/customer/forgot-password/reset", async (req, res) => {
 router.patch("/customer/profile", authRequired, requireRole("customer"), async (req, res) => {
   const name = req.body.name?.toString().trim()
   const email = req.body.email?.toString().trim().toLowerCase()
-  const phone = req.body.phone?.toString().replace(/\D/g, "")
+  const phone = normalizeIndianPhone(req.body.phone)
   const address = req.body.address?.toString().trim() || null
   const city = req.body.city?.toString().trim() || null
   const pincode = req.body.pincode?.toString().replace(/\D/g, "") || null
@@ -228,8 +311,9 @@ router.patch("/customer/profile", authRequired, requireRole("customer"), async (
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ message: "Valid email is required" })
   }
-  if (!phone || phone.length !== 10) {
-    return res.status(400).json({ message: "Phone number must be 10 digits" })
+  const phoneError = validateIndianPhone(phone)
+  if (phoneError) {
+    return res.status(400).json({ message: phoneError })
   }
 
   try {
@@ -368,7 +452,8 @@ router.post("/kitchen/register", (req, res) => {
 })
 
 router.post("/kitchen/login", async (req, res) => {
-  const { email, password } = req.body
+  const email = req.body.email?.toString().trim().toLowerCase()
+  const password = req.body.password?.toString() || ""
 
   if (!email || !password) {
     return res.status(400).json({ message: "Email and password are required" })

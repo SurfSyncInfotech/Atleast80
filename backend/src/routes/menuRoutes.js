@@ -240,6 +240,17 @@ router.put(
       const nextOffer =
         offer !== undefined ? (offer?.trim() || null) : current.offer
 
+      const contentChanged =
+        (name !== undefined && name?.trim() !== current.name) ||
+        (description !== undefined && (description?.trim() || null) !== (current.description || null)) ||
+        (price !== undefined && Number(price) !== Number(current.price)) ||
+        (category !== undefined && category !== current.category) ||
+        (itemType !== undefined && itemType !== current.item_type) ||
+        hasMediaUpdate
+
+      const resetApproval =
+        contentChanged && (existing[0].approval_status === "approved" || existing[0].approval_status === "rejected")
+
       await pool.query(
 
         `UPDATE menu_items SET
@@ -262,7 +273,7 @@ router.put(
 
           videos = ?,
 
-          is_available = COALESCE(?, is_available)
+          is_available = COALESCE(?, is_available)${resetApproval ? ", approval_status = 'pending', reviewed_at = NULL, reviewed_by = NULL, review_comment = NULL" : ""}
 
          WHERE id = ? AND kitchen_id = ?`,
 
@@ -388,7 +399,7 @@ router.get("/kitchen/:kitchenId", async (req, res) => {
 
     const [items] = await pool.query(
 
-      "SELECT * FROM menu_items WHERE kitchen_id = ? AND is_available = TRUE ORDER BY category, name",
+      "SELECT * FROM menu_items WHERE kitchen_id = ? AND is_available = TRUE AND approval_status = 'approved' ORDER BY category, name",
 
       [req.params.kitchenId]
 
@@ -408,7 +419,31 @@ router.get("/kitchen/:kitchenId", async (req, res) => {
 
 })
 
+router.get("/popular", async (req, res) => {
+  const limit = Math.min(24, Math.max(1, Number(req.query.limit) || 8))
 
+  try {
+    const [items] = await pool.query(
+      `SELECT m.*, k.name AS kitchen_name
+       FROM menu_items m
+       INNER JOIN kitchens k ON k.id = m.kitchen_id AND k.status = 'approved'
+       WHERE m.approval_status = 'approved' AND m.is_available = TRUE
+       ORDER BY m.created_at DESC
+       LIMIT ?`,
+      [limit]
+    )
+
+    res.json({
+      items: items.map((row) => ({
+        ...formatMenuItem(row),
+        kitchen_name: row.kitchen_name,
+      })),
+    })
+  } catch (error) {
+    console.error("Popular menu error:", error)
+    res.status(500).json({ message: "Failed to fetch popular items" })
+  }
+})
 
 export default router
 

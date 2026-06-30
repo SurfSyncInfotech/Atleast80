@@ -2,14 +2,16 @@ import { useEffect, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Store, User, MapPin, Mail, Clock, Save, CheckCircle, Camera,
-  ArrowLeft, ArrowRight,
+  ArrowLeft, ArrowRight, FileText, Upload,
 } from "lucide-react"
 import KitchenLayout from "../../components/layout/KitchenLayout"
 import KitchenAvatar from "../../components/common/KitchenAvatar"
+import StateCitySelect from "../../components/common/StateCitySelect"
 import Button from "../../components/ui/Button"
 import { useAuth } from "../../context/AuthContext"
-import { api, uploadKitchenLogo } from "../../lib/api"
-import { patchStoredAuth } from "../../lib/authStorage"
+import { api, uploadKitchenLogo, uploadKitchenFssaiLicense } from "../../lib/api"
+import { patchSessionForRole } from "../../lib/authStorage"
+import { resolveMediaUrl } from "../../lib/media"
 import { cn } from "../../lib/utils"
 
 const inputClass =
@@ -53,6 +55,7 @@ export default function KitchenProfilePage() {
   const [step, setStep] = useState(1)
   const [saving, setSaving] = useState(false)
   const [uploadingLogo, setUploadingLogo] = useState(false)
+  const [uploadingFssai, setUploadingFssai] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
 
@@ -79,6 +82,10 @@ export default function KitchenProfilePage() {
     if (step === 2) {
       if (!form.ownerName.trim() || !form.phone.trim() || !form.fssaiNumber.trim()) {
         setError("Owner name, phone, and FSSAI number are required")
+        return false
+      }
+      if (!kitchen?.fssai_license) {
+        setError("Upload your FSSAI license document")
         return false
       }
       if (form.phone.length !== 10) {
@@ -131,6 +138,26 @@ export default function KitchenProfilePage() {
     }
   }
 
+  const handleFssaiUpload = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadingFssai(true)
+    setError("")
+    try {
+      await uploadKitchenFssaiLicense(file)
+      await refreshKitchen()
+      setSuccess("FSSAI license updated")
+    } catch (err) {
+      setError(err.message || "Failed to upload FSSAI license")
+    } finally {
+      setUploadingFssai(false)
+      e.target.value = ""
+    }
+  }
+
+  const fssaiLicenseUrl = resolveMediaUrl(kitchen?.fssai_license)
+  const isPdfLicense = fssaiLicenseUrl?.toLowerCase().includes(".pdf")
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!validateStep()) return
@@ -159,7 +186,7 @@ export default function KitchenProfilePage() {
       })
       await refreshKitchen()
       if (data.user) {
-        patchStoredAuth({ user: data.user, kitchen: data.kitchen })
+        patchSessionForRole("kitchen", { user: data.user, kitchen: data.kitchen })
       }
       setSuccess("Profile saved successfully")
       window.scrollTo({ top: 0, behavior: "smooth" })
@@ -345,8 +372,49 @@ export default function KitchenProfilePage() {
                       </div>
                       <p className="font-nunito text-[11px] text-[#999] mt-1">Email cannot be changed</p>
                     </Field>
-                    <Field label="FSSAI License" required>
-                      <input className={inputClass} value={form.fssaiNumber} onChange={update("fssaiNumber")} />
+                    <Field label="FSSAI License Number" required>
+                      <input className={inputClass} value={form.fssaiNumber} onChange={update("fssaiNumber")} placeholder="14-digit FSSAI number" />
+                    </Field>
+                    <Field label="FSSAI License Document" required>
+                      <div className="rounded-xl border border-[#e8e8e8] bg-[#f8f8f8] p-4">
+                        {fssaiLicenseUrl ? (
+                          <div className="mb-3">
+                            {isPdfLicense ? (
+                              <a
+                                href={fssaiLicenseUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-2 text-sm font-nunito text-primary hover:underline"
+                              >
+                                <FileText size={16} />
+                                View uploaded license (PDF)
+                              </a>
+                            ) : (
+                              <a href={fssaiLicenseUrl} target="_blank" rel="noopener noreferrer" className="block">
+                                <img
+                                  src={fssaiLicenseUrl}
+                                  alt="FSSAI license"
+                                  className="max-h-40 rounded-lg border border-[#e8e8e8] object-contain bg-white"
+                                />
+                              </a>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="font-nunito text-xs text-[#999] mb-3">No license document uploaded yet.</p>
+                        )}
+                        <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-[#e8e8e8] text-sm font-poppins font-medium text-[#1c1c1c] cursor-pointer hover:bg-[#fafafa] transition-colors">
+                          <Upload size={16} className="text-primary" />
+                          {uploadingFssai ? "Uploading..." : fssaiLicenseUrl ? "Replace license" : "Upload license"}
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
+                            className="hidden"
+                            disabled={uploadingFssai}
+                            onChange={handleFssaiUpload}
+                          />
+                        </label>
+                        <p className="font-nunito text-[11px] text-[#999] mt-2">JPG, PNG, WebP, or PDF</p>
+                      </div>
                     </Field>
                   </motion.div>
                 )}
@@ -365,14 +433,16 @@ export default function KitchenProfilePage() {
                     <Field label="Full Address" required>
                       <textarea className={cn(inputClass, "min-h-[80px] resize-y")} value={form.address} onChange={update("address")} />
                     </Field>
-                    <div className="grid grid-cols-2 gap-3">
-                      <Field label="City" required>
-                        <input className={inputClass} value={form.city} onChange={update("city")} />
-                      </Field>
-                      <Field label="State" required>
-                        <input className={inputClass} value={form.state} onChange={update("state")} />
-                      </Field>
-                    </div>
+                    <Field label="State & City" required>
+                      <StateCitySelect
+                        state={form.state}
+                        city={form.city}
+                        onStateChange={(value) => setForm((f) => ({ ...f, state: value, city: "" }))}
+                        onCityChange={(value) => setForm((f) => ({ ...f, city: value }))}
+                        required
+                        disabled={saving}
+                      />
+                    </Field>
                     <Field label="Pincode" required>
                       <input className={inputClass} value={form.pincode} onChange={update("pincode")} maxLength={6} inputMode="numeric" />
                     </Field>

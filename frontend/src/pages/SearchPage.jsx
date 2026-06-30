@@ -13,7 +13,6 @@ import { cn } from "../lib/utils"
 
 const filters = [
   { id: "all", label: "All" },
-  { id: "hygiene", label: "Hygiene Verified" },
   { id: "rating", label: "Top Rated" },
   { id: "veg", label: "Pure Veg" },
   { id: "ration", label: "Ration" },
@@ -44,10 +43,8 @@ function matchesQuery(kitchen, query) {
 
 function matchesFilter(kitchen, filterId) {
   switch (filterId) {
-    case "hygiene":
-      return kitchen.hygieneVerified
     case "rating":
-      return kitchen.rating >= 4.5
+      return kitchen.ratingVisible && kitchen.rating != null && kitchen.rating >= 4.5
     case "veg":
       return kitchen.kitchenType === "veg"
     case "ration":
@@ -63,7 +60,7 @@ function sortKitchens(list, sortId) {
   const items = [...list]
   switch (sortId) {
     case "rating":
-      return items.sort((a, b) => b.rating - a.rating)
+      return items.sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))
     case "delivery":
       return items.sort(
         (a, b) => parseDeliveryMinutes(a.deliveryTime) - parseDeliveryMinutes(b.deliveryTime)

@@ -10,7 +10,7 @@ import {
 
   UtensilsCrossed,
 
-  BarChart3,
+  ShoppingBag,
 
   User,
 
@@ -31,7 +31,7 @@ import {
   Loader2,
 
   MapPin,
-
+  MessageSquare,
 } from "lucide-react"
 
 import { useAuth } from "../../context/AuthContext"
@@ -45,6 +45,7 @@ import KitchenStoryModal from "../kitchen/KitchenStoryModal"
 import StoryCircle from "../common/StoryCircle"
 
 import StoryViewer from "../common/StoryViewer"
+import AlertsPanel from "../common/AlertsPanel"
 
 import { api, uploadKitchenCover } from "../../lib/api"
 
@@ -74,9 +75,9 @@ function HeaderIconButton({ icon: Icon, label, onClick, disabled, active }) {
 
 
 
-export default function KitchenLayout({ children, fullBleed = false }) {
+export default function KitchenLayout({ children, fullBleed = false, fullWidth = false }) {
 
-  const { user, kitchen, logout, refreshKitchen } = useAuth()
+  const { user, kitchen, logoutKitchen, refreshKitchen } = useAuth()
 
   const navigate = useNavigate()
 
@@ -93,8 +94,16 @@ export default function KitchenLayout({ children, fullBleed = false }) {
   const [stories, setStories] = useState([])
 
   const [storyViewerOpen, setStoryViewerOpen] = useState(false)
+  const [alertsOpen, setAlertsOpen] = useState(false)
+  const [alertCount, setAlertCount] = useState(0)
 
   const isApproved = kitchen?.status === "approved"
+
+  useEffect(() => {
+    api("/api/alerts", {}, "kitchen")
+      .then((d) => setAlertCount((d.alerts || []).length))
+      .catch(() => setAlertCount(0))
+  }, [alertsOpen, kitchen?.status])
 
   useEffect(() => {
     if (!isApproved) {
@@ -147,9 +156,11 @@ export default function KitchenLayout({ children, fullBleed = false }) {
 
     { to: "/kitchen/menu", label: "Menu", icon: UtensilsCrossed, requiresApproval: true },
 
-    { to: "/kitchen/profile", label: "Profile", icon: User },
+    { to: "/kitchen/orders", label: "Orders", icon: ShoppingBag, requiresApproval: true },
 
-    { to: "/kitchen/dashboard", label: "Analytics", icon: BarChart3, disabled: true },
+    { to: "/kitchen/enquiries", label: "Enquiries", icon: MessageSquare, requiresApproval: true },
+
+    { to: "/kitchen/profile", label: "Profile", icon: User },
 
   ]
 
@@ -159,7 +170,7 @@ export default function KitchenLayout({ children, fullBleed = false }) {
 
     setDrawerOpen(false)
 
-    logout()
+    logoutKitchen()
 
     navigate("/kitchen/login")
 
@@ -501,7 +512,13 @@ export default function KitchenLayout({ children, fullBleed = false }) {
             <HeaderIconButton
               icon={Bell}
               label="Alerts"
-              onClick={() => {}}
+              onClick={() => setAlertsOpen(true)}
+              active={alertCount > 0}
+            />
+            <HeaderIconButton
+              icon={LogOut}
+              label="Logout"
+              onClick={handleLogout}
             />
           </div>
 
@@ -509,7 +526,16 @@ export default function KitchenLayout({ children, fullBleed = false }) {
 
 
 
-        <main className={cn("flex-1", fullBleed ? "px-2 py-3 sm:px-3 md:px-4 md:py-5" : "p-4 md:p-6")}>{children}</main>
+        <main
+          className={cn(
+            "flex-1",
+            fullWidth && "py-4 md:py-5",
+            !fullWidth && fullBleed && "px-2 py-3 sm:px-3 md:px-4 md:py-5",
+            !fullWidth && !fullBleed && "p-4 md:p-6"
+          )}
+        >
+          {children}
+        </main>
 
       </div>
 
@@ -528,6 +554,8 @@ export default function KitchenLayout({ children, fullBleed = false }) {
           onClose={() => setStoryViewerOpen(false)}
         />
       )}
+
+      <AlertsPanel open={alertsOpen} onClose={() => setAlertsOpen(false)} />
 
     </div>
     </KitchenPanelContext.Provider>

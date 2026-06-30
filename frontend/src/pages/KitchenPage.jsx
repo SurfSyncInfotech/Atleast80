@@ -19,11 +19,13 @@ import MenuListItem from "../components/common/MenuListItem"
 import MenuItemDetailModal from "../components/common/MenuItemDetailModal"
 
 import KitchenAvatar from "../components/common/KitchenAvatar"
+import BulkOrderChatbot from "../components/common/BulkOrderChatbot"
 
 import { useCart } from "../context/CartContext"
 
 import { api } from "../lib/api"
 import { resolveMenuItemMedia, resolveMediaUrl } from "../lib/media"
+import { toKitchenCard } from "../lib/kitchen"
 
 import { kitchens as mockKitchens, menuItems as mockMenu, groceryItems as mockGrocery } from "../data/mockData"
 
@@ -45,52 +47,21 @@ const tabs = [
 
   { id: "offers", label: "Offers", icon: Tag },
 
+  { id: "hygiene", label: "Check Hygiene", icon: ShieldCheck },
+
 ]
 
-
-
 function mapApiKitchen(k) {
-
+  const card = toKitchenCard(k)
   return {
-
-    id: k.id,
-
-    name: k.name,
-
-    speciality: k.speciality || "",
-
-    rating: Number(k.rating) || 4.5,
-
-    deliveryTime: k.delivery_time || "30 min",
-
-    hygieneScore: k.hygiene_score || 0,
-
-    hygieneVerified: (k.hygiene_score || 0) >= 80,
-
-    offer: k.offer,
-
-    bestItem: k.best_item,
-
+    ...card,
     description: k.description,
-
-    city: k.city,
-
-    state: k.state,
-
     address: k.address,
-
     pincode: k.pincode,
-
     openingTime: k.opening_time,
-
-    kitchenType: k.kitchen_type,
-
     phone: k.phone,
-
     image: k.image || null,
-
   }
-
 }
 
 
@@ -182,6 +153,8 @@ export default function KitchenPage() {
 
   const [selectedItem, setSelectedItem] = useState(null)
 
+  const [hygieneData, setHygieneData] = useState({ videos: [], compliant: false, areas: [] })
+
   const { itemCount, total, requireCustomer } = useCart()
 
 
@@ -198,11 +171,13 @@ export default function KitchenPage() {
 
       try {
 
-        const [kitchenRes, menuRes] = await Promise.all([
+        const [kitchenRes, menuRes, hygieneRes] = await Promise.all([
 
           api(`/api/kitchens/${id}`),
 
           api(`/api/menu/kitchen/${id}`),
+
+          api(`/api/hygiene/kitchen/${id}`).catch(() => ({ videos: [], compliant: false, areas: [] })),
 
         ])
 
@@ -213,6 +188,8 @@ export default function KitchenPage() {
         setKitchen(k)
 
         setMenu(menuRes.items.map((item) => mapApiMenuItem(item, k.name, k.id)))
+
+        setHygieneData(hygieneRes)
 
       } catch {
 
@@ -378,13 +355,16 @@ export default function KitchenPage() {
 
                   </div>
 
+                  {kitchen.ratingVisible && kitchen.rating != null ? (
                   <div className="flex-shrink-0 flex items-center gap-1 bg-secondary/15 text-dark px-2.5 py-1.5 rounded-xl">
-
                     <Star size={14} className="fill-secondary text-secondary" />
-
                     <span className="font-poppins font-bold text-sm">{kitchen.rating}</span>
-
                   </div>
+                  ) : (
+                  <div className="flex-shrink-0 text-[10px] font-poppins font-semibold text-gray bg-gray-100 px-2.5 py-1.5 rounded-xl">
+                    New
+                  </div>
+                  )}
 
                 </div>
 
@@ -436,16 +416,9 @@ export default function KitchenPage() {
 
           {/* Metrics strip */}
 
-          <div className="grid grid-cols-3 border-t border-gray-100 bg-gray-50/50">
+          <div className="grid grid-cols-2 border-t border-gray-100 bg-gray-50/50">
 
             <MetricCell icon={Clock} label="Delivery" value={kitchen.deliveryTime} />
-
-            <MetricCell
-              icon={ShieldCheck}
-              label="Hygiene"
-              value={kitchen.hygieneScore > 0 ? `${kitchen.hygieneScore}%` : "—"}
-              highlight={kitchen.hygieneVerified}
-            />
 
             <MetricCell icon={UtensilsCrossed} label="Menu" value={`${foodItems.length + groceryItems.length} items`} />
 
@@ -471,7 +444,7 @@ export default function KitchenPage() {
 
         <div className="sticky top-0 z-20 mt-5 py-2 -mx-4 px-4 sm:mx-0 sm:px-0 bg-[#f5f5f4]/95 backdrop-blur-md">
 
-          <div className="flex gap-2 p-1.5 bg-white rounded-2xl shadow-sm border border-gray-100 max-w-md">
+          <div className="flex gap-2 p-1.5 bg-white rounded-2xl shadow-sm border border-gray-100 max-w-2xl">
 
             {tabs.map((tab) => {
 
@@ -585,6 +558,12 @@ export default function KitchenPage() {
 
             )}
 
+            {activeTab === "hygiene" && (
+
+              <HygieneTab data={hygieneData} kitchen={kitchen} />
+
+            )}
+
           </div>
 
 
@@ -621,7 +600,11 @@ export default function KitchenPage() {
 
       <MenuItemDetailModal item={selectedItem} onClose={() => setSelectedItem(null)} />
 
-
+      <BulkOrderChatbot
+        kitchenId={kitchen.id}
+        kitchenName={kitchen.name}
+        cartVisible={itemCount > 0}
+      />
 
       {itemCount > 0 && (
 
@@ -1133,6 +1116,46 @@ function InfoRow({ icon: Icon, text }) {
 
   )
 
+}
+
+
+
+function HygieneTab({ data, kitchen }) {
+  const videos = data?.videos || []
+
+  return (
+    <>
+      <div className="px-5 sm:px-6 py-5 border-b border-gray-50 bg-gradient-to-r from-white to-gray-50/30">
+        <h2 className="font-poppins font-bold text-dark text-lg">Check Hygiene</h2>
+        <p className="font-nunito text-xs text-gray mt-0.5">
+          Latest daily video from {kitchen.name} covering washing area, refrigerator, and cooking area
+          {data?.compliant ? " · Updated within 24 hours" : ""}
+        </p>
+      </div>
+      <div className="px-5 sm:px-6 py-6">
+        {videos.length === 0 ? (
+          <div className="py-16 text-center">
+            <ShieldCheck size={36} className="text-gray-light mx-auto mb-3 opacity-50" />
+            <p className="font-nunito text-gray text-sm">No hygiene videos available yet.</p>
+          </div>
+        ) : (
+          <div className="max-w-xl">
+            {videos.map((v) => (
+              <div key={v.id} className="rounded-2xl border border-gray-100 overflow-hidden bg-white shadow-sm">
+                <video src={resolveMediaUrl(v.mediaUrl)} className="w-full aspect-video object-cover bg-black" controls playsInline />
+                <div className="p-4">
+                  <p className="font-poppins font-semibold text-sm text-dark">{v.label}</p>
+                  <p className="font-nunito text-xs text-gray mt-1">
+                    {v.recordedAt ? new Date(v.recordedAt).toLocaleString("en-IN") : ""}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  )
 }
 
 

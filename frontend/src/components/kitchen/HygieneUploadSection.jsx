@@ -149,7 +149,7 @@ export default function HygieneUploadSection({ compact = false, onChange }) {
           </div>
           <p className="font-nunito text-sm text-gray mt-1 leading-relaxed">
             Add clear photos and short videos of your kitchen, cooking area, and food preparation.
-            Click <strong>Submit</strong> when ready — our admin team will review them and assign your hygiene score.
+            Click <strong>Submit</strong> when ready — our admin team will review your media.
           </p>
         </div>
       </div>

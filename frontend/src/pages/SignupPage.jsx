@@ -6,6 +6,8 @@ import Button from "../components/ui/Button"
 import PasswordInput from "../components/ui/PasswordInput"
 import { useAuth } from "../context/AuthContext"
 
+const INDIAN_MOBILE = /^[6-9]\d{9}$/
+
 export default function SignupPage() {
   const navigate = useNavigate()
   const { signupCustomer } = useAuth()
@@ -20,14 +22,19 @@ export default function SignupPage() {
     setError("")
     setLoading(true)
     try {
+      const phone = form.phone.replace(/\D/g, "").slice(0, 10)
+      if (!INDIAN_MOBILE.test(phone)) {
+        throw new Error("Enter a valid 10-digit Indian mobile number")
+      }
       await signupCustomer({
         ...form,
-        phone: form.phone.replace(/\D/g, "").slice(0, 10),
+        phone,
+        email: form.email.trim().toLowerCase(),
       })
       navigate("/login", {
         replace: true,
         state: {
-          message: "Account created! Please sign in to continue.",
+          message: "Account created! Sign in with your email and password. You'll verify your phone on first sign in.",
           email: form.email.trim().toLowerCase(),
         },
       })
@@ -42,7 +49,7 @@ export default function SignupPage() {
     <div className="min-h-screen bg-cream flex flex-col md:flex-row">
       <div className="hidden md:flex md:w-1/2 bg-gradient-to-br from-primary-dark via-primary to-[#0a4025] items-center justify-center px-12">
         <div className="text-center max-w-md">
-          <img src="/logo.jpeg" alt="Atleast80" className="w-24 h-24 rounded-3xl shadow-2xl mx-auto" />
+          <img src="/logo.png" alt="Atleast80" className="w-24 h-24 rounded-3xl shadow-2xl mx-auto" />
           <h1 className="font-poppins font-bold text-white text-3xl mt-8">Join Atleast80</h1>
           <p className="font-nunito text-white/60 mt-4">
             Create your account to order trusted homemade food and essentials.
@@ -108,11 +115,12 @@ export default function SignupPage() {
                   type="tel"
                   value={form.phone}
                   onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value.replace(/\D/g, "").slice(0, 10) }))}
-                  placeholder="10-digit mobile number"
+                  placeholder="10-digit Indian mobile"
                   className="w-full pl-12 pr-4 py-4 bg-white rounded-2xl border-2 border-gray-light font-nunito focus:outline-none focus:border-primary"
                   required
                 />
               </div>
+              <p className="font-nunito text-xs text-gray mt-2">India only — verified via OTP on your first sign in</p>
             </div>
 
             <div>
@@ -130,7 +138,7 @@ export default function SignupPage() {
               </div>
             </div>
 
-            <Button type="submit" size="lg" className="w-full" disabled={loading || form.phone.length !== 10}>
+            <Button type="submit" size="lg" className="w-full" disabled={loading || !INDIAN_MOBILE.test(form.phone)}>
               {loading ? "Creating account..." : "Sign up"}
               <ArrowRight size={18} />
             </Button>

@@ -11,6 +11,7 @@ import Button from "../../components/ui/Button"
 import PasswordInput from "../../components/ui/PasswordInput"
 
 import { useAuth } from "../../context/AuthContext"
+import { useRoleRedirect } from "../../hooks/useRoleRedirect"
 
 
 
@@ -29,6 +30,7 @@ export default function AdminLoginPage() {
   const navigate = useNavigate()
 
   const { loginAdmin } = useAuth()
+  useRoleRedirect("admin")
 
   const [email, setEmail] = useState("")
 

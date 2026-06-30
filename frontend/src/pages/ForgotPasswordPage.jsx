@@ -14,7 +14,7 @@ export default function ForgotPasswordPage() {
   const [otp, setOtp] = useState(["", "", "", ""])
   const [password, setPassword] = useState("")
   const [phoneHint, setPhoneHint] = useState("")
-  const [demoOtp, setDemoOtp] = useState("1234")
+  const [demoOtp, setDemoOtp] = useState(null)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
   const [loading, setLoading] = useState(false)
@@ -29,6 +29,7 @@ export default function ForgotPasswordPage() {
       const data = await sendForgotPasswordOtp(email)
       setPhoneHint(data.phoneHint || "")
       if (data.demoOtp) setDemoOtp(data.demoOtp)
+      else setDemoOtp(null)
       setStep("otp")
     } catch (err) {
       setError(err.message || "Failed to send OTP")
@@ -125,11 +126,13 @@ export default function ForgotPasswordPage() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
             >
-              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-                <p className="font-nunito text-xs text-amber-900">
-                  Demo OTP: <span className="font-poppins font-bold tracking-widest">{demoOtp}</span>
-                </p>
-              </div>
+              {demoOtp && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                  <p className="font-nunito text-xs text-amber-900">
+                    Demo OTP: <span className="font-poppins font-bold tracking-widest">{demoOtp}</span>
+                  </p>
+                </div>
+              )}
 
               <div className="flex gap-3 justify-center">
                 {otp.map((digit, i) => (

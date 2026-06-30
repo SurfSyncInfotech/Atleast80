@@ -10,15 +10,17 @@ import {
 
   Star,
 
-  LogOut,
+  UtensilsCrossed,
+
+  Bell,
+
+  ShieldCheck,
 
   Users,
 
-  BarChart3,
+  ShoppingBag,
 
-  Settings,
-
-  Bell,
+  LogOut,
 
   Menu,
 
@@ -38,13 +40,17 @@ const links = [
 
   { to: "/admin/kitchens", label: "Kitchens", icon: ChefHat },
 
+  { to: "/admin/hygiene", label: "Hygiene", icon: ShieldCheck },
+
+  { to: "/admin/menu", label: "Menu", icon: UtensilsCrossed },
+
+  { to: "/admin/orders", label: "Orders", icon: ShoppingBag },
+
   { to: "/admin/featured", label: "Featured", icon: Star },
 
-  { to: "/admin", label: "Customers", icon: Users, disabled: true },
+  { to: "/admin/alerts", label: "Alerts", icon: Bell },
 
-  { to: "/admin", label: "Analytics", icon: BarChart3, disabled: true },
-
-  { to: "/admin", label: "Settings", icon: Settings, disabled: true },
+  { to: "/admin/customers", label: "Customers", icon: Users },
 
 ]
 
@@ -52,7 +58,7 @@ const links = [
 
 export default function AdminLayout({ children }) {
 
-  const { user, logout } = useAuth()
+  const { user, logoutAdmin } = useAuth()
 
   const navigate = useNavigate()
 
@@ -64,7 +70,7 @@ export default function AdminLayout({ children }) {
 
     setDrawerOpen(false)
 
-    logout()
+    logoutAdmin()
 
     navigate("/admin/login")
 
@@ -276,7 +282,21 @@ export default function AdminLayout({ children }) {
 
           <div className="flex items-center gap-1 flex-shrink-0">
 
-            <button className="relative p-2 rounded-lg hover:bg-gray-100 cursor-pointer">
+            <button
+              onClick={handleLogout}
+              title="Logout"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-poppins font-medium text-gray hover:text-red-600 hover:bg-red-50 cursor-pointer transition-colors"
+            >
+              <LogOut size={16} />
+              <span className="hidden sm:inline">Logout</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => navigate("/admin/alerts")}
+              title="Alerts"
+              className="relative p-2 rounded-lg hover:bg-gray-100 cursor-pointer"
+            >
 
               <Bell size={18} className="text-gray" />
 

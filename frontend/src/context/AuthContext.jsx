@@ -1,63 +1,83 @@
-import { createContext, useContext, useState, useEffect, useCallback } from "react"
+import { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react"
+import { useLocation } from "react-router-dom"
 import { api, ApiError, registerKitchen as registerKitchenApi } from "../lib/api"
 import {
-  readStoredAuth,
-  writeStoredAuth,
-  patchStoredAuth,
-  clearStoredAuth,
+  inferRoleFromPath,
+  readSessionForRole,
+  writeSessionForRole,
+  patchSessionForRole,
+  clearSessionForRole,
+  readSessions,
 } from "../lib/authStorage"
 
 const AuthContext = createContext(null)
 
-const initialAuth = readStoredAuth()
-
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(initialAuth?.user ?? null)
-  const [kitchen, setKitchen] = useState(initialAuth?.kitchen ?? null)
-  const [loading, setLoading] = useState(Boolean(initialAuth?.token))
+  const location = useLocation()
+  const currentRole = inferRoleFromPath(location.pathname)
 
-  const applySession = useCallback((authData) => {
-    if (!authData?.token || !authData?.user) {
-      clearStoredAuth()
-      setUser(null)
-      setKitchen(null)
-      return
-    }
+  const [sessions, setSessions] = useState(readSessions)
+  const [sessionReady, setSessionReady] = useState(false)
 
-    writeStoredAuth(authData)
-    setUser(authData.user)
-    setKitchen(authData.kitchen ?? null)
+  const activeSession = sessions[currentRole] ?? null
+  const user = activeSession?.user ?? null
+  const kitchen = currentRole === "kitchen" ? (activeSession?.kitchen ?? null) : null
+
+  const customerUser = sessions.customer?.user ?? null
+  const adminUser = sessions.admin?.user ?? null
+  const kitchenPartnerUser = sessions.kitchen?.user ?? null
+
+  const reloadSessions = useCallback(() => {
+    setSessions(readSessions())
   }, [])
 
-  const persist = useCallback(
-    (authData) => {
+  const applyRoleSession = useCallback(
+    (role, authData) => {
+      if (!role) return
+
+      if (!authData?.token || !authData?.user) {
+        clearSessionForRole(role)
+      } else {
+        writeSessionForRole(role, authData)
+      }
+
+      reloadSessions()
+    },
+    [reloadSessions]
+  )
+
+  const persistRole = useCallback(
+    (role, authData) => {
+      if (!role) return
+
       if (!authData) {
-        applySession(null)
+        applyRoleSession(role, null)
         return
       }
 
-      const prev = readStoredAuth()
-      applySession({
+      const prev = readSessionForRole(role)
+      applyRoleSession(role, {
         token: authData.token ?? prev?.token,
         user: authData.user ?? prev?.user ?? null,
-        kitchen: authData.kitchen !== undefined ? authData.kitchen : (prev?.kitchen ?? null),
+        kitchen:
+          authData.kitchen !== undefined ? authData.kitchen : (prev?.kitchen ?? null),
       })
     },
-    [applySession]
+    [applyRoleSession]
   )
 
   const loginKitchen = async (email, password) => {
     const data = await api("/api/auth/kitchen/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
-    })
-    persist({ token: data.token, user: data.user, kitchen: data.kitchen })
+    }, "kitchen")
+    persistRole("kitchen", { token: data.token, user: data.user, kitchen: data.kitchen })
     return data
   }
 
   const registerKitchen = async (form, fssaiLicenseFile) => {
     const data = await registerKitchenApi(form, fssaiLicenseFile)
-    persist({ token: data.token, user: data.user, kitchen: data.kitchen })
+    persistRole("kitchen", { token: data.token, user: data.user, kitchen: data.kitchen })
     return data
   }
 
@@ -65,8 +85,8 @@ export function AuthProvider({ children }) {
     const data = await api("/api/auth/admin/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
-    })
-    persist({ token: data.token, user: data.user, kitchen: null })
+    }, "admin")
+    persistRole("admin", { token: data.token, user: data.user, kitchen: null })
     return data
   }
 
@@ -74,8 +94,8 @@ export function AuthProvider({ children }) {
     const data = await api("/api/auth/customer/register", {
       method: "POST",
       body: JSON.stringify({ name, email, phone, password }),
-    })
-    persist({ token: data.token, user: data.user, kitchen: null })
+    }, "customer")
+    persistRole("customer", { token: data.token, user: data.user, kitchen: null })
     return data
   }
 
@@ -83,15 +103,29 @@ export function AuthProvider({ children }) {
     return api("/api/auth/customer/register", {
       method: "POST",
       body: JSON.stringify({ name, email, phone, password }),
-    })
+    }, "customer")
   }
 
   const loginCustomer = async (email, password) => {
     const data = await api("/api/auth/customer/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
-    })
-    persist({ token: data.token, user: data.user, kitchen: null })
+    }, "customer")
+
+    if (data.requiresOtp) {
+      return data
+    }
+
+    persistRole("customer", { token: data.token, user: data.user, kitchen: null })
+    return data
+  }
+
+  const verifyLoginOtp = async (email, password, otp) => {
+    const data = await api("/api/auth/customer/login/verify-otp", {
+      method: "POST",
+      body: JSON.stringify({ email, password, otp }),
+    }, "customer")
+    persistRole("customer", { token: data.token, user: data.user, kitchen: null })
     return data
   }
 
@@ -99,104 +133,126 @@ export function AuthProvider({ children }) {
     return api("/api/auth/customer/forgot-password/send-otp", {
       method: "POST",
       body: JSON.stringify({ email }),
-    })
+    }, "customer")
   }
 
   const resetPassword = async ({ email, otp, password }) => {
     return api("/api/auth/customer/forgot-password/reset", {
       method: "POST",
       body: JSON.stringify({ email, otp, password }),
-    })
+    }, "customer")
   }
 
   const updateProfile = async (profile) => {
     const data = await api("/api/auth/customer/profile", {
       method: "PATCH",
       body: JSON.stringify(profile),
-    })
-    const stored = readStoredAuth()
+    }, "customer")
+    const stored = readSessionForRole("customer")
     if (stored?.token) {
-      persist({ token: stored.token, user: data.user, kitchen: null })
+      persistRole("customer", { token: stored.token, user: data.user, kitchen: null })
     }
     return data
   }
 
-  const logout = useCallback(() => applySession(null), [applySession])
+  const logout = useCallback(() => {
+    applyRoleSession(currentRole, null)
+  }, [applyRoleSession, currentRole])
+
+  const logoutCustomer = useCallback(() => {
+    applyRoleSession("customer", null)
+  }, [applyRoleSession])
+
+  const logoutAdmin = useCallback(() => {
+    applyRoleSession("admin", null)
+  }, [applyRoleSession])
+
+  const logoutKitchen = useCallback(() => {
+    applyRoleSession("kitchen", null)
+  }, [applyRoleSession])
 
   const refreshKitchen = useCallback(async () => {
-    const data = await api("/api/kitchens/me")
-    setKitchen(data.kitchen)
-    const patched = patchStoredAuth({ kitchen: data.kitchen })
-    if (patched) setKitchen(patched.kitchen ?? data.kitchen)
+    const data = await api("/api/kitchens/me", {}, "kitchen")
+    patchSessionForRole("kitchen", { kitchen: data.kitchen })
+    reloadSessions()
     return data.kitchen
-  }, [])
+  }, [reloadSessions])
 
   useEffect(() => {
     let cancelled = false
 
     async function bootstrap() {
-      const stored = readStoredAuth()
+      const stored = readSessionForRole(currentRole)
 
       if (!stored?.token) {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) setSessionReady(true)
         return
       }
 
-      if (stored.user) {
-        setUser(stored.user)
-        setKitchen(stored.kitchen ?? null)
-      }
+      reloadSessions()
 
       try {
-        const data = await api("/api/auth/me")
+        const data = await api("/api/auth/me", {}, currentRole)
         if (cancelled || !data?.user) return
 
-        applySession({
+        applyRoleSession(currentRole, {
           token: stored.token,
           user: data.user,
-          kitchen: data.user.role === "kitchen" ? (data.kitchen ?? stored.kitchen ?? null) : null,
+          kitchen:
+            currentRole === "kitchen"
+              ? (data.kitchen ?? stored.kitchen ?? null)
+              : null,
         })
       } catch (err) {
         if (cancelled) return
-        if (err instanceof ApiError && err.status === 401) {
-          applySession(null)
+        if (import.meta.env.DEV && err instanceof ApiError) {
+          console.warn(`Session refresh skipped (${currentRole}):`, err.message)
         }
       } finally {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) setSessionReady(true)
       }
     }
 
+    setSessionReady(false)
     bootstrap()
+
     return () => {
       cancelled = true
     }
-  }, [applySession])
+  }, [currentRole, applyRoleSession, reloadSessions])
 
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        kitchen,
-        loading,
-        isAdmin: user?.role === "admin",
-        isKitchen: user?.role === "kitchen",
-        isCustomer: user?.role === "customer",
-        loginKitchen,
-        registerKitchen,
-        loginAdmin,
-        registerCustomer,
-        signupCustomer,
-        loginCustomer,
-        sendForgotPasswordOtp,
-        resetPassword,
-        updateProfile,
-        logout,
-        refreshKitchen,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
+  const value = useMemo(
+    () => ({
+      user,
+      kitchen,
+      customerUser,
+      adminUser,
+      kitchenPartnerUser,
+      sessionReady,
+      currentRole,
+      isAdmin: Boolean(adminUser),
+      isCustomer: Boolean(customerUser),
+      isKitchen: Boolean(kitchenPartnerUser),
+      loginKitchen,
+      registerKitchen,
+      loginAdmin,
+      registerCustomer,
+      signupCustomer,
+      loginCustomer,
+      verifyLoginOtp,
+      sendForgotPasswordOtp,
+      resetPassword,
+      updateProfile,
+      logout,
+      logoutCustomer,
+      logoutAdmin,
+      logoutKitchen,
+      refreshKitchen,
+    }),
+    [user, kitchen, customerUser, adminUser, kitchenPartnerUser, sessionReady, currentRole, logout, logoutCustomer, logoutAdmin, logoutKitchen, refreshKitchen]
   )
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {
