@@ -1,12 +1,14 @@
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useMemo } from "react"
 import {
   UtensilsCrossed, CheckCircle, XCircle, ChevronDown, Store, Trash2, MessageSquare,
 } from "lucide-react"
 import AdminLayout from "../../components/layout/AdminLayout"
 import Chip from "../../components/common/Chip"
 import MenuItemDetailModal from "../../components/common/MenuItemDetailModal"
+import TablePagination from "../../components/ui/TablePagination"
 import { api } from "../../lib/api"
 import { resolveMediaUrl, resolveMenuItemMedia } from "../../lib/media"
+import { paginateSlice } from "../../lib/pagination"
 import { cn } from "../../lib/utils"
 
 const FILTERS = [
@@ -122,6 +124,22 @@ function KitchenMenuTable({
   onOpenModal,
   onViewItem,
 }) {
+  const [itemPage, setItemPage] = useState(1)
+  const [itemPageSize, setItemPageSize] = useState(10)
+
+  const paginatedItems = useMemo(
+    () => paginateSlice(kitchen.items, itemPage, itemPageSize),
+    [kitchen.items, itemPage, itemPageSize]
+  )
+
+  useEffect(() => {
+    setItemPage(1)
+  }, [kitchen.id, kitchen.items.length])
+
+  useEffect(() => {
+    if (itemPage > paginatedItems.totalPages) setItemPage(paginatedItems.totalPages)
+  }, [itemPage, paginatedItems.totalPages])
+
   const cover = resolveMediaUrl(kitchen.coverImage)
 
   return (
@@ -181,7 +199,7 @@ function KitchenMenuTable({
               </tr>
             </thead>
             <tbody>
-              {kitchen.items.map((item) => {
+              {paginatedItems.items.map((item) => {
                 const thumb = resolveMediaUrl(item.image || item.images?.[0])
                 const status = item.approvalStatus || item.approval_status || "pending"
                 const category = item.category === "grocery" ? "Grocery" : "Food"
@@ -293,6 +311,14 @@ function KitchenMenuTable({
               })}
             </tbody>
           </table>
+          <TablePagination
+            page={paginatedItems.page}
+            pageSize={itemPageSize}
+            total={paginatedItems.total}
+            onPageChange={setItemPage}
+            onPageSizeChange={(size) => { setItemPageSize(size); setItemPage(1) }}
+            compact={kitchen.items.length <= 10}
+          />
         </div>
       )}
     </section>
@@ -322,6 +348,21 @@ export default function AdminMenuPage() {
   const [comment, setComment] = useState("")
   const [saving, setSaving] = useState(false)
   const [selectedItem, setSelectedItem] = useState(null)
+  const [kitchenPage, setKitchenPage] = useState(1)
+  const [kitchenPageSize, setKitchenPageSize] = useState(10)
+
+  const paginatedKitchens = useMemo(
+    () => paginateSlice(kitchens, kitchenPage, kitchenPageSize),
+    [kitchens, kitchenPage, kitchenPageSize]
+  )
+
+  useEffect(() => {
+    setKitchenPage(1)
+  }, [filter])
+
+  useEffect(() => {
+    if (kitchenPage > paginatedKitchens.totalPages) setKitchenPage(paginatedKitchens.totalPages)
+  }, [kitchenPage, paginatedKitchens.totalPages])
 
   const load = useCallback(() => {
     setLoading(true)
@@ -457,7 +498,7 @@ export default function AdminMenuPage() {
               {totalItems === 1 ? "" : "s"}
             </p>
             <div className="space-y-4">
-              {kitchens.map((kitchen) => (
+              {paginatedKitchens.items.map((kitchen) => (
                 <KitchenMenuTable
                   key={kitchen.id}
                   kitchen={kitchen}
@@ -469,6 +510,15 @@ export default function AdminMenuPage() {
                   onViewItem={handleViewItem}
                 />
               ))}
+            </div>
+            <div className="mt-4 bg-white border border-[#e8e8e8] overflow-hidden rounded-lg">
+              <TablePagination
+                page={paginatedKitchens.page}
+                pageSize={kitchenPageSize}
+                total={paginatedKitchens.total}
+                onPageChange={setKitchenPage}
+                onPageSizeChange={(size) => { setKitchenPageSize(size); setKitchenPage(1) }}
+              />
             </div>
           </>
         )}

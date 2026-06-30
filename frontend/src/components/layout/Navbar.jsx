@@ -36,7 +36,7 @@ export default function Navbar({ transparent = false }) {
           : "sticky top-0 bg-cream/95 backdrop-blur-md border-b border-gray-light/50"
       }`}
     >
-      <div className="max-w-7xl mx-auto px-4 md:px-10 py-3 md:py-4 flex items-center gap-4">
+      <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-4">
         <button onClick={() => navigate("/home")} className="hidden md:block cursor-pointer flex-shrink-0">
           <span
             className={`font-poppins font-bold text-xl tracking-tight transition-colors ${

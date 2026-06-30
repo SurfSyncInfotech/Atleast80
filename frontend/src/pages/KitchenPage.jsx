@@ -25,6 +25,7 @@ import { useCart } from "../context/CartContext"
 
 import { api } from "../lib/api"
 import { resolveMenuItemMedia, resolveMediaUrl } from "../lib/media"
+import { toKitchenCard } from "../lib/kitchen"
 
 import { kitchens as mockKitchens, menuItems as mockMenu, groceryItems as mockGrocery } from "../data/mockData"
 
@@ -50,46 +51,17 @@ const tabs = [
 
 ]
 
-
-
 function mapApiKitchen(k) {
-
+  const card = toKitchenCard(k)
   return {
-
-    id: k.id,
-
-    name: k.name,
-
-    speciality: k.speciality || "",
-
-    rating: Number(k.rating) || 4.5,
-
-    deliveryTime: k.delivery_time || "30 min",
-
-    offer: k.offer,
-
-    bestItem: k.best_item,
-
+    ...card,
     description: k.description,
-
-    city: k.city,
-
-    state: k.state,
-
     address: k.address,
-
     pincode: k.pincode,
-
     openingTime: k.opening_time,
-
-    kitchenType: k.kitchen_type,
-
     phone: k.phone,
-
     image: k.image || null,
-
   }
-
 }
 
 
@@ -383,13 +355,16 @@ export default function KitchenPage() {
 
                   </div>
 
+                  {kitchen.ratingVisible && kitchen.rating != null ? (
                   <div className="flex-shrink-0 flex items-center gap-1 bg-secondary/15 text-dark px-2.5 py-1.5 rounded-xl">
-
                     <Star size={14} className="fill-secondary text-secondary" />
-
                     <span className="font-poppins font-bold text-sm">{kitchen.rating}</span>
-
                   </div>
+                  ) : (
+                  <div className="flex-shrink-0 text-[10px] font-poppins font-semibold text-gray bg-gray-100 px-2.5 py-1.5 rounded-xl">
+                    New
+                  </div>
+                  )}
 
                 </div>
 

@@ -60,7 +60,7 @@ export default function AboutPage() {
           <img src={IMG.hero} alt="" className="absolute inset-0 w-full h-full object-cover opacity-50" />
           <div className="absolute top-20 right-[10%] w-72 h-72 bg-secondary/20 rounded-full blur-3xl z-10" />
 
-          <div className="relative z-20 max-w-[1400px] mx-auto px-4 md:px-10 lg:px-16 xl:px-24 py-16 md:py-24">
+          <div className="relative z-20 max-w-[1400px] mx-auto px-4 md:px-6 py-16 md:py-24">
             <div className="grid lg:grid-cols-2 gap-12 items-center">
               <motion.div initial="hidden" animate="visible" variants={fadeUp}>
                 <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 border border-white/15 text-secondary text-xs font-poppins font-semibold uppercase tracking-wider mb-5">
@@ -134,7 +134,7 @@ export default function AboutPage() {
           </div>
         </section>
 
-        <div className="max-w-[1400px] mx-auto px-4 md:px-10 lg:px-16 xl:px-24 pt-16 md:pt-20 pb-12 md:pb-16 space-y-20 md:space-y-28">
+        <div className="max-w-[1400px] mx-auto px-4 md:px-6 pt-16 md:pt-20 pb-12 md:pb-16 space-y-20 md:space-y-28">
           {/* Story + image */}
           <motion.section
             initial="hidden"
@@ -256,9 +256,9 @@ export default function AboutPage() {
               </p>
               <div className="mt-8 space-y-4">
                 {[
-                  { icon: MapPin, text: "India" },
+                  { icon: MapPin, text: "Hyderabad, India" },
                   { icon: Mail, text: "hello@atleast80.com" },
-                  { icon: Phone, text: "+91 98765 43210" },
+                  { icon: Phone, text: "+91 97973 55255" },
                 ].map(({ icon: Icon, text }) => (
                   <div key={text} className="flex items-center gap-3 text-dark">
                     <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">

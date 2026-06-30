@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useState, useRef, useMemo } from "react"
 import { useNavigate, useLocation } from "react-router-dom"
 
 import {
@@ -12,12 +12,15 @@ import {
 import KitchenLayout from "../../components/layout/KitchenLayout"
 import KitchenMenuTable from "../../components/kitchen/KitchenMenuTable"
 import Button from "../../components/ui/Button"
+import TablePagination from "../../components/ui/TablePagination"
 
 import { useAuth } from "../../context/AuthContext"
 
 import { api, uploadMenuFiles } from "../../lib/api"
 
 import { resolveMediaUrl, resolveMenuItemMedia } from "../../lib/media"
+
+import { paginateSlice } from "../../lib/pagination"
 
 import { cn } from "../../lib/utils"
 
@@ -84,6 +87,8 @@ export default function KitchenMenuPage() {
   const [offerItemText, setOfferItemText] = useState("")
 
   const [categoryFilter, setCategoryFilter] = useState("all")
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(15)
   const [deletingId, setDeletingId] = useState(null)
   const [commentModal, setCommentModal] = useState(null)
 
@@ -628,6 +633,19 @@ export default function KitchenMenuPage() {
 
     : items.filter((i) => i.category === categoryFilter)
 
+  const paginatedItems = useMemo(
+    () => paginateSlice(filteredItems, page, pageSize),
+    [filteredItems, page, pageSize]
+  )
+
+  useEffect(() => {
+    setPage(1)
+  }, [categoryFilter])
+
+  useEffect(() => {
+    if (page > paginatedItems.totalPages) setPage(paginatedItems.totalPages)
+  }, [page, paginatedItems.totalPages])
+
 
 
   const toggleAvailability = async (item) => {
@@ -804,7 +822,7 @@ export default function KitchenMenuPage() {
 
           <KitchenMenuTable
 
-            items={filteredItems}
+            items={paginatedItems.items}
 
             deletingId={deletingId}
 
@@ -816,6 +834,14 @@ export default function KitchenMenuPage() {
 
             onToggleAvailability={toggleAvailability}
 
+          />
+
+          <TablePagination
+            page={paginatedItems.page}
+            pageSize={pageSize}
+            total={paginatedItems.total}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => { setPageSize(size); setPage(1) }}
           />
 
         </div>

@@ -55,10 +55,16 @@ export default function KitchenCard({ kitchen, className, onClick }) {
         )}
 
         <div className="flex items-center gap-3 mt-3 pt-3 border-t border-gray-50">
-          <div className="flex items-center gap-1">
-            <Star size={13} className="fill-secondary text-secondary" />
-            <span className="text-xs font-semibold text-dark font-poppins">{kitchen.rating}</span>
-          </div>
+          {kitchen.ratingVisible && kitchen.rating != null ? (
+            <div className="flex items-center gap-1">
+              <Star size={13} className="fill-secondary text-secondary" />
+              <span className="text-xs font-semibold text-dark font-poppins">{kitchen.rating}</span>
+            </div>
+          ) : (
+            <span className="text-[10px] font-poppins font-semibold text-gray bg-gray-100 px-2 py-0.5 rounded-full">
+              New
+            </span>
+          )}
           <div className="hidden md:flex items-center gap-1 text-gray">
             <Clock size={13} />
             <span className="text-xs font-nunito">{kitchen.deliveryTime}</span>

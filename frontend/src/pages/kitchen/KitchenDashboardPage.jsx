@@ -27,6 +27,7 @@ export default function KitchenDashboardPage() {
   const { kitchen, refreshKitchen } = useAuth()
   const [refreshing, setRefreshing] = useState(false)
   const [menuCount, setMenuCount] = useState(null)
+  const [orderStats, setOrderStats] = useState({ todayOrders: 0, todayRevenue: 0, activeOrders: 0 })
 
   useEffect(() => { refreshKitchen().catch(() => {}) }, [refreshKitchen])
 
@@ -37,15 +38,24 @@ export default function KitchenDashboardPage() {
       .catch(() => setMenuCount(0))
   }, [kitchen?.status])
 
+  const loadOrderStats = useCallback(() => {
+    if (kitchen?.status !== "approved") return Promise.resolve()
+    return api("/api/orders/kitchen/stats", {}, "kitchen")
+      .then((d) => setOrderStats(d))
+      .catch(() => setOrderStats({ todayOrders: 0, todayRevenue: 0, activeOrders: 0 }))
+  }, [kitchen?.status])
+
   useEffect(() => {
     loadMenuCount()
-  }, [loadMenuCount])
+    loadOrderStats()
+  }, [loadMenuCount, loadOrderStats])
 
   const handleRefresh = async () => {
     setRefreshing(true)
     try {
       await refreshKitchen()
       await loadMenuCount()
+      await loadOrderStats()
     } finally {
       setRefreshing(false)
     }
@@ -103,9 +113,9 @@ export default function KitchenDashboardPage() {
       {isApproved && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6">
           {[
-            { label: "Today's Orders", value: "0", icon: ShoppingBag, gradient: "from-blue-500 to-indigo-600", iconBg: "bg-white/20" },
-            { label: "Revenue", value: "₹0", icon: IndianRupee, gradient: "from-emerald-500 to-teal-600", iconBg: "bg-white/20" },
-            { label: "Rating", value: kitchen?.rating ? Number(kitchen.rating).toFixed(1) : "—", icon: Star, gradient: "from-amber-400 to-orange-500", iconBg: "bg-white/25" },
+            { label: "Today's Orders", value: String(orderStats.todayOrders), icon: ShoppingBag, gradient: "from-blue-500 to-indigo-600", iconBg: "bg-white/20" },
+            { label: "Revenue", value: `₹${orderStats.todayRevenue}`, icon: IndianRupee, gradient: "from-emerald-500 to-teal-600", iconBg: "bg-white/20" },
+            { label: "Rating", value: kitchen?.ratingVisible && kitchen?.rating ? Number(kitchen.rating).toFixed(1) : kitchen?.rating_count != null ? `${kitchen.rating_count}/10` : "—", icon: Star, gradient: "from-amber-400 to-orange-500", iconBg: "bg-white/25" },
             { label: "Menu Items", value: menuCount ?? "—", icon: UtensilsCrossed, gradient: "from-primary to-primary-dark", iconBg: "bg-white/20" },
           ].map((m) => {
             const Icon = m.icon
@@ -179,7 +189,7 @@ export default function KitchenDashboardPage() {
           <div className="grid sm:grid-cols-3 gap-3">
             {[
               { icon: UtensilsCrossed, label: "Manage Menu", desc: "Add food & ration items", action: () => navigate("/kitchen/menu"), primary: true },
-              { icon: ShoppingBag, label: "Orders", desc: "Coming soon", disabled: true },
+              { icon: ShoppingBag, label: "Orders", desc: `${orderStats.activeOrders} active`, action: () => navigate("/kitchen/orders"), primary: false },
               { icon: IndianRupee, label: "Payouts", desc: "Coming soon", disabled: true },
             ].map((item) => {
               const Icon = item.icon

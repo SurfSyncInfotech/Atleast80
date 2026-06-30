@@ -14,11 +14,11 @@ import {
 
   Bell,
 
+  ShieldCheck,
+
   Users,
 
-  BarChart3,
-
-  Settings,
+  ShoppingBag,
 
   LogOut,
 
@@ -40,17 +40,17 @@ const links = [
 
   { to: "/admin/kitchens", label: "Kitchens", icon: ChefHat },
 
+  { to: "/admin/hygiene", label: "Hygiene", icon: ShieldCheck },
+
   { to: "/admin/menu", label: "Menu", icon: UtensilsCrossed },
+
+  { to: "/admin/orders", label: "Orders", icon: ShoppingBag },
 
   { to: "/admin/featured", label: "Featured", icon: Star },
 
   { to: "/admin/alerts", label: "Alerts", icon: Bell },
 
   { to: "/admin/customers", label: "Customers", icon: Users },
-
-  { to: "/admin", label: "Analytics", icon: BarChart3, disabled: true },
-
-  { to: "/admin", label: "Settings", icon: Settings, disabled: true },
 
 ]
 
@@ -291,7 +291,12 @@ export default function AdminLayout({ children }) {
               <span className="hidden sm:inline">Logout</span>
             </button>
 
-            <button className="relative p-2 rounded-lg hover:bg-gray-100 cursor-pointer">
+            <button
+              type="button"
+              onClick={() => navigate("/admin/alerts")}
+              title="Alerts"
+              className="relative p-2 rounded-lg hover:bg-gray-100 cursor-pointer"
+            >
 
               <Bell size={18} className="text-gray" />
 

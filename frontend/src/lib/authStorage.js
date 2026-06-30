@@ -2,7 +2,7 @@ const SESSIONS_KEY = "atleast80_sessions"
 const LEGACY_KEY = "atleast80_auth"
 const LEGACY_TOKEN_KEY = "atleast80_token"
 
-const KITCHEN_PARTNER_PATH = /^\/kitchen\/(dashboard|menu|profile|login|signup)(\/|$)/
+const KITCHEN_PARTNER_PATH = /^\/kitchen\/(dashboard|menu|profile|orders|enquiries|login|signup)(\/|$)/
 
 const CUSTOMER_AUTH_PATHS = [
   "/login",

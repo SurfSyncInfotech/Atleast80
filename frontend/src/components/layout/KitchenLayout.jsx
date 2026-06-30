@@ -10,7 +10,7 @@ import {
 
   UtensilsCrossed,
 
-  BarChart3,
+  ShoppingBag,
 
   User,
 
@@ -32,7 +32,6 @@ import {
 
   MapPin,
   MessageSquare,
-
 } from "lucide-react"
 
 import { useAuth } from "../../context/AuthContext"
@@ -157,11 +156,11 @@ export default function KitchenLayout({ children, fullBleed = false, fullWidth =
 
     { to: "/kitchen/menu", label: "Menu", icon: UtensilsCrossed, requiresApproval: true },
 
+    { to: "/kitchen/orders", label: "Orders", icon: ShoppingBag, requiresApproval: true },
+
     { to: "/kitchen/enquiries", label: "Enquiries", icon: MessageSquare, requiresApproval: true },
 
     { to: "/kitchen/profile", label: "Profile", icon: User },
-
-    { to: "/kitchen/dashboard", label: "Analytics", icon: BarChart3, disabled: true },
 
   ]
 

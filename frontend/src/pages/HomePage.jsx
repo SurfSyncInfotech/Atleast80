@@ -10,7 +10,6 @@ import {
 import Navbar from "../components/layout/Navbar"
 import Footer from "../components/layout/Footer"
 import KitchenCard from "../components/common/KitchenCard"
-import FoodCard from "../components/common/FoodCard"
 import StoryCircle from "../components/common/StoryCircle"
 import Chip from "../components/common/Chip"
 import Button from "../components/ui/Button"
@@ -578,58 +577,6 @@ function AboutSection() {
   )
 }
 
-function PopularItems() {
-  const [items, setItems] = useState([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    api("/api/menu/popular?limit=8")
-      .then((data) => {
-        setItems(
-          (data.items || []).map((item) => ({
-            id: item.id,
-            name: item.name,
-            price: Number(item.price),
-            image: item.image || item.images?.[0] || "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&h=300&fit=crop",
-            kitchen: item.kitchen_name || "Home Kitchen",
-          }))
-        )
-      })
-      .catch(() => setItems([]))
-      .finally(() => setLoading(false))
-  }, [])
-
-  if (!loading && items.length === 0) return null
-
-  return (
-    <motion.section
-      initial="hidden"
-      whileInView="visible"
-      viewport={{ once: true, margin: "-50px" }}
-      className="hidden md:block mt-16"
-    >
-      <motion.h3 variants={fadeUp} className="font-poppins font-bold text-dark text-xl lg:text-2xl mb-6">
-        Popular Right Now
-      </motion.h3>
-      {loading ? (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-52 bg-gray-100 rounded-xl animate-pulse" />
-          ))}
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
-          {items.map((item, i) => (
-            <motion.div key={item.id} variants={fadeUp} custom={i}>
-              <FoodCard item={item} />
-            </motion.div>
-          ))}
-        </div>
-      )}
-    </motion.section>
-  )
-}
-
 function HowItWorks() {
   const steps = [
     { step: "01", title: "Browse Kitchens", desc: "Discover trusted home kitchens near you with real hygiene ratings", icon: Search },
@@ -796,7 +743,7 @@ export default function HomePage() {
 
       {/* Page content */}
       <div className="bg-cream pb-20 md:pb-8">
-        <div className="px-4 md:px-10 lg:px-16 xl:px-24 max-w-[1400px] mx-auto">
+        <div className="px-4 md:px-6 max-w-[1400px] mx-auto">
           <MobileHeroBanner />
           <HomepageLocationBar />
           <CategoryRow />
@@ -804,7 +751,6 @@ export default function HomePage() {
           <StoriesSection />
           <FeaturedKitchens />
           <ExploreMoreKitchens />
-          <PopularItems />
           <HowItWorks />
           <WhySection />
           <PartnerSection />
