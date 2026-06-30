@@ -3,6 +3,7 @@ import pool from "../config/db.js"
 import { authRequired, requireRole } from "../middleware/auth.js"
 import { normalizePublicUrl } from "../utils/mediaUrl.js"
 import { formatMenuItem } from "../utils/menuItem.js"
+import { getKitchenVisibilityInfo } from "../utils/hygieneCompliance.js"
 
 const router = Router()
 
@@ -41,6 +42,158 @@ router.get("/stats", async (_req, res) => {
   } catch (error) {
     console.error("Admin stats error:", error)
     res.status(500).json({ message: "Failed to fetch stats" })
+  }
+})
+
+function mapAdminOrder(row) {
+  return {
+    id: row.id,
+    orderNumber: row.order_number,
+    kitchenId: row.kitchen_id,
+    kitchenName: row.kitchen_name,
+    kitchenCity: row.kitchen_city,
+    customerName: row.customer_name,
+    customerPhone: row.customer_phone,
+    customerEmail: row.customer_email,
+    status: row.status,
+    paymentMethod: row.payment_method,
+    packingType: row.packing_type,
+    deliveryMethod: row.delivery_method,
+    itemTotal: Number(row.item_total),
+    packingFee: Number(row.packing_fee),
+    deliveryFee: Number(row.delivery_fee),
+    grandTotal: Number(row.grand_total),
+    deliveryAddress: row.delivery_address,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    review: row.review_id
+      ? { id: row.review_id, rating: row.review_rating, review: row.review_text, createdAt: row.review_created_at }
+      : null,
+  }
+}
+
+async function fetchOrderItems(orderId) {
+  const [items] = await pool.query(
+    "SELECT id, menu_item_id, name, price, qty, image FROM order_items WHERE order_id = ?",
+    [orderId]
+  )
+  return items.map((item) => ({
+    id: item.id,
+    menuItemId: item.menu_item_id,
+    name: item.name,
+    price: Number(item.price),
+    qty: item.qty,
+    image: item.image,
+  }))
+}
+
+router.get("/orders", async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT o.*,
+              k.name AS kitchen_name, k.city AS kitchen_city,
+              u.name AS customer_name, u.phone AS customer_phone, u.email AS customer_email,
+              r.id AS review_id, r.rating AS review_rating, r.review AS review_text, r.created_at AS review_created_at
+       FROM orders o
+       JOIN kitchens k ON k.id = o.kitchen_id
+       JOIN users u ON u.id = o.user_id
+       LEFT JOIN order_reviews r ON r.order_id = o.id
+       ORDER BY o.created_at DESC`
+    )
+
+    const orders = await Promise.all(
+      rows.map(async (row) => ({
+        ...mapAdminOrder(row),
+        items: await fetchOrderItems(row.id),
+      }))
+    )
+
+    const [kitchenRows] = await pool.query(
+      `SELECT k.id, k.name, k.city, k.image,
+              COUNT(o.id) AS total_orders,
+              SUM(CASE WHEN o.status NOT IN ('delivered', 'cancelled') THEN 1 ELSE 0 END) AS active_orders,
+              SUM(CASE WHEN o.status = 'pending' THEN 1 ELSE 0 END) AS pending_orders,
+              COALESCE(SUM(
+                CASE WHEN o.status = 'delivered'
+                  AND YEAR(o.created_at) = YEAR(CURDATE())
+                  AND MONTH(o.created_at) = MONTH(CURDATE())
+                THEN o.grand_total ELSE 0 END
+              ), 0) AS monthly_revenue,
+              SUM(
+                CASE WHEN o.status = 'delivered'
+                  AND YEAR(o.created_at) = YEAR(CURDATE())
+                  AND MONTH(o.created_at) = MONTH(CURDATE())
+                THEN 1 ELSE 0 END
+              ) AS monthly_delivered
+       FROM kitchens k
+       LEFT JOIN orders o ON o.kitchen_id = k.id
+       WHERE k.status = 'approved'
+       GROUP BY k.id, k.name, k.city, k.image
+       ORDER BY pending_orders DESC, active_orders DESC, total_orders DESC, k.name ASC`
+    )
+
+    const kitchens = kitchenRows.map((k) => ({
+      id: k.id,
+      name: k.name,
+      city: k.city,
+      image: normalizePublicUrl(k.image),
+      totalOrders: Number(k.total_orders),
+      activeOrders: Number(k.active_orders),
+      pendingOrders: Number(k.pending_orders),
+      monthlyRevenue: Number(k.monthly_revenue),
+      monthlyDelivered: Number(k.monthly_delivered),
+    }))
+
+    const monthlyRevenueTotal = kitchens.reduce((sum, k) => sum + k.monthlyRevenue, 0)
+    const monthLabel = new Date().toLocaleDateString("en-IN", { month: "long", year: "numeric" })
+
+    const summary = {
+      total: orders.length,
+      active: orders.filter((o) => !["delivered", "cancelled"].includes(o.status)).length,
+      pending: orders.filter((o) => o.status === "pending").length,
+      delivered: orders.filter((o) => o.status === "delivered").length,
+      cancelled: orders.filter((o) => o.status === "cancelled").length,
+      kitchens: kitchens.length,
+      kitchensWithOrders: kitchens.filter((k) => k.totalOrders > 0).length,
+      monthlyRevenue: monthlyRevenueTotal,
+      monthLabel,
+    }
+
+    res.json({ orders, kitchens, summary })
+  } catch (error) {
+    console.error("Admin list orders error:", error)
+    res.status(500).json({ message: "Failed to fetch orders" })
+  }
+})
+
+router.get("/orders/:id", async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT o.*,
+              k.name AS kitchen_name, k.city AS kitchen_city,
+              u.name AS customer_name, u.phone AS customer_phone, u.email AS customer_email,
+              r.id AS review_id, r.rating AS review_rating, r.review AS review_text, r.created_at AS review_created_at
+       FROM orders o
+       JOIN kitchens k ON k.id = o.kitchen_id
+       JOIN users u ON u.id = o.user_id
+       LEFT JOIN order_reviews r ON r.order_id = o.id
+       WHERE o.id = ?`,
+      [req.params.id]
+    )
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    const order = {
+      ...mapAdminOrder(rows[0]),
+      items: await fetchOrderItems(rows[0].id),
+    }
+
+    res.json({ order })
+  } catch (error) {
+    console.error("Admin get order error:", error)
+    res.status(500).json({ message: "Failed to fetch order" })
   }
 })
 
@@ -120,6 +273,111 @@ router.get("/kitchens/cities", async (_req, res) => {
   }
 })
 
+router.get("/kitchens/hygiene-status", async (req, res) => {
+  const filter = req.query.filter || "all"
+
+  try {
+    const [rows] = await pool.query(
+      `SELECT k.id, k.name, k.owner_name, k.city, k.status, k.reviewed_at, k.visibility_status,
+              k.image, k.hygiene_score, u.email AS user_email, u.phone AS user_phone
+       FROM kitchens k
+       JOIN users u ON u.id = k.user_id
+       WHERE k.status = 'approved'
+       ORDER BY k.name ASC`
+    )
+
+    const kitchens = []
+    for (const row of rows) {
+      const info = await getKitchenVisibilityInfo(pool, row)
+      const item = {
+        id: row.id,
+        name: row.name,
+        ownerName: row.owner_name,
+        city: row.city,
+        email: row.user_email,
+        phone: row.user_phone,
+        image: normalizePublicUrl(row.image),
+        hygieneScore: row.hygiene_score,
+        reviewedAt: row.reviewed_at,
+        ...info,
+      }
+
+      if (filter === "missing" && info.hygieneCompliant) continue
+      if (filter === "hidden" && info.publiclyVisible) continue
+      kitchens.push(item)
+    }
+
+    const summary = {
+      total: rows.length,
+      missingHygiene: 0,
+      hiddenFromCustomers: 0,
+    }
+    for (const row of rows) {
+      const info = await getKitchenVisibilityInfo(pool, row)
+      if (!info.hygieneCompliant) summary.missingHygiene++
+      if (!info.publiclyVisible) summary.hiddenFromCustomers++
+    }
+
+    res.json({ kitchens, summary })
+  } catch (error) {
+    console.error("Admin hygiene status error:", error)
+    res.status(500).json({ message: "Failed to fetch hygiene status" })
+  }
+})
+
+router.patch("/kitchens/:id/visibility", async (req, res) => {
+  const { id } = req.params
+  const { visibilityStatus } = req.body
+  const allowed = ["auto", "visible", "hidden"]
+
+  if (!allowed.includes(visibilityStatus)) {
+    return res.status(400).json({ message: "visibilityStatus must be auto, visible, or hidden" })
+  }
+
+  try {
+    const [existing] = await pool.query(
+      "SELECT id, status FROM kitchens WHERE id = ?",
+      [id]
+    )
+    if (existing.length === 0) {
+      return res.status(404).json({ message: "Kitchen not found" })
+    }
+    if (existing[0].status !== "approved") {
+      return res.status(400).json({ message: "Only approved kitchens can have visibility changed" })
+    }
+
+    await pool.query("UPDATE kitchens SET visibility_status = ? WHERE id = ?", [visibilityStatus, id])
+
+    const [updated] = await pool.query(
+      `SELECT k.id, k.name, k.owner_name, k.city, k.status, k.reviewed_at, k.visibility_status,
+              k.image, k.hygiene_score, u.email AS user_email, u.phone AS user_phone
+       FROM kitchens k JOIN users u ON u.id = k.user_id WHERE k.id = ?`,
+      [id]
+    )
+
+    const info = await getKitchenVisibilityInfo(pool, updated[0])
+
+    res.json({
+      message: "Visibility updated",
+      kitchen: {
+        id: updated[0].id,
+        name: updated[0].name,
+        ownerName: updated[0].owner_name,
+        city: updated[0].city,
+        email: updated[0].user_email,
+        phone: updated[0].user_phone,
+        image: normalizePublicUrl(updated[0].image),
+        hygieneScore: updated[0].hygiene_score,
+        reviewedAt: updated[0].reviewed_at,
+        ...info,
+      },
+    })
+  } catch (error) {
+    console.error("Admin visibility update error:", error)
+    res.status(500).json({ message: "Failed to update visibility" })
+  }
+})
+
 router.get("/kitchens/:id/stories", async (req, res) => {
   try {
     const [kitchen] = await pool.query("SELECT id FROM kitchens WHERE id = ?", [req.params.id])
@@ -162,13 +420,27 @@ router.patch("/kitchens/:id/approve", async (req, res) => {
       })
     }
 
-    await pool.query(
-      `UPDATE kitchens
-       SET status = 'approved', rejection_reason = NULL, reviewed_at = NOW(), reviewed_by = ?,
-           rating = 4.5
-       WHERE id = ?`,
-      [req.user.id, id]
-    )
+    try {
+      await pool.query(
+        `UPDATE kitchens
+         SET status = 'approved', rejection_reason = NULL, reviewed_at = NOW(), reviewed_by = ?,
+             rating = 0, rating_count = 0
+         WHERE id = ?`,
+        [req.user.id, id]
+      )
+    } catch (error) {
+      if (error.code === "ER_BAD_FIELD_ERROR") {
+        await pool.query(
+          `UPDATE kitchens
+           SET status = 'approved', rejection_reason = NULL, reviewed_at = NOW(), reviewed_by = ?,
+               rating = 0
+           WHERE id = ?`,
+          [req.user.id, id]
+        )
+      } else {
+        throw error
+      }
+    }
 
     await pool.query(
       `INSERT INTO alerts (target_role, kitchen_id, title, body, is_system, created_by) VALUES (?, ?, ?, ?, 1, ?)`,

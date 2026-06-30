@@ -9,7 +9,8 @@ import {
   getKitchenFileUrl,
 } from "../middleware/upload.js"
 import { formatKitchen, formatKitchens } from "../utils/mediaUrl.js"
-import { getHygieneCompliance } from "../utils/hygieneCompliance.js"
+import { getHygieneCompliance, isKitchenPubliclyVisible } from "../utils/hygieneCompliance.js"
+import { getKitchenRatingStats, withPublicRating, withPublicRatings, SQL_RATING_COUNT } from "../utils/kitchenRating.js"
 
 const router = Router()
 
@@ -73,7 +74,7 @@ router.post("/me/cover", authRequired, requireRole("kitchen"), (req, res) => {
 router.get("/me", authRequired, requireRole("kitchen"), async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT k.*, u.name AS user_name, u.email AS user_email
+      `SELECT k.*, u.name AS user_name, u.email AS user_email, ${SQL_RATING_COUNT}
        FROM kitchens k
        JOIN users u ON u.id = k.user_id
        WHERE k.user_id = ?`,
@@ -84,7 +85,16 @@ router.get("/me", authRequired, requireRole("kitchen"), async (req, res) => {
       return res.status(404).json({ message: "Kitchen not found" })
     }
 
-    res.json({ kitchen: formatKitchen(rows[0]) })
+    const kitchen = formatKitchen(rows[0])
+    const stats = getKitchenRatingStats(rows[0])
+    res.json({
+      kitchen: {
+        ...kitchen,
+        rating_count: stats.ratingCount,
+        ratingsNeeded: stats.ratingsNeeded,
+        ratingVisible: stats.ratingVisible,
+      },
+    })
   } catch (error) {
     console.error("Kitchen me error:", error)
     res.status(500).json({ message: "Failed to fetch kitchen" })
@@ -285,13 +295,18 @@ router.patch("/me", authRequired, requireRole("kitchen"), async (req, res) => {
 router.get("/featured", async (_req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT id, name, owner_name, speciality, image, cover_image, rating, delivery_time,
-              hygiene_score, offer, best_item, city, state, kitchen_type, status, is_featured, featured_order, reviewed_at
-       FROM kitchens
-       WHERE status = 'approved' AND is_featured = 1
-       ORDER BY featured_order ASC, submitted_at DESC`
+      `SELECT k.id, k.name, k.owner_name, k.speciality, k.image, k.cover_image, k.rating, k.delivery_time,
+              k.hygiene_score, k.offer, k.best_item, k.city, k.state, k.kitchen_type, k.status, k.is_featured, k.featured_order, k.reviewed_at, k.visibility_status,
+              ${SQL_RATING_COUNT}
+       FROM kitchens k
+       WHERE k.status = 'approved' AND k.is_featured = 1
+       ORDER BY k.featured_order ASC, k.submitted_at DESC`
     )
-    res.json({ kitchens: formatKitchens(rows) })
+    const visible = []
+    for (const row of rows) {
+      if (await isKitchenPubliclyVisible(pool, row)) visible.push(row)
+    }
+    res.json({ kitchens: withPublicRatings(formatKitchens(visible)) })
   } catch (error) {
     console.error("Featured kitchens error:", error)
     res.status(500).json({ message: "Failed to fetch featured kitchens" })
@@ -301,13 +316,18 @@ router.get("/featured", async (_req, res) => {
 router.get("/", async (_req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT id, name, owner_name, speciality, image, cover_image, rating, delivery_time,
-              hygiene_score, offer, best_item, city, state, kitchen_type, status, reviewed_at
-       FROM kitchens
-       WHERE status = 'approved'
-       ORDER BY submitted_at DESC`
+      `SELECT k.id, k.name, k.owner_name, k.speciality, k.image, k.cover_image, k.rating, k.delivery_time,
+              k.hygiene_score, k.offer, k.best_item, k.city, k.state, k.kitchen_type, k.status, k.reviewed_at, k.visibility_status,
+              ${SQL_RATING_COUNT}
+       FROM kitchens k
+       WHERE k.status = 'approved'
+       ORDER BY k.submitted_at DESC`
     )
-    res.json({ kitchens: formatKitchens(rows) })
+    const visible = []
+    for (const row of rows) {
+      if (await isKitchenPubliclyVisible(pool, row)) visible.push(row)
+    }
+    res.json({ kitchens: withPublicRatings(formatKitchens(visible)) })
   } catch (error) {
     console.error("Public kitchens error:", error)
     res.status(500).json({ message: "Failed to fetch kitchens" })
@@ -317,10 +337,11 @@ router.get("/", async (_req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT id, name, owner_name, speciality, description, image, rating,
-              delivery_time, hygiene_score, offer, best_item, city, status, reviewed_at
-       FROM kitchens
-       WHERE id = ? AND status = 'approved'`,
+      `SELECT k.id, k.name, k.owner_name, k.speciality, k.description, k.image, k.rating,
+              k.delivery_time, k.hygiene_score, k.offer, k.best_item, k.city, k.status, k.reviewed_at, k.visibility_status,
+              ${SQL_RATING_COUNT}
+       FROM kitchens k
+       WHERE k.id = ? AND k.status = 'approved'`,
       [req.params.id]
     )
 
@@ -328,10 +349,15 @@ router.get("/:id", async (req, res) => {
       return res.status(404).json({ message: "Kitchen not found" })
     }
 
+    const visible = await isKitchenPubliclyVisible(pool, rows[0])
+    if (!visible) {
+      return res.status(404).json({ message: "Kitchen not found" })
+    }
+
     const { compliant } = await getHygieneCompliance(pool, rows[0].id)
 
     res.json({
-      kitchen: formatKitchen(rows[0]),
+      kitchen: withPublicRating(formatKitchen(rows[0])),
       hygieneCompliant: compliant,
     })
   } catch (error) {

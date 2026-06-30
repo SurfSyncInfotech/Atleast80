@@ -81,6 +81,10 @@ export async function getHygieneCompliance(pool, kitchenId) {
 export async function isKitchenPubliclyVisible(pool, kitchen) {
   if (!kitchen || kitchen.status !== "approved") return false
 
+  const visibility = kitchen.visibility_status || "auto"
+  if (visibility === "hidden") return false
+  if (visibility === "visible") return true
+
   const { compliant } = await getHygieneCompliance(pool, kitchen.id)
   if (compliant) return true
 
@@ -90,6 +94,18 @@ export async function isKitchenPubliclyVisible(pool, kitchen) {
   }
 
   return false
+}
+
+export async function getKitchenVisibilityInfo(pool, kitchen) {
+  const compliance = await getHygieneCompliance(pool, kitchen.id)
+  const publiclyVisible = await isKitchenPubliclyVisible(pool, kitchen)
+  return {
+    hygieneCompliant: compliance.compliant,
+    hygieneLatest: compliance.latest,
+    requiresUpload: compliance.requiresUpload,
+    publiclyVisible,
+    visibilityStatus: kitchen.visibility_status || "auto",
+  }
 }
 
 export async function getVisibleApprovedKitchenIds(pool) {
