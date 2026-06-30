@@ -1,15 +1,16 @@
 import { useEffect, useState, useRef } from "react"
+import { useNavigate, useLocation } from "react-router-dom"
 
 import {
 
-  Plus, Trash2, Pencil, UtensilsCrossed, Lock, Leaf, ImageIcon, IndianRupee,
+  Plus, UtensilsCrossed, Lock, Leaf, IndianRupee,
 
   Upload, X, Video, Play, Tag,
 
 } from "lucide-react"
 
 import KitchenLayout from "../../components/layout/KitchenLayout"
-
+import KitchenMenuTable from "../../components/kitchen/KitchenMenuTable"
 import Button from "../../components/ui/Button"
 
 import { useAuth } from "../../context/AuthContext"
@@ -47,6 +48,8 @@ const MAX_VIDEOS = 3
 export default function KitchenMenuPage() {
 
   const { kitchen, refreshKitchen } = useAuth()
+  const navigate = useNavigate()
+  const location = useLocation()
 
   const [items, setItems] = useState([])
 
@@ -80,6 +83,10 @@ export default function KitchenMenuPage() {
 
   const [offerItemText, setOfferItemText] = useState("")
 
+  const [categoryFilter, setCategoryFilter] = useState("all")
+  const [deletingId, setDeletingId] = useState(null)
+  const [commentModal, setCommentModal] = useState(null)
+
   const [savingOffers, setSavingOffers] = useState(false)
 
   const imageInputRef = useRef(null)
@@ -100,7 +107,7 @@ export default function KitchenMenuPage() {
 
     try {
 
-      const data = await api("/api/menu/me")
+      const data = await api("/api/menu/me", {}, "kitchen")
 
       setItems((data.items || []).map(resolveMenuItemMedia))
 
@@ -133,6 +140,17 @@ export default function KitchenMenuPage() {
     else setLoading(false)
 
   }, [isApproved, kitchen?.status])
+
+  useEffect(() => {
+    const editItemId = location.state?.editItemId
+    if (!editItemId || !items.length) return
+
+    const item = items.find((i) => String(i.id) === String(editItemId))
+    if (item) {
+      openEdit(item)
+      navigate("/kitchen/menu", { replace: true, state: {} })
+    }
+  }, [items, location.state?.editItemId])
 
 
 
@@ -236,7 +254,7 @@ export default function KitchenMenuPage() {
 
         body: JSON.stringify({ offer: globalOffer.trim() || null }),
 
-      })
+      }, "kitchen")
 
       for (const item of items) {
 
@@ -252,7 +270,7 @@ export default function KitchenMenuPage() {
 
             body: JSON.stringify({ offer: nextOffer }),
 
-          })
+          }, "kitchen")
 
         }
 
@@ -534,7 +552,7 @@ export default function KitchenMenuPage() {
 
           body: JSON.stringify(payload),
 
-        })
+        }, "kitchen")
 
       } else {
 
@@ -544,7 +562,7 @@ export default function KitchenMenuPage() {
 
           body: JSON.stringify(payload),
 
-        })
+        }, "kitchen")
 
       }
 
@@ -568,13 +586,15 @@ export default function KitchenMenuPage() {
 
 
 
-  const handleDelete = async (id) => {
+  const handleDelete = async (item) => {
 
-    if (!confirm("Remove this item from your menu?")) return
+    if (!confirm(`Remove "${item.name}" from your menu?`)) return
+
+    setDeletingId(item.id)
 
     try {
 
-      await api(`/api/menu/${id}`, { method: "DELETE" })
+      await api(`/api/menu/${item.id}`, { method: "DELETE" }, "kitchen")
 
       await loadMenu()
 
@@ -582,9 +602,31 @@ export default function KitchenMenuPage() {
 
       alert(err.message)
 
+    } finally {
+
+      setDeletingId(null)
+
     }
 
   }
+
+
+
+  const handleViewComment = (item) => {
+
+    const comment = item.reviewComment || item.review_comment
+
+    if (comment) setCommentModal({ name: item.name, comment })
+
+  }
+
+
+
+  const filteredItems = categoryFilter === "all"
+
+    ? items
+
+    : items.filter((i) => i.category === categoryFilter)
 
 
 
@@ -598,7 +640,7 @@ export default function KitchenMenuPage() {
 
         body: JSON.stringify({ isAvailable: !item.is_available }),
 
-      })
+      }, "kitchen")
 
       await loadMenu()
 
@@ -608,13 +650,6 @@ export default function KitchenMenuPage() {
 
     }
 
-  }
-
-
-
-  const getItemCover = (item) => {
-    const raw = item.images?.length ? item.images[0] : item.image || null
-    return resolveMediaUrl(raw)
   }
 
 
@@ -697,17 +732,31 @@ export default function KitchenMenuPage() {
 
         {["all", "food", "grocery"].map((cat) => (
 
-          <span
+          <button
 
             key={cat}
 
-            className="px-3 sm:px-4 py-1.5 rounded-lg bg-white border border-gray-200 text-xs font-poppins font-medium text-gray capitalize"
+            type="button"
+
+            onClick={() => setCategoryFilter(cat)}
+
+            className={cn(
+
+              "px-3 sm:px-4 py-1.5 rounded-lg border text-xs font-poppins font-medium capitalize cursor-pointer transition-colors",
+
+              categoryFilter === cat
+
+                ? "bg-primary text-white border-primary"
+
+                : "bg-white border-gray-200 text-gray hover:border-primary/40"
+
+            )}
 
           >
 
             {cat === "all" ? `All (${items.length})` : `${cat} (${items.filter((i) => i.category === cat).length})`}
 
-          </span>
+          </button>
 
         ))}
 
@@ -741,183 +790,71 @@ export default function KitchenMenuPage() {
 
         </div>
 
+      ) : filteredItems.length === 0 ? (
+
+        <div className="bg-white rounded-xl border border-gray-200 p-10 text-center">
+
+          <p className="font-nunito text-sm text-gray">No items in this category.</p>
+
+        </div>
+
       ) : (
 
-        <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
+        <div className="bg-white border border-[#e8e8e8] shadow-sm overflow-hidden">
 
-          {items.map((item) => {
+          <KitchenMenuTable
 
-            const cover = getItemCover(item)
+            items={filteredItems}
 
-            const imageCount = item.images?.length || (item.image ? 1 : 0)
+            deletingId={deletingId}
 
-            const videoCount = item.videos?.length || 0
+            onComment={handleViewComment}
 
+            onEdit={openEdit}
 
+            onDelete={handleDelete}
 
-            return (
+            onToggleAvailability={toggleAvailability}
 
-              <div
+          />
 
-                key={item.id}
+        </div>
 
-                className={cn(
+      )}
 
-                  "bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm",
 
-                  !item.is_available && "opacity-60"
 
-                )}
+      {commentModal && (
 
-              >
+        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
 
-                <div className="h-36 bg-gray-100 relative">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-2xl">
 
-                  {cover ? (
+            <h3 className="font-poppins font-bold text-lg text-[#1c1c1c]">Admin feedback</h3>
 
-                    <img src={cover} alt={item.name} className="w-full h-full object-cover" />
+            <p className="font-poppins font-semibold text-sm text-[#363636] mt-2">{commentModal.name}</p>
 
-                  ) : (
+            <p className="font-nunito text-sm text-red-700 mt-3 leading-relaxed bg-red-50 border border-red-100 rounded-lg px-3 py-2.5">
 
-                    <div className="w-full h-full flex items-center justify-center">
+              {commentModal.comment}
 
-                      <ImageIcon size={32} className="text-gray-light" />
+            </p>
 
-                    </div>
+            <button
 
-                  )}
+              type="button"
 
-                  <div className="absolute top-2 left-2 flex gap-1 flex-wrap">
+              onClick={() => setCommentModal(null)}
 
-                    <span className="text-[10px] font-poppins font-semibold px-2 py-0.5 rounded-full bg-white/90 text-dark capitalize">
+              className="w-full mt-4 py-2.5 rounded-lg border border-[#e8e8e8] font-poppins text-sm font-medium cursor-pointer hover:bg-[#fafafa]"
 
-                      {item.category}
+            >
 
-                    </span>
+              Close
 
-                    <span className={cn(
+            </button>
 
-                      "text-[10px] font-poppins font-semibold px-2 py-0.5 rounded-full",
-
-                      item.item_type === "veg" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
-
-                    )}>
-
-                      {item.item_type === "veg" ? "Veg" : "Non-Veg"}
-
-                    </span>
-
-                    {imageCount > 1 && (
-
-                      <span className="text-[10px] font-poppins font-semibold px-2 py-0.5 rounded-full bg-black/60 text-white">
-
-                        +{imageCount - 1} photos
-
-                      </span>
-
-                    )}
-
-                    {videoCount > 0 && (
-
-                      <span className="text-[10px] font-poppins font-semibold px-2 py-0.5 rounded-full bg-black/60 text-white flex items-center gap-0.5">
-
-                        <Video size={10} /> {videoCount}
-
-                      </span>
-
-                    )}
-
-                  </div>
-
-                  {!item.is_available && (
-
-                    <span className="absolute top-2 right-2 text-[10px] font-poppins font-semibold px-2 py-0.5 rounded-full bg-gray-800 text-white">
-
-                      Unavailable
-
-                    </span>
-
-                  )}
-
-                </div>
-
-                <div className="p-4">
-
-                  <div className="flex items-start justify-between gap-2">
-
-                    <h3 className="font-poppins font-semibold text-sm text-dark">{item.name}</h3>
-
-                    <span className="font-poppins font-bold text-primary text-sm flex-shrink-0">
-
-                      ₹{Number(item.price)}
-
-                    </span>
-
-                  </div>
-
-                  {item.offer && (
-
-                    <p className="inline-flex mt-1.5 text-[10px] font-poppins font-semibold px-2 py-0.5 rounded-full bg-accent/15 text-accent">
-
-                      {item.offer}
-
-                    </p>
-
-                  )}
-
-                  {item.description && (
-
-                    <p className="font-nunito text-xs text-gray mt-1 line-clamp-2">{item.description}</p>
-
-                  )}
-
-                  <div className="flex gap-2 mt-4">
-
-                    <button
-
-                      onClick={() => openEdit(item)}
-
-                      className="flex-1 flex items-center justify-center gap-1 py-2 rounded-lg border border-gray-200 text-xs font-poppins font-medium text-dark hover:bg-gray-50 cursor-pointer"
-
-                    >
-
-                      <Pencil size={13} /> Edit
-
-                    </button>
-
-                    <button
-
-                      onClick={() => toggleAvailability(item)}
-
-                      className="flex-1 py-2 rounded-lg border border-gray-200 text-xs font-poppins font-medium text-dark hover:bg-gray-50 cursor-pointer"
-
-                    >
-
-                      {item.is_available ? "Disable" : "Enable"}
-
-                    </button>
-
-                    <button
-
-                      onClick={() => handleDelete(item.id)}
-
-                      className="p-2 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 cursor-pointer"
-
-                    >
-
-                      <Trash2 size={14} />
-
-                    </button>
-
-                  </div>
-
-                </div>
-
-              </div>
-
-            )
-
-          })}
+          </div>
 
         </div>
 

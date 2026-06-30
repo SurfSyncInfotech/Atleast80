@@ -10,6 +10,10 @@ import adminRoutes from "./routes/adminRoutes.js"
 import menuRoutes from "./routes/menuRoutes.js"
 import storyRoutes from "./routes/storyRoutes.js"
 import orderRoutes from "./routes/orderRoutes.js"
+import hygieneRoutes from "./routes/hygieneRoutes.js"
+import alertRoutes from "./routes/alertRoutes.js"
+import locationRoutes from "./routes/locationRoutes.js"
+import bulkEnquiryRoutes from "./routes/bulkEnquiryRoutes.js"
 import pool from "./config/db.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -33,6 +37,8 @@ app.use(express.json({ limit: "1gb" }))
 app.use("/uploads/menu", express.static(path.join(__dirname, "../uploads/menu")))
 app.use("/uploads/kitchen", express.static(path.join(__dirname, "../uploads/kitchen")))
 app.use("/uploads/stories", express.static(path.join(__dirname, "../uploads/stories")))
+app.use("/uploads/hygiene", express.static(path.join(__dirname, "../uploads/hygiene")))
+app.use("/uploads/quotations", express.static(path.join(__dirname, "../uploads/quotations")))
 
 app.get("/", (_req, res) => {
   res.json({ message: "Atleast80 API is running" })
@@ -61,6 +67,10 @@ app.use("/api/admin", adminRoutes)
 app.use("/api/menu", menuRoutes)
 app.use("/api/stories", storyRoutes)
 app.use("/api/orders", orderRoutes)
+app.use("/api/hygiene", hygieneRoutes)
+app.use("/api/alerts", alertRoutes)
+app.use("/api/locations", locationRoutes)
+app.use("/api/bulk-enquiries", bulkEnquiryRoutes)
 
 async function startServer() {
   try {

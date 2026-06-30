@@ -7,8 +7,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 export const UPLOADS_DIR = path.join(__dirname, "../../uploads/menu")
 export const KITCHEN_UPLOADS_DIR = path.join(__dirname, "../../uploads/kitchen")
 export const STORIES_UPLOADS_DIR = path.join(__dirname, "../../uploads/stories")
+export const HYGIENE_UPLOADS_DIR = path.join(__dirname, "../../uploads/hygiene")
+export const QUOTATION_UPLOADS_DIR = path.join(__dirname, "../../uploads/quotations")
 
-for (const dir of [UPLOADS_DIR, KITCHEN_UPLOADS_DIR, STORIES_UPLOADS_DIR]) {
+for (const dir of [UPLOADS_DIR, KITCHEN_UPLOADS_DIR, STORIES_UPLOADS_DIR, HYGIENE_UPLOADS_DIR, QUOTATION_UPLOADS_DIR]) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
 }
 
@@ -140,4 +142,54 @@ export const storyUpload = multer({
 
 export function getStoryFileUrl(req, filename) {
   return `${getPublicBaseUrl(req)}/uploads/stories/${filename}`
+}
+
+const hygieneStorage = multer.diskStorage({
+  destination(_req, _file, cb) {
+    cb(null, HYGIENE_UPLOADS_DIR)
+  },
+  filename(_req, file, cb) {
+    const ext = path.extname(file.originalname).toLowerCase() || ".webm"
+    cb(null, `hygiene-${Date.now()}-${Math.random().toString(36).slice(2, 9)}${ext}`)
+  },
+})
+
+function videoOnlyFilter(_req, file, cb) {
+  if (VIDEO_TYPES.includes(file.mimetype)) cb(null, true)
+  else cb(new Error("Only video files (MP4, WebM, MOV) are allowed for hygiene checks"))
+}
+
+export const hygieneVideoUpload = multer({
+  storage: hygieneStorage,
+  fileFilter: videoOnlyFilter,
+  limits: { fileSize: 100 * 1024 * 1024 },
+})
+
+export function getHygieneFileUrl(req, filename) {
+  return `${getPublicBaseUrl(req)}/uploads/hygiene/${filename}`
+}
+
+const quotationStorage = multer.diskStorage({
+  destination(_req, _file, cb) {
+    cb(null, QUOTATION_UPLOADS_DIR)
+  },
+  filename(_req, file, cb) {
+    const ext = path.extname(file.originalname).toLowerCase() || ".pdf"
+    cb(null, `quote-${Date.now()}-${Math.random().toString(36).slice(2, 9)}${ext}`)
+  },
+})
+
+function quotationFileFilter(_req, file, cb) {
+  if (FSSAI_TYPES.includes(file.mimetype)) cb(null, true)
+  else cb(new Error("Quotation must be JPG, PNG, WebP, GIF, or PDF"))
+}
+
+export const quotationUpload = multer({
+  storage: quotationStorage,
+  fileFilter: quotationFileFilter,
+  limits: { fileSize: 10 * 1024 * 1024 },
+})
+
+export function getQuotationFileUrl(req, filename) {
+  return `${getPublicBaseUrl(req)}/uploads/quotations/${filename}`
 }

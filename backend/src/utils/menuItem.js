@@ -21,6 +21,10 @@ export function formatMenuItem(item) {
 
   return {
     ...item,
+    approval_status: item.approval_status || "pending",
+    approvalStatus: item.approval_status || "pending",
+    review_comment: item.review_comment || null,
+    reviewComment: item.review_comment || null,
     images,
     videos,
     image,

@@ -1,7 +1,8 @@
-import { MapPin, Search, Bell, ShoppingCart, User } from "lucide-react"
+import { Search, Bell, ShoppingCart, User, LogOut } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { useCart } from "../../context/CartContext"
 import { useAuth } from "../../context/AuthContext"
+import LocationPicker from "../common/LocationPicker"
 
 function initials(name) {
   return (name || "U")
@@ -15,11 +16,16 @@ function initials(name) {
 export default function Navbar({ transparent = false }) {
   const navigate = useNavigate()
   const { itemCount, requireCustomer } = useCart()
-  const { user, isCustomer } = useAuth()
+  const { customerUser, isCustomer, logoutCustomer } = useAuth()
 
   const goCart = () => {
     if (!requireCustomer()) return
     navigate("/cart")
+  }
+
+  const handleLogout = () => {
+    logoutCustomer()
+    navigate("/home")
   }
 
   return (
@@ -41,26 +47,7 @@ export default function Navbar({ transparent = false }) {
           </span>
         </button>
 
-        <button className="flex items-center gap-1.5 cursor-pointer group md:hidden">
-          <MapPin size={18} className="text-primary" />
-          <div className="text-left">
-            <p className="text-xs text-gray">Delivering to</p>
-            <p className="text-sm font-poppins font-semibold text-dark group-hover:text-primary transition-colors">
-              India <span className="text-xs text-gray">▼</span>
-            </p>
-          </div>
-        </button>
-
-        <button
-          className={`hidden md:flex items-center gap-1.5 cursor-pointer group px-4 py-2.5 rounded-full border transition-all duration-200 ${
-            transparent
-              ? "bg-white/10 backdrop-blur-sm border-white/20 hover:bg-white/20"
-              : "bg-white border-gray-light hover:border-primary hover:shadow-sm"
-          }`}
-        >
-          <MapPin size={15} className={transparent ? "text-secondary" : "text-primary"} />
-          <span className={`text-sm font-medium ${transparent ? "text-white" : "text-dark"}`}>India</span>
-        </button>
+        <LocationPicker transparent={transparent} className="flex-shrink-0" />
 
         {!transparent && (
           <div className="flex-1 relative max-w-2xl">
@@ -114,25 +101,39 @@ export default function Navbar({ transparent = false }) {
         </button>
 
         {isCustomer ? (
-          <button
-            onClick={() => navigate("/profile")}
-            className={`hidden md:flex items-center gap-2.5 pl-1.5 pr-4 py-1.5 rounded-full cursor-pointer transition-all ${
-              transparent
-                ? "bg-white/15 hover:bg-white/25 text-white"
-                : "bg-white border border-gray-light hover:border-primary shadow-sm"
-            }`}
-          >
-            <span
-              className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-poppins font-bold ${
-                transparent ? "bg-white text-primary" : "bg-primary text-white"
+          <>
+            <button
+              onClick={() => navigate("/profile")}
+              className={`hidden md:flex items-center gap-2.5 pl-1.5 pr-4 py-1.5 rounded-full cursor-pointer transition-all ${
+                transparent
+                  ? "bg-white/15 hover:bg-white/25 text-white"
+                  : "bg-white border border-gray-light hover:border-primary shadow-sm"
               }`}
             >
-              {initials(user.name)}
-            </span>
-            <span className={`text-sm font-poppins font-semibold max-w-[100px] truncate ${transparent ? "text-white" : "text-dark"}`}>
-              {user.name?.split(" ")[0]}
-            </span>
-          </button>
+              <span
+                className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-poppins font-bold ${
+                  transparent ? "bg-white text-primary" : "bg-primary text-white"
+                }`}
+              >
+                {initials(customerUser?.name)}
+              </span>
+              <span className={`text-sm font-poppins font-semibold max-w-[100px] truncate ${transparent ? "text-white" : "text-dark"}`}>
+                {customerUser?.name?.split(" ")[0]}
+              </span>
+            </button>
+            <button
+              onClick={handleLogout}
+              title="Logout"
+              className={`hidden md:flex items-center gap-1.5 px-3 py-2 rounded-full text-sm font-poppins font-medium cursor-pointer transition-colors ${
+                transparent
+                  ? "text-white/90 hover:bg-white/10"
+                  : "text-gray hover:text-red-600 hover:bg-red-50"
+              }`}
+            >
+              <LogOut size={16} />
+              Logout
+            </button>
+          </>
         ) : (
           <button
             onClick={() => navigate("/login")}

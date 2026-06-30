@@ -29,7 +29,6 @@ export default function AdminDashboardPage() {
   const [rejectReason, setRejectReason] = useState("")
   const [selected, setSelected] = useState(null)
   const [approveModal, setApproveModal] = useState(null)
-  const [hygieneScore, setHygieneScore] = useState(85)
   const [deleteModal, setDeleteModal] = useState(null)
 
   const loadData = useCallback(async () => {
@@ -70,13 +69,10 @@ export default function AdminDashboardPage() {
     setSearch(searchInput.trim())
   }
 
-  const handleApprove = async (id, score) => {
+  const handleApprove = async (id) => {
     setActionId(id)
     try {
-      await api(`/api/admin/kitchens/${id}/approve`, {
-        method: "PATCH",
-        body: JSON.stringify({ hygieneScore: score }),
-      })
+      await api(`/api/admin/kitchens/${id}/approve`, { method: "PATCH" })
       setApproveModal(null)
       setSelected(null)
       await loadData()
@@ -450,26 +446,7 @@ export default function AdminDashboardPage() {
           <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-2xl">
             <h3 className="font-poppins font-bold text-lg text-[#1c1c1c]">Approve Kitchen</h3>
             <p className="font-nunito text-[#696969] text-sm mt-1">
-              Assign a hygiene score after reviewing uploaded kitchen &amp; food media.
-            </p>
-            <label className="block mt-5 font-poppins text-sm font-medium text-[#1c1c1c]">
-              Hygiene score (%)
-            </label>
-            <input
-              type="range"
-              min={1}
-              max={100}
-              value={hygieneScore}
-              onChange={(e) => setHygieneScore(Number(e.target.value))}
-              className="w-full mt-2"
-            />
-            <div className="flex items-center justify-between mt-2">
-              <span className="font-nunito text-xs text-[#999]">1%</span>
-              <span className="font-poppins font-bold text-2xl text-primary">{hygieneScore}%</span>
-              <span className="font-nunito text-xs text-[#999]">100%</span>
-            </div>
-            <p className="font-nunito text-xs text-[#696969] mt-3">
-              Scores 80% and above earn the hygiene verified badge on the kitchen page.
+              This kitchen will go live on the marketplace. The partner must record daily hygiene videos after approval.
             </p>
             <div className="flex gap-3 mt-5">
               <button
@@ -479,11 +456,11 @@ export default function AdminDashboardPage() {
                 Cancel
               </button>
               <button
-                onClick={() => handleApprove(approveModal, hygieneScore)}
+                onClick={() => handleApprove(approveModal)}
                 disabled={actionId === approveModal}
                 className="flex-1 py-2.5 rounded-lg bg-primary text-white font-poppins text-sm font-semibold hover:bg-primary-dark cursor-pointer disabled:opacity-50"
               >
-                {actionId === approveModal ? "Approving..." : "Approve & assign score"}
+                {actionId === approveModal ? "Approving..." : "Approve kitchen"}
               </button>
             </div>
           </div>
@@ -547,7 +524,7 @@ function KitchenDrawer({ kitchen: k, onClose, onApprove, onReject, onDelete, act
   const [storiesLoading, setStoriesLoading] = useState(true)
   const coverUrl = resolveMediaUrl(k.cover_image)
   const hasCover = Boolean(coverUrl)
-  const canApprove = hasCover && stories.length > 0
+  const canApprove = hasCover
 
   useEffect(() => {
     let cancelled = false
@@ -644,7 +621,7 @@ function KitchenDrawer({ kitchen: k, onClose, onApprove, onReject, onDelete, act
                 ))}
               </div>
             )}
-            <DrawerField label="Current hygiene score" value={k.hygiene_score ? `${k.hygiene_score}%` : "Not assigned"} />
+
           </DrawerSection>
 
           <DrawerSection title="Compliance" icon={FileText}>
@@ -686,7 +663,7 @@ function KitchenDrawer({ kitchen: k, onClose, onApprove, onReject, onDelete, act
           <div className="p-4 border-t border-[#e8e8e8] flex gap-3">
             <button
               onClick={onApprove}
-              disabled={actionLoading || storiesLoading || !canApprove}
+              disabled={actionLoading || !canApprove}
               className="flex-1 py-3 rounded-lg bg-primary text-white font-poppins font-semibold text-sm hover:bg-primary-dark cursor-pointer disabled:opacity-50"
             >
               {actionLoading ? "Approving..." : "Approve Kitchen"}

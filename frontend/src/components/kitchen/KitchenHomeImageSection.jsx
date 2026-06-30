@@ -40,7 +40,7 @@ export default function KitchenHomeImageSection({ kitchen, onUploaded }) {
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="font-poppins font-semibold text-dark">Upload home card image</h3>
             <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-800 border border-amber-200 text-[10px] font-poppins font-bold uppercase tracking-wide px-2.5 py-0.5">
-              Required for approval
+              Required for application
             </span>
           </div>
           <p className="font-nunito text-sm text-gray mt-1 leading-relaxed">

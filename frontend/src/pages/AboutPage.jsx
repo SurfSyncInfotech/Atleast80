@@ -21,19 +21,19 @@ const IMG = {
   hero: "https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=1200&h=900&fit=crop",
   kitchen: "/indianwomen.png",
   meal: "https://images.unsplash.com/photo-1589301760014-d929f3979dbc?w=800&h=600&fit=crop",
-  grocery: "/grocery.png",
-  family: "/about.png",
+  grocery: "/grocery.jpeg",
+  family: "/about.jpeg",
 }
 
 const stats = [
   { icon: ChefHat, label: "Home Kitchens", value: "500+", color: "from-blue-500 to-indigo-600" },
   { icon: Users, label: "Happy Customers", value: "50K+", color: "from-emerald-500 to-teal-600" },
   { icon: Leaf, label: "Cities", value: "25+", color: "from-amber-400 to-orange-500" },
-  { icon: ShieldCheck, label: "Hygiene Verified", value: "80%+", color: "from-primary to-primary-dark" },
+  { icon: ShieldCheck, label: "Daily Hygiene Checks", value: "24h", color: "from-primary to-primary-dark" },
 ]
 
 const values = [
-  { icon: ShieldCheck, title: "Hygiene First", desc: "Daily verification, transparent ratings, and strict kitchen standards on every order.", accent: "bg-emerald-50 text-emerald-700" },
+  { icon: ShieldCheck, title: "Hygiene First", desc: "Daily video checks, transparent standards, and strict kitchen requirements on every order.", accent: "bg-emerald-50 text-emerald-700" },
   { icon: Home, title: "Real Home Kitchens", desc: "Authentic home chefs and families — not commercial restaurants — cooking with care.", accent: "bg-blue-50 text-blue-700" },
   { icon: ShoppingCart, title: "Food & Ration", desc: "Meals, tiffins, and daily grocery essentials from one trusted kitchen.", accent: "bg-amber-50 text-amber-700" },
   { icon: Heart, title: "Community First", desc: "Fair earnings for home kitchens and affordable, healthy food for every household.", accent: "bg-rose-50 text-rose-700" },
@@ -96,7 +96,13 @@ export default function AboutPage() {
               >
                 <img src={IMG.meal} alt="Homemade meal" className="rounded-2xl h-52 w-full object-cover shadow-2xl ring-1 ring-white/20" />
                 <img src={IMG.kitchen} alt="Indian woman preparing roti" className="rounded-2xl h-52 w-full object-cover shadow-2xl ring-1 ring-white/20 mt-8" />
-                <img src={IMG.grocery} alt="Supermarket grocery" className="rounded-2xl h-44 w-full object-cover shadow-2xl ring-1 ring-white/20 -mt-4 col-span-2" />
+                <div className="col-span-2 rounded-2xl overflow-hidden shadow-2xl ring-1 ring-white/20 bg-white/[0.08]">
+                  <img
+                    src={IMG.grocery}
+                    alt="Atleast80 — home food, kitchen food, and ration"
+                    className="w-full aspect-[2.35/1] object-contain object-center"
+                  />
+                </div>
               </motion.div>
             </div>
           </div>

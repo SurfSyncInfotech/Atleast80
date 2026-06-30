@@ -129,6 +129,7 @@ export default function ProfilePage() {
   })
   const [saveError, setSaveError] = useState("")
   const [saving, setSaving] = useState(false)
+  const [alerts, setAlerts] = useState([])
 
   const hasAddress = Boolean(user?.address || user?.city || user?.pincode)
   const pastOrders = orders.filter((o) => !currentOrder || o.id !== currentOrder.id)
@@ -144,6 +145,10 @@ export default function ProfilePage() {
       pincode: user.pincode || "",
     })
   }, [user])
+
+  useEffect(() => {
+    api("/api/alerts").then((d) => setAlerts(d.alerts || [])).catch(() => setAlerts([]))
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -249,6 +254,16 @@ export default function ProfilePage() {
 
       {/* Main content */}
       <div className="px-4 md:px-8 lg:px-10 w-full max-w-[min(100%,90rem)] mx-auto py-6">
+        {alerts.length > 0 && (
+          <div className="mb-5 space-y-3">
+            {alerts.map((alert) => (
+              <div key={alert.id} className="bg-white rounded-2xl border border-primary/15 p-4 shadow-sm">
+                <p className="font-poppins font-semibold text-sm text-dark">{alert.title}</p>
+                <p className="font-nunito text-sm text-gray mt-1">{alert.body}</p>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="grid lg:grid-cols-2 gap-5 lg:gap-8 items-stretch">
           {/* Account details */}
           <div className="bg-white rounded-2xl p-5 md:p-6 shadow-sm border border-gray-100 h-full">

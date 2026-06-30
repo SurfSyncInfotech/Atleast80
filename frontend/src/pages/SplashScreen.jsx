@@ -50,7 +50,7 @@ export default function SplashScreen() {
         className="relative z-10"
       >
         <img
-          src="/logo.jpeg"
+          src="/logo.png"
           alt="Atleast80"
           className="w-44 h-44 rounded-3xl shadow-2xl"
         />

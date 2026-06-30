@@ -19,6 +19,8 @@ import StoryViewer from "../components/common/StoryViewer"
 import { api } from "../lib/api"
 import { resolveStoryGroups } from "../lib/media"
 import { toKitchenCard } from "../lib/kitchen"
+import { useLocationPreference, matchesLocation } from "../lib/locationPreference"
+import HomepageLocationBar from "../components/common/HomepageLocationBar"
 
 const categories = [
   { id: 1, name: "Meals", icon: UtensilsCrossed },
@@ -80,11 +82,35 @@ function KitchenCardSkeleton() {
 }
 
 const HERO_VIDEO_RATE = 0.5
+const HERO_VIDEO_MAX_SECONDS = 7
 const HERO_VIDEO_CLASS =
   "absolute left-0 right-0 top-0 w-full h-[118%] object-cover object-top"
 
-function setHeroVideoRate(e) {
+function handleHeroVideoLoaded(e) {
   e.currentTarget.playbackRate = HERO_VIDEO_RATE
+}
+
+function handleHeroVideoTimeUpdate(e) {
+  const video = e.currentTarget
+  if (video.currentTime >= HERO_VIDEO_MAX_SECONDS) {
+    video.currentTime = 0
+  }
+}
+
+function HeroVideo({ className = HERO_VIDEO_CLASS }) {
+  return (
+    <video
+      autoPlay
+      muted
+      playsInline
+      onLoadedMetadata={handleHeroVideoLoaded}
+      onTimeUpdate={handleHeroVideoTimeUpdate}
+      className={className}
+      poster="/logo.png"
+    >
+      <source src="/atleast80.mp4" type="video/mp4" />
+    </video>
+  )
 }
 
 function DesktopHero() {
@@ -92,17 +118,7 @@ function DesktopHero() {
 
   return (
     <section className="hidden md:block relative h-[85vh] min-h-[600px] overflow-hidden">
-      <video
-        autoPlay
-        muted
-        loop
-        playsInline
-        onLoadedMetadata={setHeroVideoRate}
-        className={HERO_VIDEO_CLASS}
-        poster="/logo.jpeg"
-      >
-        <source src="/atleast80.mp4" type="video/mp4" />
-      </video>
+      <HeroVideo />
 
       <div className="absolute inset-0 z-[1] bg-black/45" />
 
@@ -113,7 +129,7 @@ function DesktopHero() {
           transition={{ duration: 0.8, ease: "easeOut" }}
         >
           <img
-            src="/logo.jpeg"
+            src="/logo.png"
             alt="Atleast80"
             className="w-24 h-24 rounded-2xl shadow-2xl mx-auto mb-8 ring-4 ring-white/20"
           />
@@ -186,17 +202,7 @@ function MobileHeroBanner() {
 
   return (
     <div className="relative mt-4 md:hidden overflow-hidden rounded-2xl h-52 sm:h-56">
-      <video
-        autoPlay
-        muted
-        loop
-        playsInline
-        onLoadedMetadata={setHeroVideoRate}
-        className={HERO_VIDEO_CLASS}
-        poster="/logo.jpeg"
-      >
-        <source src="/atleast80.mp4" type="video/mp4" />
-      </video>
+      <HeroVideo />
       <div className="absolute inset-0 z-[1] bg-gradient-to-t from-black/70 via-black/45 to-black/30" />
       <div className="relative z-10 h-full flex flex-col justify-end p-5">
         <h2 className="font-poppins font-bold text-white text-2xl leading-tight">
@@ -337,9 +343,12 @@ function StoriesSection() {
 
 function FeaturedKitchens() {
   const navigate = useNavigate()
+  const { state, city } = useLocationPreference()
   const [kitchens, setKitchens] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
+
+  const filteredKitchens = kitchens.filter((k) => matchesLocation(k, { state, city }))
 
   const loadKitchens = () => {
     setLoading(true)
@@ -357,7 +366,7 @@ function FeaturedKitchens() {
     loadKitchens()
   }, [])
 
-  if (!loading && !error && kitchens.length === 0) return null
+  if (!loading && !error && filteredKitchens.length === 0) return null
 
   return (
     <motion.section
@@ -397,7 +406,7 @@ function FeaturedKitchens() {
         </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
-          {kitchens.map((kitchen) => (
+          {filteredKitchens.map((kitchen) => (
             <KitchenCard
               key={kitchen.id}
               kitchen={kitchen}
@@ -412,9 +421,12 @@ function FeaturedKitchens() {
 
 function ExploreMoreKitchens() {
   const navigate = useNavigate()
+  const { state, city } = useLocationPreference()
   const [kitchens, setKitchens] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
+
+  const filteredKitchens = kitchens.filter((k) => matchesLocation(k, { state, city }))
 
   const loadKitchens = () => {
     setLoading(true)
@@ -432,7 +444,26 @@ function ExploreMoreKitchens() {
     loadKitchens()
   }, [])
 
-  if (!loading && !error && kitchens.length === 0) return null
+  if (!loading && !error && filteredKitchens.length === 0) {
+    if (kitchens.length > 0 && (city || state)) {
+      return (
+        <motion.section
+          variants={sectionReveal}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, margin: "-50px" }}
+          className="mt-8 md:mt-16"
+        >
+          <div className="text-center py-10 bg-white rounded-2xl border border-gray-100">
+            <p className="font-nunito text-gray text-sm">
+              No kitchens found in {city || state}. Try another city or clear your location.
+            </p>
+          </div>
+        </motion.section>
+      )
+    }
+    return null
+  }
 
   return (
     <motion.section
@@ -447,7 +478,7 @@ function ExploreMoreKitchens() {
           Explore More
         </h3>
         <p className="font-nunito text-gray text-sm mt-1">
-          Browse all verified home kitchens near you
+          {city ? `Home kitchens in ${city}` : "Browse all verified home kitchens near you"}
         </p>
       </div>
       {loading ? (
@@ -469,7 +500,7 @@ function ExploreMoreKitchens() {
         </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
-          {kitchens.map((kitchen) => (
+          {filteredKitchens.map((kitchen) => (
             <KitchenCard
               key={kitchen.id}
               kitchen={kitchen}
@@ -536,7 +567,7 @@ function AboutSection() {
               className="rounded-xl w-full h-[48%] min-h-[80px] object-cover flex-1"
             />
             <img
-              src="/grocery.png"
+              src="/grocery.jpeg"
               alt="Supermarket grocery"
               className="rounded-xl w-full h-[48%] min-h-[80px] object-cover flex-1"
             />
@@ -548,6 +579,28 @@ function AboutSection() {
 }
 
 function PopularItems() {
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    api("/api/menu/popular?limit=8")
+      .then((data) => {
+        setItems(
+          (data.items || []).map((item) => ({
+            id: item.id,
+            name: item.name,
+            price: Number(item.price),
+            image: item.image || item.images?.[0] || "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&h=300&fit=crop",
+            kitchen: item.kitchen_name || "Home Kitchen",
+          }))
+        )
+      })
+      .catch(() => setItems([]))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (!loading && items.length === 0) return null
+
   return (
     <motion.section
       initial="hidden"
@@ -558,13 +611,21 @@ function PopularItems() {
       <motion.h3 variants={fadeUp} className="font-poppins font-bold text-dark text-xl lg:text-2xl mb-6">
         Popular Right Now
       </motion.h3>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
-        {menuItems.map((item, i) => (
-          <motion.div key={item.id} variants={fadeUp} custom={i}>
-            <FoodCard item={item} />
-          </motion.div>
-        ))}
-      </div>
+      {loading ? (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-52 bg-gray-100 rounded-xl animate-pulse" />
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+          {items.map((item, i) => (
+            <motion.div key={item.id} variants={fadeUp} custom={i}>
+              <FoodCard item={item} />
+            </motion.div>
+          ))}
+        </div>
+      )}
     </motion.section>
   )
 }
@@ -651,7 +712,7 @@ function PartnerSection() {
   const stats = [
     { icon: Store, value: "500+", label: "Home Kitchens" },
     { icon: Users, value: "50K+", label: "Happy Customers" },
-    { icon: TrendingUp, value: "95%", label: "Hygiene Score" },
+    { icon: TrendingUp, value: "Daily", label: "Hygiene Checks" },
   ]
 
   return (
@@ -737,6 +798,7 @@ export default function HomePage() {
       <div className="bg-cream pb-20 md:pb-8">
         <div className="px-4 md:px-10 lg:px-16 xl:px-24 max-w-[1400px] mx-auto">
           <MobileHeroBanner />
+          <HomepageLocationBar />
           <CategoryRow />
           <AboutSection />
           <StoriesSection />

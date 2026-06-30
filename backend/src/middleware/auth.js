@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken"
 const JWT_SECRET = process.env.JWT_SECRET || "atleast80_dev_secret_change_in_production"
 
 export function signToken(payload) {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" })
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: "30d" })
 }
 
 export function authRequired(req, res, next) {

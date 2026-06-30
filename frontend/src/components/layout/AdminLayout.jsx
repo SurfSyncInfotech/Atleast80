@@ -10,7 +10,9 @@ import {
 
   Star,
 
-  LogOut,
+  UtensilsCrossed,
+
+  Bell,
 
   Users,
 
@@ -18,7 +20,7 @@ import {
 
   Settings,
 
-  Bell,
+  LogOut,
 
   Menu,
 
@@ -38,9 +40,13 @@ const links = [
 
   { to: "/admin/kitchens", label: "Kitchens", icon: ChefHat },
 
+  { to: "/admin/menu", label: "Menu", icon: UtensilsCrossed },
+
   { to: "/admin/featured", label: "Featured", icon: Star },
 
-  { to: "/admin", label: "Customers", icon: Users, disabled: true },
+  { to: "/admin/alerts", label: "Alerts", icon: Bell },
+
+  { to: "/admin/customers", label: "Customers", icon: Users },
 
   { to: "/admin", label: "Analytics", icon: BarChart3, disabled: true },
 
@@ -52,7 +58,7 @@ const links = [
 
 export default function AdminLayout({ children }) {
 
-  const { user, logout } = useAuth()
+  const { user, logoutAdmin } = useAuth()
 
   const navigate = useNavigate()
 
@@ -64,7 +70,7 @@ export default function AdminLayout({ children }) {
 
     setDrawerOpen(false)
 
-    logout()
+    logoutAdmin()
 
     navigate("/admin/login")
 
@@ -275,6 +281,15 @@ export default function AdminLayout({ children }) {
           <p className="font-poppins font-semibold text-sm text-[#1c1c1c] truncate flex-1">Admin Console</p>
 
           <div className="flex items-center gap-1 flex-shrink-0">
+
+            <button
+              onClick={handleLogout}
+              title="Logout"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-poppins font-medium text-gray hover:text-red-600 hover:bg-red-50 cursor-pointer transition-colors"
+            >
+              <LogOut size={16} />
+              <span className="hidden sm:inline">Logout</span>
+            </button>
 
             <button className="relative p-2 rounded-lg hover:bg-gray-100 cursor-pointer">
 

@@ -2,6 +2,7 @@ import { Router } from "express"
 import pool from "../config/db.js"
 import { authRequired, requireRole } from "../middleware/auth.js"
 import { normalizePublicUrl } from "../utils/mediaUrl.js"
+import { formatMenuItem } from "../utils/menuItem.js"
 
 const router = Router()
 
@@ -12,6 +13,18 @@ const SORT_COLUMNS = {
   name: "k.name",
   city: "k.city",
   status: "k.status",
+}
+
+let phoneVerifiedColumnCache = null
+
+async function getPhoneVerifiedSelect() {
+  if (phoneVerifiedColumnCache != null) return phoneVerifiedColumnCache
+  const [cols] = await pool.query(
+    `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'phone_verified'`
+  )
+  phoneVerifiedColumnCache = cols.length > 0 ? "phone_verified" : "0 AS phone_verified"
+  return phoneVerifiedColumnCache
 }
 
 router.get("/stats", async (_req, res) => {
@@ -136,11 +149,6 @@ router.get("/kitchens/:id/stories", async (req, res) => {
 
 router.patch("/kitchens/:id/approve", async (req, res) => {
   const { id } = req.params
-  const hygieneScore = Number(req.body.hygieneScore)
-
-  if (!Number.isFinite(hygieneScore) || hygieneScore < 1 || hygieneScore > 100) {
-    return res.status(400).json({ message: "Hygiene score between 1 and 100 is required" })
-  }
 
   try {
     const [existing] = await pool.query("SELECT id, status, cover_image FROM kitchens WHERE id = ?", [id])
@@ -154,22 +162,23 @@ router.patch("/kitchens/:id/approve", async (req, res) => {
       })
     }
 
-    const [media] = await pool.query(
-      "SELECT COUNT(*) AS count FROM kitchen_stories WHERE kitchen_id = ? AND purpose = 'verification'",
-      [id]
-    )
-    if (media[0].count === 0) {
-      return res.status(400).json({
-        message: "Kitchen has not uploaded hygiene photos/videos yet",
-      })
-    }
-
     await pool.query(
       `UPDATE kitchens
        SET status = 'approved', rejection_reason = NULL, reviewed_at = NOW(), reviewed_by = ?,
-           hygiene_score = ?, rating = 4.5
+           rating = 4.5
        WHERE id = ?`,
-      [req.user.id, Math.round(hygieneScore), id]
+      [req.user.id, id]
+    )
+
+    await pool.query(
+      `INSERT INTO alerts (target_role, kitchen_id, title, body, is_system, created_by) VALUES (?, ?, ?, ?, 1, ?)`,
+      [
+        "kitchen",
+        id,
+        "You're approved — record hygiene videos",
+        "Congratulations! Your kitchen is live. Record one short daily video covering your washing area, refrigerator, and cooking area using the camera on your dashboard. Overdue kitchens are hidden from customers.",
+        req.user.id,
+      ]
     )
 
     const [updated] = await pool.query(
@@ -277,6 +286,56 @@ router.patch("/kitchens/:id/reject", async (req, res) => {
   }
 })
 
+router.post("/alerts", async (req, res) => {
+  const { targetRole, title, body, kitchenId } = req.body
+  if (!["kitchen", "customer"].includes(targetRole)) {
+    return res.status(400).json({ message: "targetRole must be kitchen or customer" })
+  }
+  if (!title?.trim() || !body?.trim()) {
+    return res.status(400).json({ message: "Title and body are required" })
+  }
+
+  try {
+    const [result] = await pool.query(
+      `INSERT INTO alerts (target_role, kitchen_id, title, body, is_system, created_by)
+       VALUES (?, ?, ?, ?, 0, ?)`,
+      [targetRole, kitchenId || null, title.trim(), body.trim(), req.user.id]
+    )
+    res.status(201).json({ message: "Alert created", id: result.insertId })
+  } catch (error) {
+    console.error("Create alert error:", error)
+    res.status(500).json({ message: "Failed to create alert" })
+  }
+})
+
+router.get("/alerts", async (req, res) => {
+  const targetRole = req.query.targetRole
+
+  try {
+    const params = []
+    let where = ""
+
+    if (targetRole === "kitchen" || targetRole === "customer") {
+      where = "WHERE target_role = ?"
+      params.push(targetRole)
+    }
+
+    const [rows] = await pool.query(
+      `SELECT id, target_role AS targetRole, kitchen_id AS kitchenId, title, body,
+              is_system AS isSystem, created_at AS createdAt
+       FROM alerts
+       ${where}
+       ORDER BY created_at DESC
+       LIMIT 100`,
+      params
+    )
+    res.json({ alerts: rows })
+  } catch (error) {
+    console.error("Admin alerts list error:", error)
+    res.status(500).json({ message: "Failed to fetch alerts" })
+  }
+})
+
 router.delete("/kitchens/:id", async (req, res) => {
   const { id } = req.params
   const connection = await pool.getConnection()
@@ -313,6 +372,265 @@ router.delete("/kitchens/:id", async (req, res) => {
     res.status(500).json({ message: "Failed to delete kitchen" })
   } finally {
     connection.release()
+  }
+})
+
+router.get("/menu", async (req, res) => {
+  const status = req.query.status
+  const allowed = ["pending", "approved", "rejected"]
+
+  try {
+    const params = []
+    let where = "WHERE k.status = 'approved'"
+
+    if (status && allowed.includes(status)) {
+      where += " AND m.approval_status = ?"
+      params.push(status)
+    }
+
+    const [rows] = await pool.query(
+      `SELECT m.*, k.name AS kitchen_name, k.city AS kitchen_city,
+              k.cover_image AS kitchen_cover_image, k.owner_name AS kitchen_owner_name
+       FROM menu_items m
+       INNER JOIN kitchens k ON k.id = m.kitchen_id
+       ${where}
+       ORDER BY k.name ASC, m.created_at DESC
+       LIMIT 500`,
+      params
+    )
+
+    const kitchenMap = new Map()
+
+    for (const row of rows) {
+      const kitchenId = row.kitchen_id
+
+      if (!kitchenMap.has(kitchenId)) {
+        kitchenMap.set(kitchenId, {
+          id: kitchenId,
+          name: row.kitchen_name,
+          city: row.kitchen_city,
+          ownerName: row.kitchen_owner_name,
+          coverImage: normalizePublicUrl(row.kitchen_cover_image),
+          items: [],
+          pendingCount: 0,
+          approvedCount: 0,
+          rejectedCount: 0,
+        })
+      }
+
+      const kitchen = kitchenMap.get(kitchenId)
+      const item = {
+        ...formatMenuItem(row),
+        kitchen_id: kitchenId,
+        kitchen_name: row.kitchen_name,
+        kitchen_city: row.kitchen_city,
+      }
+
+      kitchen.items.push(item)
+
+      const itemStatus = item.approvalStatus || item.approval_status || "pending"
+      if (itemStatus === "pending") kitchen.pendingCount += 1
+      else if (itemStatus === "approved") kitchen.approvedCount += 1
+      else if (itemStatus === "rejected") kitchen.rejectedCount += 1
+    }
+
+    const kitchens = Array.from(kitchenMap.values()).sort((a, b) => {
+      if (b.pendingCount !== a.pendingCount) return b.pendingCount - a.pendingCount
+      return a.name.localeCompare(b.name)
+    })
+
+    res.json({ kitchens })
+  } catch (error) {
+    console.error("Admin menu list error:", error)
+    res.status(500).json({ message: "Failed to fetch menu items" })
+  }
+})
+
+router.patch("/menu/:id/approve", async (req, res) => {
+  try {
+    const [result] = await pool.query(
+      `UPDATE menu_items
+       SET approval_status = 'approved', review_comment = NULL, reviewed_at = NOW(), reviewed_by = ?
+       WHERE id = ?`,
+      [req.user.id, req.params.id]
+    )
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "Menu item not found" })
+    }
+
+    const [items] = await pool.query("SELECT * FROM menu_items WHERE id = ?", [req.params.id])
+    res.json({ message: "Menu item approved", item: formatMenuItem(items[0]) })
+  } catch (error) {
+    console.error("Approve menu item error:", error)
+    res.status(500).json({ message: "Failed to approve menu item" })
+  }
+})
+
+router.patch("/menu/:id/reject", async (req, res) => {
+  const comment = req.body?.comment?.trim()
+  if (!comment) {
+    return res.status(400).json({ message: "Comment is required when rejecting a menu item" })
+  }
+
+  try {
+    const [result] = await pool.query(
+      `UPDATE menu_items
+       SET approval_status = 'rejected', review_comment = ?, reviewed_at = NOW(), reviewed_by = ?
+       WHERE id = ?`,
+      [comment, req.user.id, req.params.id]
+    )
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "Menu item not found" })
+    }
+
+    const [items] = await pool.query("SELECT * FROM menu_items WHERE id = ?", [req.params.id])
+    res.json({ message: "Menu item rejected", item: formatMenuItem(items[0]) })
+  } catch (error) {
+    console.error("Reject menu item error:", error)
+    res.status(500).json({ message: "Failed to reject menu item" })
+  }
+})
+
+router.patch("/menu/:id/comment", async (req, res) => {
+  const comment = req.body?.comment?.trim()
+  if (!comment) {
+    return res.status(400).json({ message: "Comment is required" })
+  }
+
+  try {
+    const [result] = await pool.query(
+      `UPDATE menu_items SET review_comment = ? WHERE id = ?`,
+      [comment, req.params.id]
+    )
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "Menu item not found" })
+    }
+
+    const [items] = await pool.query("SELECT * FROM menu_items WHERE id = ?", [req.params.id])
+    res.json({ message: "Comment saved", item: formatMenuItem(items[0]) })
+  } catch (error) {
+    console.error("Menu item comment error:", error)
+    res.status(500).json({ message: "Failed to save comment" })
+  }
+})
+
+router.delete("/menu/:id", async (req, res) => {
+  const comment = req.body?.comment?.trim()
+
+  try {
+    const [existing] = await pool.query(
+      `SELECT m.id, m.name, m.kitchen_id FROM menu_items m WHERE m.id = ?`,
+      [req.params.id]
+    )
+
+    if (existing.length === 0) {
+      return res.status(404).json({ message: "Menu item not found" })
+    }
+
+    const item = existing[0]
+    await pool.query("DELETE FROM menu_items WHERE id = ?", [req.params.id])
+
+    if (comment) {
+      await pool.query(
+        `INSERT INTO alerts (target_role, kitchen_id, title, body, is_system, created_by)
+         VALUES (?, ?, ?, ?, 1, ?)`,
+        [
+          "kitchen",
+          item.kitchen_id,
+          `Menu item removed: ${item.name}`,
+          comment,
+          req.user.id,
+        ]
+      )
+    }
+
+    res.json({ message: "Menu item deleted" })
+  } catch (error) {
+    console.error("Delete menu item error:", error)
+    res.status(500).json({ message: "Failed to delete menu item" })
+  }
+})
+
+router.get("/customers", async (req, res) => {
+  const { search, page = 1, limit = 20 } = req.query
+  const pageNum = Math.max(1, Number(page) || 1)
+  const limitNum = Math.min(100, Math.max(10, Number(limit) || 20))
+  const offset = (pageNum - 1) * limitNum
+
+  try {
+    const where = ["role = 'customer'"]
+    const params = []
+
+    if (search?.trim()) {
+      where.push("(name LIKE ? OR email LIKE ? OR phone LIKE ?)")
+      const q = `%${search.trim()}%`
+      params.push(q, q, q)
+    }
+
+    const whereClause = `WHERE ${where.join(" AND ")}`
+    const phoneVerifiedSelect = await getPhoneVerifiedSelect()
+
+    const [countRows] = await pool.query(
+      `SELECT COUNT(*) AS total FROM users ${whereClause}`,
+      params
+    )
+    const total = Number(countRows[0].total)
+
+    const [rows] = await pool.query(
+      `SELECT id, name, email, phone, ${phoneVerifiedSelect}, created_at
+       FROM users
+       ${whereClause}
+       ORDER BY created_at DESC
+       LIMIT ? OFFSET ?`,
+      [...params, limitNum, offset]
+    )
+
+    res.json({
+      customers: rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        email: row.email,
+        phone: row.phone,
+        phoneVerified: Boolean(row.phone_verified),
+        createdAt: row.created_at,
+      })),
+      pagination: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum) || 1,
+      },
+    })
+  } catch (error) {
+    console.error("Admin customers list error:", error)
+    res.status(500).json({ message: "Failed to fetch customers" })
+  }
+})
+
+router.delete("/customers/:id", async (req, res) => {
+  const id = Number(req.params.id)
+  if (!id) {
+    return res.status(400).json({ message: "Invalid customer id" })
+  }
+
+  try {
+    const [rows] = await pool.query(
+      "SELECT id, name FROM users WHERE id = ? AND role = 'customer'",
+      [id]
+    )
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "Customer not found" })
+    }
+
+    await pool.query("DELETE FROM users WHERE id = ? AND role = 'customer'", [id])
+
+    res.json({ message: `Customer "${rows[0].name}" deleted` })
+  } catch (error) {
+    console.error("Delete customer error:", error)
+    res.status(500).json({ message: "Failed to delete customer" })
   }
 })
 

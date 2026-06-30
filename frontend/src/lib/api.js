@@ -9,12 +9,12 @@ export class ApiError extends Error {
   }
 }
 
-function getToken() {
-  return getStoredToken()
+function getToken(role) {
+  return getStoredToken(role)
 }
 
-export async function api(path, options = {}) {
-  const token = getToken()
+export async function api(path, options = {}, role) {
+  const token = getToken(role)
   const headers = {
     "Content-Type": "application/json",
     ...options.headers,
@@ -37,7 +37,7 @@ export async function uploadMenuFiles(files) {
 
   const formData = new FormData()
   files.forEach((file) => formData.append("files", file))
-  return uploadFormData("/api/menu/upload", formData)
+  return uploadFormData("/api/menu/upload", formData, "kitchen")
 }
 
 export async function uploadStoryFiles(files) {
@@ -45,11 +45,11 @@ export async function uploadStoryFiles(files) {
 
   const formData = new FormData()
   files.forEach((file) => formData.append("files", file))
-  return uploadFormData("/api/stories", formData)
+  return uploadFormData("/api/stories", formData, "kitchen")
 }
 
-async function uploadFormData(path, formData) {
-  const token = getToken()
+async function uploadFormData(path, formData, role) {
+  const token = getToken(role)
   const headers = {}
   if (token) headers.Authorization = `Bearer ${token}`
 
@@ -86,13 +86,29 @@ async function uploadFormData(path, formData) {
 export async function uploadKitchenLogo(file) {
   const formData = new FormData()
   formData.append("logo", file)
-  return uploadFormData("/api/kitchens/me/logo", formData)
+  return uploadFormData("/api/kitchens/me/logo", formData, "kitchen")
 }
 
 export async function uploadKitchenCover(file) {
   const formData = new FormData()
   formData.append("cover", file)
-  return uploadFormData("/api/kitchens/me/cover", formData)
+  return uploadFormData("/api/kitchens/me/cover", formData, "kitchen")
+}
+
+export async function uploadHygieneVideo(blob) {
+  const formData = new FormData()
+  formData.append("video", blob, "hygiene-daily.webm")
+  return uploadFormData("/api/hygiene/me", formData, "kitchen")
+}
+
+export async function deleteHygieneVideo() {
+  return api("/api/hygiene/me", { method: "DELETE" }, "kitchen")
+}
+
+export async function uploadKitchenFssaiLicense(file) {
+  const formData = new FormData()
+  formData.append("fssaiLicense", file)
+  return uploadFormData("/api/kitchens/me/fssai-license", formData, "kitchen")
 }
 
 export async function registerKitchen(form, fssaiLicenseFile) {
@@ -103,7 +119,7 @@ export async function registerKitchen(form, fssaiLicenseFile) {
     }
   })
   formData.append("fssaiLicense", fssaiLicenseFile)
-  return uploadFormData("/api/auth/kitchen/register", formData)
+  return uploadFormData("/api/auth/kitchen/register", formData, "kitchen")
 }
 
 export async function uploadFiles(path, files) {

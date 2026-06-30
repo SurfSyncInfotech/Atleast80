@@ -8,7 +8,7 @@ import { cn } from "../../lib/utils"
 const PLACEHOLDER =
   "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=800&h=600&fit=crop"
 
-export default function MenuItemDetailModal({ item, onClose }) {
+export default function MenuItemDetailModal({ item, onClose, adminView = false }) {
   const { addItem, removeItem, getItemQty } = useCart()
   const [activeImage, setActiveImage] = useState(0)
 
@@ -36,6 +36,9 @@ export default function MenuItemDetailModal({ item, onClose }) {
   const displayImages = images.length > 0 ? images : [PLACEHOLDER]
   const qty = item ? getItemQty(item.id) : 0
   const isVeg = item?.itemType === "veg" || item?.item_type === "veg"
+  const approvalStatus = item?.approvalStatus || item?.approval_status
+  const adminComment = item?.reviewComment || item?.review_comment
+  const kitchenLabel = item?.kitchen || item?.kitchen_name
 
   const prevImage = () => setActiveImage((i) => (i === 0 ? displayImages.length - 1 : i - 1))
   const nextImage = () => setActiveImage((i) => (i === displayImages.length - 1 ? 0 : i + 1))
@@ -154,6 +157,12 @@ export default function MenuItemDetailModal({ item, onClose }) {
               </p>
             )}
 
+            {item.offer && (
+              <p className="inline-flex mt-3 text-[11px] font-poppins font-semibold px-2.5 py-1 rounded-full bg-accent/15 text-accent">
+                {item.offer}
+              </p>
+            )}
+
             {videos.length > 0 && (
               <div className="mt-5">
                 <div className="flex items-center gap-2 mb-3">
@@ -178,41 +187,83 @@ export default function MenuItemDetailModal({ item, onClose }) {
               </div>
             )}
 
-            {item.kitchen && (
-              <p className="font-nunito text-xs text-gray mt-4">From {item.kitchen}</p>
+            {kitchenLabel && (
+              <p className="font-nunito text-xs text-gray mt-4">From {kitchenLabel}</p>
+            )}
+
+            {adminView && (
+              <div className="mt-5 pt-4 border-t border-gray-100 space-y-3">
+                {approvalStatus && (
+                  <div className="flex items-center gap-2">
+                    <span className="font-poppins text-xs font-semibold text-gray uppercase tracking-wide">Status</span>
+                    <span
+                      className={cn(
+                        "text-[10px] font-poppins font-semibold px-2 py-0.5 rounded-full capitalize",
+                        approvalStatus === "approved"
+                          ? "bg-emerald-100 text-emerald-700"
+                          : approvalStatus === "rejected"
+                          ? "bg-red-100 text-red-700"
+                          : "bg-amber-100 text-amber-800"
+                      )}
+                    >
+                      {approvalStatus}
+                    </span>
+                  </div>
+                )}
+                {item.created_at && (
+                  <p className="font-nunito text-xs text-gray">
+                    Submitted{" "}
+                    {new Date(item.created_at).toLocaleString("en-IN", {
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </p>
+                )}
+                {adminComment && (
+                  <div className="rounded-lg bg-red-50 border border-red-100 px-3 py-2.5">
+                    <p className="font-poppins text-xs font-semibold text-red-800 mb-1">Admin comment</p>
+                    <p className="font-nunito text-sm text-red-700 leading-relaxed">{adminComment}</p>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
           {/* Footer — price + add to cart */}
           <div className="flex-shrink-0 border-t border-gray-100 p-4 sm:p-5 bg-white flex items-center justify-between gap-4">
             <p className="font-poppins font-bold text-dark text-xl">₹{Number(item.price)}</p>
-            {qty > 0 ? (
-              <div className="flex items-center gap-3 bg-primary/10 border border-primary/20 rounded-xl px-3 py-2">
-                <button
-                  onClick={() => removeItem(item.id)}
-                  className="text-primary cursor-pointer p-1"
-                  aria-label="Decrease quantity"
-                >
-                  <Minus size={18} />
-                </button>
-                <span className="font-poppins font-bold text-primary text-base min-w-[20px] text-center">
-                  {qty}
-                </span>
+            {!adminView && (
+              qty > 0 ? (
+                <div className="flex items-center gap-3 bg-primary/10 border border-primary/20 rounded-xl px-3 py-2">
+                  <button
+                    onClick={() => removeItem(item.id)}
+                    className="text-primary cursor-pointer p-1"
+                    aria-label="Decrease quantity"
+                  >
+                    <Minus size={18} />
+                  </button>
+                  <span className="font-poppins font-bold text-primary text-base min-w-[20px] text-center">
+                    {qty}
+                  </span>
+                  <button
+                    onClick={() => addItem(item)}
+                    className="text-primary cursor-pointer p-1"
+                    aria-label="Increase quantity"
+                  >
+                    <Plus size={18} />
+                  </button>
+                </div>
+              ) : (
                 <button
                   onClick={() => addItem(item)}
-                  className="text-primary cursor-pointer p-1"
-                  aria-label="Increase quantity"
+                  className="bg-primary text-white font-poppins font-semibold text-sm px-6 py-2.5 rounded-xl hover:bg-primary-dark transition-colors cursor-pointer"
                 >
-                  <Plus size={18} />
+                  Add to cart
                 </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => addItem(item)}
-                className="bg-primary text-white font-poppins font-semibold text-sm px-6 py-2.5 rounded-xl hover:bg-primary-dark transition-colors cursor-pointer"
-              >
-                Add to cart
-              </button>
+              )
             )}
           </div>
         </motion.div>

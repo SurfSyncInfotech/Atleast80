@@ -4,10 +4,12 @@ import { authRequired, requireRole } from "../middleware/auth.js"
 import {
   kitchenLogoUpload,
   kitchenCoverUpload,
+  fssaiLicenseUpload,
   getKitchenLogoUrl,
   getKitchenFileUrl,
 } from "../middleware/upload.js"
 import { formatKitchen, formatKitchens } from "../utils/mediaUrl.js"
+import { getHygieneCompliance } from "../utils/hygieneCompliance.js"
 
 const router = Router()
 
@@ -87,6 +89,36 @@ router.get("/me", authRequired, requireRole("kitchen"), async (req, res) => {
     console.error("Kitchen me error:", error)
     res.status(500).json({ message: "Failed to fetch kitchen" })
   }
+})
+
+router.post("/me/fssai-license", authRequired, requireRole("kitchen"), (req, res) => {
+  fssaiLicenseUpload.single("fssaiLicense")(req, res, async (err) => {
+    if (err) {
+      return res.status(400).json({ message: err.message || "Upload failed" })
+    }
+    if (!req.file) {
+      return res.status(400).json({ message: "FSSAI license file is required" })
+    }
+
+    try {
+      const licenseUrl = getKitchenFileUrl(req, req.file.filename)
+      await pool.query("UPDATE kitchens SET fssai_license = ? WHERE user_id = ?", [
+        licenseUrl,
+        req.user.id,
+      ])
+
+      const [rows] = await pool.query(
+        `SELECT k.*, u.name AS user_name, u.email AS user_email
+         FROM kitchens k JOIN users u ON u.id = k.user_id WHERE k.user_id = ?`,
+        [req.user.id]
+      )
+
+      res.json({ message: "FSSAI license updated", kitchen: formatKitchen(rows[0]) })
+    } catch (error) {
+      console.error("FSSAI license upload error:", error)
+      res.status(500).json({ message: "Failed to upload FSSAI license" })
+    }
+  })
 })
 
 router.patch("/me/offer", authRequired, requireRole("kitchen"), async (req, res) => {
@@ -254,7 +286,7 @@ router.get("/featured", async (_req, res) => {
   try {
     const [rows] = await pool.query(
       `SELECT id, name, owner_name, speciality, image, cover_image, rating, delivery_time,
-              hygiene_score, offer, best_item, city, kitchen_type, status, is_featured, featured_order
+              hygiene_score, offer, best_item, city, state, kitchen_type, status, is_featured, featured_order, reviewed_at
        FROM kitchens
        WHERE status = 'approved' AND is_featured = 1
        ORDER BY featured_order ASC, submitted_at DESC`
@@ -270,7 +302,7 @@ router.get("/", async (_req, res) => {
   try {
     const [rows] = await pool.query(
       `SELECT id, name, owner_name, speciality, image, cover_image, rating, delivery_time,
-              hygiene_score, offer, best_item, city, kitchen_type, status
+              hygiene_score, offer, best_item, city, state, kitchen_type, status, reviewed_at
        FROM kitchens
        WHERE status = 'approved'
        ORDER BY submitted_at DESC`
@@ -286,7 +318,7 @@ router.get("/:id", async (req, res) => {
   try {
     const [rows] = await pool.query(
       `SELECT id, name, owner_name, speciality, description, image, rating,
-              delivery_time, hygiene_score, offer, best_item, city, status
+              delivery_time, hygiene_score, offer, best_item, city, status, reviewed_at
        FROM kitchens
        WHERE id = ? AND status = 'approved'`,
       [req.params.id]
@@ -296,7 +328,12 @@ router.get("/:id", async (req, res) => {
       return res.status(404).json({ message: "Kitchen not found" })
     }
 
-    res.json({ kitchen: formatKitchen(rows[0]) })
+    const { compliant } = await getHygieneCompliance(pool, rows[0].id)
+
+    res.json({
+      kitchen: formatKitchen(rows[0]),
+      hygieneCompliant: compliant,
+    })
   } catch (error) {
     console.error("Kitchen detail error:", error)
     res.status(500).json({ message: "Failed to fetch kitchen" })

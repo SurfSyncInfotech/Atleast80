@@ -20,6 +20,7 @@ import {
 } from "lucide-react"
 import Button from "../../components/ui/Button"
 import PasswordInput from "../../components/ui/PasswordInput"
+import StateCitySelect from "../../components/common/StateCitySelect"
 import { useAuth } from "../../context/AuthContext"
 import { cn } from "../../lib/utils"
 
@@ -461,12 +462,17 @@ export default function KitchenSignupPage() {
                       />
                     </Field>
                     <div className="grid sm:grid-cols-3 gap-5">
-                      <Field label="City" required icon={MapPin}>
-                        <input className={inputClass} value={form.city} onChange={update("city")} placeholder="e.g. Lucknow" required />
-                      </Field>
-                      <Field label="State" required>
-                        <input className={inputClass} value={form.state} onChange={update("state")} placeholder="e.g. Uttar Pradesh" required />
-                      </Field>
+                      <div className="sm:col-span-2">
+                        <Field label="State & City" required icon={MapPin}>
+                          <StateCitySelect
+                            state={form.state}
+                            city={form.city}
+                            onStateChange={(value) => setForm((f) => ({ ...f, state: value, city: "" }))}
+                            onCityChange={(value) => setForm((f) => ({ ...f, city: value }))}
+                            required
+                          />
+                        </Field>
+                      </div>
                       <Field label="Pincode" required>
                         <input
                           className={inputClass}

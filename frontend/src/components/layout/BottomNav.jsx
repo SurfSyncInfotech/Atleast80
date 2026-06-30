@@ -20,7 +20,7 @@ export default function BottomNav() {
   const location = useLocation()
   const navigate = useNavigate()
   const { itemCount } = useCart()
-  const { isCustomer, user } = useAuth()
+  const { customerUser, isCustomer } = useAuth()
 
   const goProfile = () => navigate(isCustomer ? "/profile" : "/login")
 
@@ -52,7 +52,7 @@ export default function BottomNav() {
                 </div>
               ) : item.path === "/profile" && isCustomer ? (
                 <div className="w-7 h-7 rounded-full bg-primary text-white text-[10px] font-poppins font-bold flex items-center justify-center">
-                  {initials(user?.name)}
+                  {initials(customerUser?.name)}
                 </div>
               ) : (
                 <div className="relative">

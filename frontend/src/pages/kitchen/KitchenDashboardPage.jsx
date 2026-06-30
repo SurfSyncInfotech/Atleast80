@@ -1,13 +1,13 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { useNavigate, useLocation } from "react-router-dom"
 import {
   Clock, CheckCircle, XCircle, RefreshCw,
   Star, ShoppingBag, IndianRupee, UtensilsCrossed,
-  ChevronRight, Circle, FileCheck, Shield, Sparkles,
+  ChevronRight, Circle,
 } from "lucide-react"
 import KitchenLayout from "../../components/layout/KitchenLayout"
-import HygieneUploadSection from "../../components/kitchen/HygieneUploadSection"
 import KitchenHomeImageSection from "../../components/kitchen/KitchenHomeImageSection"
+import HygieneRecordSection from "../../components/kitchen/HygieneRecordSection"
 import { useAuth } from "../../context/AuthContext"
 import { api } from "../../lib/api"
 import { cn } from "../../lib/utils"
@@ -16,7 +16,7 @@ const kitchenTypeLabel = { veg: "Pure Veg", non_veg: "Non-Veg", both: "Veg & Non
 
 const onboardingSteps = [
   { key: "register", label: "Application submitted" },
-  { key: "hygiene", label: "Upload hygiene proof" },
+  { key: "home", label: "Upload home image" },
   { key: "review", label: "Admin review" },
   { key: "approved", label: "Go live on Atleast80" },
 ]
@@ -27,22 +27,25 @@ export default function KitchenDashboardPage() {
   const { kitchen, refreshKitchen } = useAuth()
   const [refreshing, setRefreshing] = useState(false)
   const [menuCount, setMenuCount] = useState(null)
-  const [hygieneCount, setHygieneCount] = useState(0)
 
   useEffect(() => { refreshKitchen().catch(() => {}) }, [refreshKitchen])
 
-  useEffect(() => {
-    if (kitchen?.status === "approved") {
-      api("/api/menu/me").then((d) => setMenuCount(d.items.length)).catch(() => setMenuCount(0))
-    }
+  const loadMenuCount = useCallback(() => {
+    if (kitchen?.status !== "approved") return Promise.resolve()
+    return api("/api/menu/me", {}, "kitchen")
+      .then((d) => setMenuCount((d.items || []).length))
+      .catch(() => setMenuCount(0))
   }, [kitchen?.status])
+
+  useEffect(() => {
+    loadMenuCount()
+  }, [loadMenuCount])
 
   const handleRefresh = async () => {
     setRefreshing(true)
     try {
       await refreshKitchen()
-      const d = await api("/api/menu/me").catch(() => null)
-      if (d) setMenuCount(d.items.length)
+      await loadMenuCount()
     } finally {
       setRefreshing(false)
     }
@@ -54,19 +57,18 @@ export default function KitchenDashboardPage() {
   const isApproved = status === "approved"
   const isPending = status === "pending"
   const isRejected = status === "rejected"
+  const hasHomeImage = Boolean(kitchen?.cover_image || kitchen?.cover)
   const currentStep = isApproved
     ? 4
     : isRejected
     ? 3
-    : isPending && hygieneCount > 0
+    : isPending && hasHomeImage
     ? 3
     : isPending
     ? 2
     : 1
-  const menuActive = isApproved && (menuCount ?? 0) > 0
 
   const isNewSignup = location.state?.newSignup
-  const hasHomeImage = Boolean(kitchen?.cover_image || kitchen?.cover)
 
   const refreshHomeImage = async () => {
     await refreshKitchen()
@@ -78,7 +80,7 @@ export default function KitchenDashboardPage() {
         <div className="mb-6 rounded-2xl border border-primary/20 bg-primary/5 px-5 py-4">
           <p className="font-poppins font-semibold text-primary text-sm">Welcome to Atleast80!</p>
           <p className="font-nunito text-sm text-gray mt-1">
-            Your application is submitted. Upload your <strong>home card image</strong> and submit <strong>hygiene proof</strong> below before admin can approve your kitchen.
+            You&apos;re logged in. Upload your <strong>home card image</strong> below — admin will review your application for approval.
           </p>
         </div>
       )}
@@ -98,48 +100,17 @@ export default function KitchenDashboardPage() {
         </button>
       </div>
 
-      {/* Stats — approved */}
       {isApproved && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6">
           {[
-            {
-              label: "Today's Orders",
-              value: "0",
-              icon: ShoppingBag,
-              gradient: "from-blue-500 to-indigo-600",
-              iconBg: "bg-white/20",
-            },
-            {
-              label: "Revenue",
-              value: "₹0",
-              icon: IndianRupee,
-              gradient: "from-emerald-500 to-teal-600",
-              iconBg: "bg-white/20",
-            },
-            {
-              label: "Rating",
-              value: kitchen?.rating ? Number(kitchen.rating).toFixed(1) : "—",
-              icon: Star,
-              gradient: "from-amber-400 to-orange-500",
-              iconBg: "bg-white/25",
-            },
-            {
-              label: "Menu Items",
-              value: menuCount ?? "—",
-              icon: UtensilsCrossed,
-              gradient: "from-primary to-primary-dark",
-              iconBg: "bg-white/20",
-            },
+            { label: "Today's Orders", value: "0", icon: ShoppingBag, gradient: "from-blue-500 to-indigo-600", iconBg: "bg-white/20" },
+            { label: "Revenue", value: "₹0", icon: IndianRupee, gradient: "from-emerald-500 to-teal-600", iconBg: "bg-white/20" },
+            { label: "Rating", value: kitchen?.rating ? Number(kitchen.rating).toFixed(1) : "—", icon: Star, gradient: "from-amber-400 to-orange-500", iconBg: "bg-white/25" },
+            { label: "Menu Items", value: menuCount ?? "—", icon: UtensilsCrossed, gradient: "from-primary to-primary-dark", iconBg: "bg-white/20" },
           ].map((m) => {
             const Icon = m.icon
             return (
-              <div
-                key={m.label}
-                className={cn(
-                  "rounded-2xl p-4 sm:p-5 shadow-md text-white bg-gradient-to-br",
-                  m.gradient
-                )}
-              >
+              <div key={m.label} className={cn("rounded-2xl p-4 sm:p-5 shadow-md text-white bg-gradient-to-br", m.gradient)}>
                 <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center mb-4", m.iconBg)}>
                   <Icon size={20} />
                 </div>
@@ -151,7 +122,6 @@ export default function KitchenDashboardPage() {
         </div>
       )}
 
-      {/* Onboarding tracker */}
       {!isApproved && (
         <div className="bg-white rounded-xl border border-[#e8e8e8] p-5 mb-6 shadow-sm">
           <h3 className="font-poppins font-semibold text-sm text-[#1c1c1c] mb-4">Application Progress</h3>
@@ -171,10 +141,7 @@ export default function KitchenDashboardPage() {
                     )}>
                       {done ? <CheckCircle size={16} /> : active && isRejected ? <XCircle size={16} /> : active ? <Clock size={16} /> : <Circle size={12} />}
                     </div>
-                    <p className={cn(
-                      "font-nunito text-xs sm:text-[10px] sm:mt-2 sm:text-center leading-tight",
-                      active ? "text-[#1c1c1c] font-medium" : "text-[#999]"
-                    )}>
+                    <p className={cn("font-nunito text-xs sm:text-[10px] sm:mt-2 sm:text-center leading-tight", active ? "text-[#1c1c1c] font-medium" : "text-[#999]")}>
                       {step.label}
                     </p>
                   </div>
@@ -188,10 +155,8 @@ export default function KitchenDashboardPage() {
           {isPending && (
             <p className="font-nunito text-xs text-amber-800 bg-amber-50 rounded-xl px-4 py-3 mt-4 border border-amber-100">
               {!hasHomeImage
-                ? "Upload your home card image below to complete your application."
-                : hygieneCount > 0
-                ? "Your hygiene media is submitted. Admin will review your kitchen and assign a hygiene score within 24 hours."
-                : "Add photos and videos of your kitchen and food below, then click Submit for review. Admin needs these to verify hygiene and approve your kitchen."}
+                ? "Upload your home card image below. Hygiene videos are recorded daily after approval."
+                : "Home image uploaded. Admin will review your application soon."}
             </p>
           )}
           {isRejected && kitchen?.rejection_reason && (
@@ -203,15 +168,11 @@ export default function KitchenDashboardPage() {
       )}
 
       {isPending && (
-        <>
-          <KitchenHomeImageSection kitchen={kitchen} onUploaded={refreshHomeImage} />
-          <div className="mb-6">
-            <HygieneUploadSection onChange={setHygieneCount} />
-          </div>
-        </>
+        <KitchenHomeImageSection kitchen={kitchen} onUploaded={refreshHomeImage} />
       )}
 
-      {/* Quick actions */}
+      {isApproved && <HygieneRecordSection />}
+
       {isApproved && (
         <div className="mb-6">
           <h3 className="font-poppins font-semibold text-sm text-[#1c1c1c] mb-3">Quick Actions</h3>
@@ -225,22 +186,18 @@ export default function KitchenDashboardPage() {
               return (
                 <button
                   key={item.label}
+                  type="button"
                   onClick={item.action}
                   disabled={item.disabled}
                   className={cn(
-                    "flex items-center gap-3 p-4 rounded-xl border text-left transition-all cursor-pointer",
-                    item.primary ? "bg-primary border-primary text-white hover:bg-primary-dark shadow-md" : "bg-white border-[#e8e8e8] hover:shadow-sm hover:border-[#ddd]",
-                    item.disabled && "opacity-50 cursor-not-allowed"
+                    "rounded-xl border p-4 text-left transition-all",
+                    item.disabled ? "opacity-50 cursor-not-allowed border-gray-100 bg-gray-50" : "cursor-pointer hover:shadow-md",
+                    item.primary ? "border-primary/30 bg-primary/5 hover:border-primary/50" : "border-gray-100 bg-white"
                   )}
                 >
-                  <div className={cn("w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0", item.primary ? "bg-white/20" : "bg-[#f4f4f5]")}>
-                    <Icon size={20} className={item.primary ? "text-white" : "text-primary"} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className={cn("font-poppins font-semibold text-sm", item.primary ? "text-white" : "text-[#1c1c1c]")}>{item.label}</p>
-                    <p className={cn("font-nunito text-xs mt-0.5 truncate", item.primary ? "text-white/70" : "text-[#999]")}>{item.desc}</p>
-                  </div>
-                  {!item.disabled && <ChevronRight size={16} className={item.primary ? "text-white/70" : "text-[#ccc]"} />}
+                  <Icon size={20} className={item.primary ? "text-primary" : "text-gray"} />
+                  <p className="font-poppins font-semibold text-sm text-dark mt-2">{item.label}</p>
+                  <p className="font-nunito text-xs text-gray mt-0.5">{item.desc}</p>
                 </button>
               )
             })}
@@ -248,98 +205,23 @@ export default function KitchenDashboardPage() {
         </div>
       )}
 
-      {/* Details grid */}
-      <div className="grid lg:grid-cols-5 gap-5">
-        <div className="lg:col-span-3 bg-white rounded-xl border border-[#e8e8e8] p-5 shadow-sm">
-          <h3 className="font-poppins font-semibold text-sm text-[#1c1c1c] mb-4">Business Details</h3>
-          <div className="grid sm:grid-cols-2 gap-x-6 gap-y-4">
-            <Detail label="Kitchen Type" value={kitchenTypeLabel[kitchen?.kitchen_type]} />
-            <Detail label="Signature Dish" value={kitchen?.best_item} />
-            <Detail label="Operating Hours" value={kitchen?.opening_time} />
-            <Detail label="Phone" value={kitchen?.phone} />
-            <Detail label="Email" value={kitchen?.email} />
-            <Detail
-              label="FSSAI License"
-              value={
-                kitchen?.fssai_license ? (
-                  <a
-                    href={kitchen.fssai_license}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-primary hover:underline"
-                  >
-                    View uploaded license
-                  </a>
-                ) : (
-                  kitchen?.fssai_number || "—"
-                )
-              }
-            />
-            <div className="sm:col-span-2">
-              <Detail label="About" value={kitchen?.description} />
-            </div>
+      {isApproved && kitchen && (
+        <div className="bg-white rounded-xl border border-[#e8e8e8] p-5 shadow-sm">
+          <h3 className="font-poppins font-semibold text-sm text-[#1c1c1c] mb-3">Kitchen summary</h3>
+          <div className="grid sm:grid-cols-2 gap-3 text-sm font-nunito text-gray">
+            <p><span className="text-dark font-medium">Name:</span> {kitchen.name}</p>
+            <p><span className="text-dark font-medium">Type:</span> {kitchenTypeLabel[kitchen.kitchen_type] || kitchen.kitchen_type}</p>
+            <p><span className="text-dark font-medium">Speciality:</span> {kitchen.speciality}</p>
           </div>
+          <button
+            type="button"
+            onClick={() => navigate("/kitchen/profile")}
+            className="mt-4 inline-flex items-center gap-1 text-sm font-poppins font-semibold text-primary cursor-pointer hover:underline"
+          >
+            Edit profile <ChevronRight size={14} />
+          </button>
         </div>
-
-        <div className="lg:col-span-2 space-y-4">
-          <div className="bg-white rounded-xl border border-[#e8e8e8] p-5 shadow-sm">
-            <h3 className="font-poppins font-semibold text-sm text-[#1c1c1c] mb-4">Partner Status</h3>
-            <div className="space-y-3">
-              {[
-                { icon: FileCheck, label: "Application", ok: true },
-                { icon: Shield, label: "Hygiene Verified", ok: isApproved && (kitchen?.hygiene_score || 0) > 0 },
-                { icon: Sparkles, label: "Live on Platform", ok: isApproved },
-                { icon: UtensilsCrossed, label: "Menu Active", ok: menuActive },
-              ].map((item) => {
-                const Icon = item.icon
-                return (
-                  <div key={item.label} className="flex items-center gap-3">
-                    <div className={cn(
-                      "w-9 h-9 rounded-xl flex items-center justify-center",
-                      item.ok ? "bg-emerald-100 text-emerald-600" : "bg-[#f4f4f5] text-[#ccc]"
-                    )}>
-                      <Icon size={16} />
-                    </div>
-                    <span className={cn("font-nunito text-sm flex-1", item.ok ? "text-[#1c1c1c]" : "text-[#999]")}>
-                      {item.label}
-                    </span>
-                    {item.ok ? (
-                      <CheckCircle size={16} className="text-emerald-500" />
-                    ) : (
-                      <Clock size={16} className="text-[#ddd]" />
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-
-          {isApproved && (
-            <div className="bg-gradient-to-br from-primary to-primary-dark rounded-xl p-5 text-white shadow-md">
-              <Star size={20} className="text-secondary mb-2" />
-              <p className="font-poppins font-semibold text-sm">You&apos;re live!</p>
-              <p className="font-nunito text-xs text-white/70 mt-1 leading-relaxed">
-                Customers can discover your kitchen. Add menu items and upload your logo to stand out.
-              </p>
-              <button
-                onClick={() => navigate("/kitchen/menu")}
-                className="mt-4 w-full py-2.5 bg-white text-primary rounded-xl font-poppins font-semibold text-xs hover:bg-white/90 cursor-pointer transition-colors"
-              >
-                {menuCount === 0 ? "Add Menu Items" : "Manage Menu"}
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
+      )}
     </KitchenLayout>
-  )
-}
-
-function Detail({ label, value }) {
-  return (
-    <div>
-      <p className="font-nunito text-[11px] text-[#999] uppercase tracking-wide">{label}</p>
-      <div className="font-nunito text-sm text-[#1c1c1c] mt-0.5">{value || "—"}</div>
-    </div>
   )
 }

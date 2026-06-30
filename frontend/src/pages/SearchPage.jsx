@@ -13,7 +13,6 @@ import { cn } from "../lib/utils"
 
 const filters = [
   { id: "all", label: "All" },
-  { id: "hygiene", label: "Hygiene Verified" },
   { id: "rating", label: "Top Rated" },
   { id: "veg", label: "Pure Veg" },
   { id: "ration", label: "Ration" },
@@ -44,8 +43,6 @@ function matchesQuery(kitchen, query) {
 
 function matchesFilter(kitchen, filterId) {
   switch (filterId) {
-    case "hygiene":
-      return kitchen.hygieneVerified
     case "rating":
       return kitchen.rating >= 4.5
     case "veg":

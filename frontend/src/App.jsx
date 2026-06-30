@@ -23,9 +23,13 @@ import KitchenSignupPage from "./pages/kitchen/KitchenSignupPage"
 import KitchenDashboardPage from "./pages/kitchen/KitchenDashboardPage"
 import KitchenMenuPage from "./pages/kitchen/KitchenMenuPage"
 import KitchenProfilePage from "./pages/kitchen/KitchenProfilePage"
+import KitchenBulkEnquiriesPage from "./pages/kitchen/KitchenBulkEnquiriesPage"
 import AdminLoginPage from "./pages/admin/AdminLoginPage"
 import AdminDashboardPage from "./pages/admin/AdminDashboardPage"
 import AdminFeaturedKitchensPage from "./pages/admin/AdminFeaturedKitchensPage"
+import AdminCustomersPage from "./pages/admin/AdminCustomersPage"
+import AdminAlertsPage from "./pages/admin/AdminAlertsPage"
+import AdminMenuPage from "./pages/admin/AdminMenuPage"
 
 const pagesWithBottomNav = ["/home", "/search", "/stories", "/orders", "/profile"]
 
@@ -69,6 +73,14 @@ function AppContent() {
             element={
               <ProtectedRoute role="kitchen">
                 <KitchenProfilePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/kitchen/enquiries"
+            element={
+              <ProtectedRoute role="kitchen">
+                <KitchenBulkEnquiriesPage />
               </ProtectedRoute>
             }
           />
@@ -133,10 +145,34 @@ function AppContent() {
             }
           />
           <Route
+            path="/admin/alerts"
+            element={
+              <ProtectedRoute role="admin">
+                <AdminAlertsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/menu"
+            element={
+              <ProtectedRoute role="admin">
+                <AdminMenuPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/admin/featured"
             element={
               <ProtectedRoute role="admin">
                 <AdminFeaturedKitchensPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/customers"
+            element={
+              <ProtectedRoute role="admin">
+                <AdminCustomersPage />
               </ProtectedRoute>
             }
           />
