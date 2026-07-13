@@ -414,7 +414,7 @@ router.post("/kitchen/register", (req, res) => {
 
       const hash = await bcrypt.hash(password, 10)
       const [userResult] = await connection.query(
-        "INSERT INTO users (role, name, email, phone, password_hash) VALUES ('kitchen', ?, ?, ?, ?)",
+        "INSERT INTO users (role, name, email, phone, password_hash, phone_verified) VALUES ('kitchen', ?, ?, ?, ?, 0)",
         [ownerName, email, phone, hash]
       )
 
@@ -475,6 +475,26 @@ router.post("/kitchen/login", async (req, res) => {
       return res.status(401).json({ message: "Invalid email or password" })
     }
 
+    if (!user.phone_verified) {
+      const phone = user.phone
+      const phoneError = phone ? validateIndianPhone(phone) : "No phone number on account"
+      if (phoneError) {
+        return res.status(400).json({ message: phoneError })
+      }
+
+      await createAndSendOtp(`login:${user.id}`, phone)
+
+      const payload = {
+        requiresOtp: true,
+        message: "OTP sent to your registered phone number",
+        phoneHint: `******${phone.slice(-4)}`,
+      }
+      const demoOtp = getDemoOtp()
+      if (demoOtp) payload.demoOtp = demoOtp
+
+      return res.json(payload)
+    }
+
     const token = signToken({ id: user.id, role: "kitchen", kitchenId: user.kitchen_id })
 
     res.json({
@@ -485,6 +505,56 @@ router.post("/kitchen/login", async (req, res) => {
     })
   } catch (error) {
     console.error("Kitchen login error:", error)
+    res.status(500).json({ message: "Login failed" })
+  }
+})
+
+router.post("/kitchen/login/verify-otp", async (req, res) => {
+  const email = req.body.email?.toString().trim().toLowerCase()
+  const password = req.body.password?.toString() || ""
+  const otp = req.body.otp?.toString().trim()
+
+  if (!email || !password) {
+    return res.status(400).json({ message: "Email and password are required" })
+  }
+  if (!otp || otp.length !== 4) {
+    return res.status(400).json({ message: "Enter the 4-digit OTP" })
+  }
+
+  try {
+    const [users] = await pool.query(
+      "SELECT u.*, k.id AS kitchen_id, k.name AS kitchen_name, k.status AS kitchen_status FROM users u LEFT JOIN kitchens k ON k.user_id = u.id WHERE u.email = ? AND u.role = 'kitchen'",
+      [email]
+    )
+
+    if (users.length === 0) {
+      return res.status(401).json({ message: "Invalid email or password" })
+    }
+
+    const user = users[0]
+    const valid = await bcrypt.compare(password, user.password_hash)
+    if (!valid) {
+      return res.status(401).json({ message: "Invalid email or password" })
+    }
+
+    if (!checkOtp(`login:${user.id}`, otp)) {
+      return res.status(401).json({ message: "Invalid or expired OTP" })
+    }
+
+    consumeOtp(`login:${user.id}`)
+    await pool.query("UPDATE users SET phone_verified = 1 WHERE id = ?", [user.id])
+    user.phone_verified = 1
+
+    const token = signToken({ id: user.id, role: "kitchen", kitchenId: user.kitchen_id })
+
+    res.json({
+      message: "Login successful",
+      token,
+      user: { id: user.id, name: user.name, email: user.email, phone: user.phone, role: "kitchen" },
+      kitchen: { id: user.kitchen_id, name: user.kitchen_name, status: user.kitchen_status },
+    })
+  } catch (error) {
+    console.error("Kitchen login verify OTP error:", error)
     res.status(500).json({ message: "Login failed" })
   }
 })

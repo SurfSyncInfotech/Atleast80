@@ -292,14 +292,51 @@ router.patch("/me", authRequired, requireRole("kitchen"), async (req, res) => {
   }
 })
 
+router.patch("/me/status", authRequired, requireRole("kitchen"), async (req, res) => {
+  const { isActive, isFreshFoodActive, isGroceryActive } = req.body
+
+  try {
+    const [result] = await pool.query(
+      `UPDATE kitchens 
+       SET 
+         is_active = COALESCE(?, is_active), 
+         is_fresh_food_active = COALESCE(?, is_fresh_food_active), 
+         is_grocery_active = COALESCE(?, is_grocery_active) 
+       WHERE user_id = ?`,
+      [
+        isActive !== undefined ? (isActive ? 1 : 0) : null,
+        isFreshFoodActive !== undefined ? (isFreshFoodActive ? 1 : 0) : null,
+        isGroceryActive !== undefined ? (isGroceryActive ? 1 : 0) : null,
+        req.user.id
+      ]
+    )
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "Kitchen not found" })
+    }
+
+    const [rows] = await pool.query(
+      `SELECT k.*, u.name AS user_name, u.email AS user_email
+       FROM kitchens k JOIN users u ON u.id = k.user_id WHERE k.user_id = ?`,
+      [req.user.id]
+    )
+
+    res.json({ message: "Status updated successfully", kitchen: formatKitchen(rows[0]) })
+  } catch (error) {
+    console.error("Kitchen status update error:", error)
+    res.status(500).json({ message: "Failed to update status" })
+  }
+})
+
+
 router.get("/featured", async (_req, res) => {
   try {
     const [rows] = await pool.query(
       `SELECT k.id, k.name, k.owner_name, k.speciality, k.image, k.cover_image, k.rating, k.delivery_time,
-              k.hygiene_score, k.offer, k.best_item, k.city, k.state, k.kitchen_type, k.status, k.is_featured, k.featured_order, k.reviewed_at, k.visibility_status,
+              k.hygiene_score, k.offer, k.best_item, k.city, k.state, k.kitchen_type, k.status, k.is_featured, k.featured_order, k.reviewed_at, k.visibility_status, k.is_active,
               ${SQL_RATING_COUNT}
        FROM kitchens k
-       WHERE k.status = 'approved' AND k.is_featured = 1
+       WHERE k.status = 'approved' AND k.is_active = 1 AND k.is_featured = 1
        ORDER BY k.featured_order ASC, k.submitted_at DESC`
     )
     const visible = []
@@ -317,10 +354,10 @@ router.get("/", async (_req, res) => {
   try {
     const [rows] = await pool.query(
       `SELECT k.id, k.name, k.owner_name, k.speciality, k.image, k.cover_image, k.rating, k.delivery_time,
-              k.hygiene_score, k.offer, k.best_item, k.city, k.state, k.kitchen_type, k.status, k.reviewed_at, k.visibility_status,
+              k.hygiene_score, k.offer, k.best_item, k.city, k.state, k.kitchen_type, k.status, k.reviewed_at, k.visibility_status, k.is_active,
               ${SQL_RATING_COUNT}
        FROM kitchens k
-       WHERE k.status = 'approved'
+       WHERE k.status = 'approved' AND k.is_active = 1
        ORDER BY k.submitted_at DESC`
     )
     const visible = []
@@ -338,10 +375,10 @@ router.get("/:id", async (req, res) => {
   try {
     const [rows] = await pool.query(
       `SELECT k.id, k.name, k.owner_name, k.speciality, k.description, k.image, k.rating,
-              k.delivery_time, k.hygiene_score, k.offer, k.best_item, k.city, k.status, k.reviewed_at, k.visibility_status,
+              k.delivery_time, k.hygiene_score, k.offer, k.best_item, k.city, k.status, k.reviewed_at, k.visibility_status, k.is_active,
               ${SQL_RATING_COUNT}
        FROM kitchens k
-       WHERE k.id = ? AND k.status = 'approved'`,
+       WHERE k.id = ? AND k.status = 'approved' AND k.is_active = 1`,
       [req.params.id]
     )
 

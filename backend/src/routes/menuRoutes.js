@@ -376,36 +376,32 @@ router.delete(
 
 
 router.get("/kitchen/:kitchenId", async (req, res) => {
-
   try {
-
     const [kitchen] = await pool.query(
-
-      "SELECT id FROM kitchens WHERE id = ? AND status = 'approved'",
-
+      "SELECT id, is_active, is_fresh_food_active, is_grocery_active FROM kitchens WHERE id = ? AND status = 'approved'",
       [req.params.kitchenId]
-
     )
 
-
-
-    if (kitchen.length === 0) {
-
+    if (kitchen.length === 0 || kitchen[0].is_active === 0) {
       return res.status(404).json({ message: "Kitchen not found" })
-
     }
 
+    const isFreshActive = kitchen[0].is_fresh_food_active === 1
+    const isGroceryActive = kitchen[0].is_grocery_active === 1
 
+    if (!isFreshActive && !isGroceryActive) {
+      return res.json({ items: [] })
+    }
 
-    const [items] = await pool.query(
+    let query = "SELECT * FROM menu_items WHERE kitchen_id = ? AND is_available = TRUE AND approval_status = 'approved'"
+    if (!isFreshActive) {
+      query += " AND category = 'grocery'"
+    } else if (!isGroceryActive) {
+      query += " AND category = 'food'"
+    }
+    query += " ORDER BY category, name"
 
-      "SELECT * FROM menu_items WHERE kitchen_id = ? AND is_available = TRUE AND approval_status = 'approved' ORDER BY category, name",
-
-      [req.params.kitchenId]
-
-    )
-
-
+    const [items] = await pool.query(query, [req.params.kitchenId])
 
     res.json({ items: items.map(formatMenuItem) })
 
@@ -426,8 +422,12 @@ router.get("/popular", async (req, res) => {
     const [items] = await pool.query(
       `SELECT m.*, k.name AS kitchen_name
        FROM menu_items m
-       INNER JOIN kitchens k ON k.id = m.kitchen_id AND k.status = 'approved'
+       INNER JOIN kitchens k ON k.id = m.kitchen_id AND k.status = 'approved' AND k.is_active = 1
        WHERE m.approval_status = 'approved' AND m.is_available = TRUE
+         AND (
+           (k.is_fresh_food_active = 1 AND m.category = 'food') OR
+           (k.is_grocery_active = 1 AND m.category = 'grocery')
+         )
        ORDER BY m.created_at DESC
        LIMIT ?`,
       [limit]

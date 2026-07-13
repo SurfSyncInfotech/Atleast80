@@ -80,6 +80,7 @@ export async function getHygieneCompliance(pool, kitchenId) {
 
 export async function isKitchenPubliclyVisible(pool, kitchen) {
   if (!kitchen || kitchen.status !== "approved") return false
+  if (kitchen.is_active === 0 || kitchen.is_active === false) return false
 
   const visibility = kitchen.visibility_status || "auto"
   if (visibility === "hidden") return false

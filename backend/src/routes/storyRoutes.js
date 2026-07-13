@@ -42,7 +42,7 @@ router.get("/", async (_req, res) => {
               k.name AS kitchen_name, k.image AS kitchen_image
        FROM kitchen_stories s
        JOIN kitchens k ON k.id = s.kitchen_id
-       WHERE k.status = 'approved' AND s.purpose = 'story'
+       WHERE k.status = 'approved' AND k.is_active = 1 AND s.purpose = 'story'
        ORDER BY s.created_at ASC`
     )
     res.json({ groups: groupStories(rows) })
