@@ -1,13 +1,12 @@
 import { useNavigate } from "react-router-dom"
-import { MapPin, Phone, Mail, MessageCircle, Clock, ArrowRight, Headphones } from "lucide-react"
+import { Phone, Mail, MessageCircle, Clock, ArrowRight, Headphones } from "lucide-react"
 import StaticPageLayout from "../components/layout/StaticPageLayout"
 import Button from "../components/ui/Button"
 
 const CONTACT = {
-  phone: "+91 97973 55255",
-  phoneHref: "tel:+919797355255",
-  email: "hello@atleast80.com",
-  address: "Hyderabad, India",
+  phone: "+91 40 3559 4439",
+  phoneHref: "tel:+914035594439",
+  email: "contact@elifelo.com",
 }
 
 const CHANNELS = [
@@ -27,14 +26,6 @@ const CHANNELS = [
     href: `mailto:${CONTACT.email}`,
     gradient: "from-primary to-primary-dark",
   },
-  {
-    icon: MapPin,
-    label: "Office",
-    hint: "Visit by appointment",
-    value: CONTACT.address,
-    href: null,
-    gradient: "from-amber-500 to-orange-600",
-  },
 ]
 
 export default function ContactPage() {
@@ -47,7 +38,7 @@ export default function ContactPage() {
       subtitle="Whether you're placing an order, running a home kitchen, or exploring a partnership — reach out anytime during support hours."
     >
       {/* Contact channels */}
-      <div className="grid md:grid-cols-3 gap-4 md:gap-5 mb-10">
+      <div className="grid md:grid-cols-2 gap-4 md:gap-5 mb-10 max-w-3xl">
         {CHANNELS.map((ch) => {
           const Icon = ch.icon
           const inner = (

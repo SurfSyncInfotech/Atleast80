@@ -92,11 +92,10 @@ const SECTIONS = [
       <>
         <p>
           For privacy questions:{" "}
-          <a href="mailto:hello@atleast80.com" className="text-primary font-semibold hover:underline">hello@atleast80.com</a>
+          <a href="mailto:contact@elifelo.com" className="text-primary font-semibold hover:underline">contact@elifelo.com</a>
           {" · "}
-          <a href="tel:+919797355255" className="text-primary font-semibold hover:underline">+91 97973 55255</a>
+          <a href="tel:+914035594439" className="text-primary font-semibold hover:underline">+91 40 3559 4439</a>
         </p>
-        <p>Atleast80, Hyderabad, India</p>
       </>
     ),
   },

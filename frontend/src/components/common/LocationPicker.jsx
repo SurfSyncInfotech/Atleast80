@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react"
 import { MapPin } from "lucide-react"
 import StateCitySelect from "./StateCitySelect"
-import { useLocationPreference, getLocationPreference } from "../../lib/locationPreference"
+import { useLocationPreference, getLocationPreference, useAutoDetectLocation } from "../../lib/locationPreference"
 import { cn } from "../../lib/utils"
 
 export default function LocationPicker({ transparent = false, className }) {
   const { state, city, setLocation, label } = useLocationPreference()
+  const { detecting } = useAutoDetectLocation()
   const [open, setOpen] = useState(false)
   const rootRef = useRef(null)
 
@@ -20,7 +21,7 @@ export default function LocationPicker({ transparent = false, className }) {
     return () => document.removeEventListener("mousedown", onClickOutside)
   }, [open])
 
-  const display = label || "Select location"
+  const display = detecting ? "Detecting..." : label || "Select location"
 
   return (
     <div ref={rootRef} className={cn("relative", className)}>
@@ -55,6 +56,7 @@ export default function LocationPicker({ transparent = false, className }) {
             state={state}
             city={city}
             variant="light"
+            disabled={detecting}
             onStateChange={(value) => setLocation(value, "")}
             onCityChange={(value) => {
               const current = getLocationPreference()

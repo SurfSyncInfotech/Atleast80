@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom"
-import { MapPin, Phone, Mail, ArrowRight } from "lucide-react"
+import { Phone, Mail, ArrowRight } from "lucide-react"
 
 export default function Footer() {
   const navigate = useNavigate()
@@ -35,14 +35,11 @@ export default function Footer() {
               Trusted homemade food and essentials delivered from verified local home kitchens.
             </p>
             <div className="mt-5 space-y-2.5">
-              <p className="flex items-center gap-2 text-sm text-white/50">
-                <MapPin size={14} className="text-secondary flex-shrink-0" /> Hyderabad
-              </p>
-              <a href="tel:+919797355255" className="flex items-center gap-2 text-sm text-white/50 hover:text-secondary transition-colors">
-                <Phone size={14} className="text-secondary flex-shrink-0" /> +91 97973 55255
+              <a href="tel:+914035594439" className="flex items-center gap-2 text-sm text-white/50 hover:text-secondary transition-colors">
+                <Phone size={14} className="text-secondary flex-shrink-0" /> +91 40 3559 4439
               </a>
-              <a href="mailto:hello@atleast80.com" className="flex items-center gap-2 text-sm text-white/50 hover:text-secondary transition-colors">
-                <Mail size={14} className="text-secondary flex-shrink-0" /> hello@atleast80.com
+              <a href="mailto:contact@elifelo.com" className="flex items-center gap-2 text-sm text-white/50 hover:text-secondary transition-colors">
+                <Mail size={14} className="text-secondary flex-shrink-0" /> contact@elifelo.com
               </a>
             </div>
           </div>
