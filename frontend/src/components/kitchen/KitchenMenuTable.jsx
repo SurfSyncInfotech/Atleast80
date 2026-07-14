@@ -131,9 +131,14 @@ export default function KitchenMenuTable({
                       <button
                         type="button"
                         onClick={() => onToggleAvailability(item)}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-[#e8e8e8] text-[#363636] text-[11px] font-poppins font-semibold hover:bg-[#fafafa] cursor-pointer"
+                        className={cn(
+                          "inline-flex items-center gap-1 px-2 py-1 rounded-md border text-[11px] font-poppins font-semibold cursor-pointer transition-colors",
+                          item.is_available
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                            : "border-gray-200 bg-gray-50 text-gray-500 hover:bg-gray-100"
+                        )}
                       >
-                        {item.is_available ? "Disable" : "Enable"}
+                        {item.is_available ? "Active" : "Inactive"}
                       </button>
                     )}
                     <button

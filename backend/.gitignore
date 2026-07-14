@@ -3,3 +3,5 @@ node_modules/
 *.log
 uploads/menu/*
 !uploads/menu/.gitkeep
+*.apk
+.codex_ref_frames/

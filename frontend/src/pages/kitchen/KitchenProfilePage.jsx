@@ -49,9 +49,38 @@ function kitchenToForm(kitchen) {
   }
 }
 
+function ToggleSwitch({ label, description, checked, onChange, disabled }) {
+  return (
+    <div className="flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-100">
+      <div className="flex-1 pr-4">
+        <h3 className="font-poppins font-bold text-sm text-[#1c1c1c]">{label}</h3>
+        <p className="font-nunito text-[#696969] text-[11px] mt-1">{description}</p>
+      </div>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange(!checked)}
+        className={cn(
+          "w-11 h-6 flex items-center rounded-full p-0.5 transition-colors duration-200 focus:outline-none flex-shrink-0 cursor-pointer",
+          checked ? "bg-primary" : "bg-gray-300",
+          disabled && "opacity-50 cursor-not-allowed"
+        )}
+      >
+        <div
+          className={cn(
+            "bg-white w-5 h-5 rounded-full shadow-md transform transition-transform duration-200",
+            checked ? "translate-x-5" : "translate-x-0"
+          )}
+        />
+      </button>
+    </div>
+  )
+}
+
 export default function KitchenProfilePage() {
   const { kitchen, refreshKitchen } = useAuth()
   const [form, setForm] = useState(null)
+  const [updatingStatus, setUpdatingStatus] = useState(false)
   const [step, setStep] = useState(1)
   const [saving, setSaving] = useState(false)
   const [uploadingLogo, setUploadingLogo] = useState(false)
@@ -66,6 +95,29 @@ export default function KitchenProfilePage() {
   useEffect(() => {
     if (kitchen) setForm(kitchenToForm(kitchen))
   }, [kitchen])
+
+  const handleStatusToggle = async (field, value) => {
+    setUpdatingStatus(true)
+    setError("")
+    setSuccess("")
+    try {
+      const payload = {}
+      if (field === "is_active") payload.isActive = value
+      if (field === "is_fresh_food_active") payload.isFreshFoodActive = value
+      if (field === "is_grocery_active") payload.isGroceryActive = value
+
+      await api("/api/kitchens/me/status", {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      })
+      await refreshKitchen()
+      setSuccess("Visibility settings updated successfully")
+    } catch (err) {
+      setError(err.message || "Failed to update visibility settings")
+    } finally {
+      setUpdatingStatus(false)
+    }
+  }
 
   const update = (field) => (e) => {
     setForm((prev) => ({ ...prev, [field]: e.target.value }))
@@ -209,7 +261,38 @@ export default function KitchenProfilePage() {
 
   return (
     <KitchenLayout fullBleed>
-      <div className="w-full">
+      <div className="w-full space-y-6">
+        {/* Status and Visibility Toggles */}
+        <div className="bg-white w-full rounded-xl md:rounded-2xl border border-[#e8e8e8] shadow-sm overflow-hidden p-6">
+          <h2 className="font-poppins font-bold text-lg text-[#1c1c1c] mb-1">Shop Status & Visibility</h2>
+          <p className="font-nunito text-[#696969] text-xs mb-4">
+            Control whether your kitchen is open to customers, and what types of products are visible.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <ToggleSwitch
+              label="Shop Status"
+              description="Toggle whether your kitchen is active and open for orders."
+              checked={Boolean(kitchen?.is_active ?? true)}
+              onChange={(val) => handleStatusToggle("is_active", val)}
+              disabled={updatingStatus}
+            />
+            <ToggleSwitch
+              label="Fresh Food Delivery"
+              description="Show or hide your Fresh Food items (meals, thalis, etc.)."
+              checked={Boolean(kitchen?.is_fresh_food_active ?? true)}
+              onChange={(val) => handleStatusToggle("is_fresh_food_active", val)}
+              disabled={updatingStatus}
+            />
+            <ToggleSwitch
+              label="Grocery Delivery"
+              description="Show or hide your Grocery products."
+              checked={Boolean(kitchen?.is_grocery_active ?? true)}
+              onChange={(val) => handleStatusToggle("is_grocery_active", val)}
+              disabled={updatingStatus}
+            />
+          </div>
+        </div>
+
         <form onSubmit={handleSubmit} className="bg-white w-full rounded-xl md:rounded-2xl border border-[#e8e8e8] shadow-sm overflow-hidden flex flex-col">
           {/* Header */}
           <div className="px-4 py-4 border-b border-[#e8e8e8]">

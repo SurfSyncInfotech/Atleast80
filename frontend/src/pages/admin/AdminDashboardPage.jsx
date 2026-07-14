@@ -31,8 +31,8 @@ export default function AdminDashboardPage() {
   const [approveModal, setApproveModal] = useState(null)
   const [deleteModal, setDeleteModal] = useState(null)
 
-  const loadData = useCallback(async () => {
-    setLoading(true)
+  const loadData = useCallback(async (showSpinner = true) => {
+    if (showSpinner) setLoading(true)
     try {
       const params = new URLSearchParams({
         page: String(page),
@@ -52,11 +52,20 @@ export default function AdminDashboardPage() {
     } catch (err) {
       console.error(err)
     } finally {
-      setLoading(false)
+      if (showSpinner) setLoading(false)
     }
   }, [filter, search, cityFilter, page, pageSize])
 
-  useEffect(() => { loadData() }, [loadData])
+  useEffect(() => {
+    loadData(true)
+  }, [loadData])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadData(false)
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [loadData])
 
   useEffect(() => {
     api("/api/admin/kitchens/cities").then((d) => setCities(d.cities)).catch(() => {})

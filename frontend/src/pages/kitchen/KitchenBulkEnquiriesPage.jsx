@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { MessageSquare, IndianRupee, FileText, Loader2, Upload, Trash2 } from "lucide-react"
+import { MessageSquare, IndianRupee, FileText, Loader2, Upload, Trash2, AlertTriangle } from "lucide-react"
 import KitchenLayout from "../../components/layout/KitchenLayout"
 import { api } from "../../lib/api"
 import { resolveMediaUrl } from "../../lib/media"
@@ -14,6 +14,7 @@ export default function KitchenBulkEnquiriesPage() {
   const [deletingId, setDeletingId] = useState(null)
   const [forms, setForms] = useState({})
   const [error, setError] = useState("")
+  const [confirmModal, setConfirmModal] = useState({ open: false, enquiryId: null })
 
   const load = () => {
     setLoading(true)
@@ -67,9 +68,13 @@ export default function KitchenBulkEnquiriesPage() {
     }
   }
 
-  const handleDeleteQuotation = async (enquiryId) => {
-    if (!window.confirm("Delete this quotation? The enquiry will move back to pending.")) return
+  const handleDeleteQuotation = (enquiryId) => {
+    setConfirmModal({ open: true, enquiryId })
+  }
 
+  const handleConfirmDelete = async () => {
+    const enquiryId = confirmModal.enquiryId
+    setConfirmModal({ open: false, enquiryId: null })
     setDeletingId(enquiryId)
     setError("")
     try {
@@ -86,6 +91,7 @@ export default function KitchenBulkEnquiriesPage() {
   const quoted = enquiries.filter((e) => e.status === "quoted")
 
   return (
+    <>
     <KitchenLayout fullBleed>
       <div className="w-full">
         <div className="mb-6">
@@ -157,6 +163,55 @@ export default function KitchenBulkEnquiriesPage() {
         )}
       </div>
     </KitchenLayout>
+
+    {/* Custom Delete Confirm Modal */}
+    {confirmModal.open && (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        style={{ backgroundColor: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }}
+      >
+        <div
+          className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6"
+          style={{ animation: "fadeInScale 0.18s ease-out" }}
+        >
+          {/* Icon */}
+          <div className="flex justify-center mb-4">
+            <div className="w-14 h-14 rounded-full bg-red-50 flex items-center justify-center">
+              <AlertTriangle size={28} className="text-red-500" />
+            </div>
+          </div>
+
+          {/* Text */}
+          <h3 className="font-poppins font-bold text-lg text-dark text-center mb-2">
+            Delete Quotation?
+          </h3>
+          <p className="font-nunito text-sm text-gray text-center leading-relaxed mb-6">
+            This quotation will be permanently deleted and the enquiry will move back to{" "}
+            <span className="font-semibold text-dark">Pending</span> status.
+          </p>
+
+          {/* Buttons */}
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => setConfirmModal({ open: false, enquiryId: null })}
+              className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 font-poppins font-semibold text-sm text-gray hover:bg-gray-50 transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmDelete}
+              className="flex-1 px-4 py-2.5 rounded-xl bg-red-500 text-white font-poppins font-semibold text-sm hover:bg-red-600 transition-colors flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Trash2 size={15} />
+              Yes, Delete
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+  </>
   )
 }
 
