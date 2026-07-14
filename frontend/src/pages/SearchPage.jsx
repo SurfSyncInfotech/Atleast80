@@ -8,6 +8,7 @@ import KitchenCard from "../components/common/KitchenCard"
 import Chip from "../components/common/Chip"
 import { api } from "../lib/api"
 import { toKitchenCard } from "../lib/kitchen"
+import { useAutoDetectLocation } from "../lib/locationPreference"
 import { kitchens as mockKitchens } from "../data/mockData"
 import { cn } from "../lib/utils"
 
@@ -74,6 +75,7 @@ function sortKitchens(list, sortId) {
 
 export default function SearchPage() {
   const navigate = useNavigate()
+  useAutoDetectLocation()
   const [kitchens, setKitchens] = useState([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState("")

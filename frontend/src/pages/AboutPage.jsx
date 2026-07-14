@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom"
 import { motion } from "framer-motion"
 import {
   ArrowRight, ShieldCheck, Home, Heart, Users, Leaf,
-  ShoppingCart, ChefHat, MapPin, Mail, Phone, Sparkles, CheckCircle2,
+  ShoppingCart, ChefHat, Mail, Phone, Sparkles, CheckCircle2,
 } from "lucide-react"
 import Navbar from "../components/layout/Navbar"
 import Footer from "../components/layout/Footer"
@@ -256,9 +256,8 @@ export default function AboutPage() {
               </p>
               <div className="mt-8 space-y-4">
                 {[
-                  { icon: MapPin, text: "Hyderabad, India" },
-                  { icon: Mail, text: "hello@atleast80.com" },
-                  { icon: Phone, text: "+91 97973 55255" },
+                  { icon: Mail, text: "contact@elifelo.com" },
+                  { icon: Phone, text: "+91 40 3559 4439" },
                 ].map(({ icon: Icon, text }) => (
                   <div key={text} className="flex items-center gap-3 text-dark">
                     <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">

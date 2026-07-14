@@ -54,17 +54,30 @@ export default function StateCitySelect({
       return
     }
 
+    let cancelled = false
+    setCities([])
     setLoadingCities(true)
     api(`/api/locations/cities?state=${encodeURIComponent(stateIso)}`)
-      .then((data) => setCities(data.cities || []))
-      .catch(() => setCities([]))
-      .finally(() => setLoadingCities(false))
+      .then((data) => {
+        if (!cancelled) setCities(data.cities || [])
+      })
+      .catch(() => {
+        if (!cancelled) setCities([])
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingCities(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
   }, [stateIso])
 
   const handleStateSelect = (e) => {
     const iso = e.target.value
     const selected = states.find((s) => s.iso2 === iso)
     setStateIso(iso)
+    setCities([])
     onStateChange(selected?.name || "")
     onCityChange("")
   }
@@ -110,7 +123,7 @@ export default function StateCitySelect({
                 : "Select city"}
             </option>
             {cities.map((c) => (
-              <option key={c.name} value={c.name}>
+              <option key={c.id || c.name} value={c.name}>
                 {c.name}
               </option>
             ))}
