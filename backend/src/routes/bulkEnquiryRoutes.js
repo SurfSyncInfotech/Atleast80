@@ -238,7 +238,7 @@ router.delete(
       if (rows[0].kitchen_id !== req.kitchenId) {
         return res.status(403).json({ message: "Not your enquiry" })
       }
-      if (rows[0].status !== "quoted") {
+      if (rows[0].status === "pending") {
         return res.status(400).json({ message: "No quotation to delete" })
       }
 
@@ -262,5 +262,135 @@ router.delete(
     }
   }
 )
+
+router.post("/:id/accept", authRequired, requireRole("customer"), async (req, res) => {
+  const enquiryId = Number(req.params.id)
+  if (!enquiryId) {
+    return res.status(400).json({ message: "Invalid enquiry" })
+  }
+
+  try {
+    const [rows] = await pool.query(
+      "SELECT id, customer_id, status FROM bulk_order_enquiries WHERE id = ?",
+      [enquiryId]
+    )
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "Enquiry not found" })
+    }
+    if (rows[0].customer_id !== req.user.id) {
+      return res.status(403).json({ message: "Not authorized to accept this quotation" })
+    }
+    if (rows[0].status !== "quoted" && rows[0].status !== "rejected") {
+      return res.status(400).json({ message: "No quotation to accept" })
+    }
+
+    await pool.query(
+      "UPDATE bulk_order_enquiries SET status = 'accepted' WHERE id = ?",
+      [enquiryId]
+    )
+
+    res.json({ message: "Quotation accepted successfully." })
+  } catch (error) {
+    console.error("Accept quotation error:", error)
+    res.status(500).json({ message: "Failed to accept quotation" })
+  }
+})
+
+router.post("/:id/reject", authRequired, requireRole("customer"), async (req, res) => {
+  const enquiryId = Number(req.params.id)
+  if (!enquiryId) {
+    return res.status(400).json({ message: "Invalid enquiry" })
+  }
+
+  try {
+    const [rows] = await pool.query(
+      "SELECT id, customer_id, status FROM bulk_order_enquiries WHERE id = ?",
+      [enquiryId]
+    )
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "Enquiry not found" })
+    }
+    if (rows[0].customer_id !== req.user.id) {
+      return res.status(403).json({ message: "Not authorized to reject this quotation" })
+    }
+    if (rows[0].status !== "quoted" && rows[0].status !== "accepted") {
+      return res.status(400).json({ message: "No quotation to reject" })
+    }
+
+    await pool.query(
+      "UPDATE bulk_order_enquiries SET status = 'rejected' WHERE id = ?",
+      [enquiryId]
+    )
+
+    res.json({ message: "Quotation rejected successfully." })
+  } catch (error) {
+    console.error("Reject quotation error:", error)
+    res.status(500).json({ message: "Failed to reject quotation" })
+  }
+})
+
+router.post("/:id/pay", authRequired, requireRole("customer"), async (req, res) => {
+  const enquiryId = Number(req.params.id)
+  if (!enquiryId) {
+    return res.status(400).json({ message: "Invalid enquiry" })
+  }
+
+  try {
+    const [rows] = await pool.query(
+      "SELECT id, customer_id, status FROM bulk_order_enquiries WHERE id = ?",
+      [enquiryId]
+    )
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "Enquiry not found" })
+    }
+    if (rows[0].customer_id !== req.user.id) {
+      return res.status(403).json({ message: "Not authorized to pay for this quotation" })
+    }
+    if (rows[0].status !== "accepted") {
+      return res.status(400).json({ message: "Quotation must be accepted before payment" })
+    }
+
+    await pool.query(
+      "UPDATE bulk_order_enquiries SET status = 'completed' WHERE id = ?",
+      [enquiryId]
+    )
+
+    res.json({ message: "Payment successful. Order placed." })
+  } catch (error) {
+    console.error("Pay quotation error:", error)
+    res.status(500).json({ message: "Failed to process payment" })
+  }
+})
+
+router.delete("/:id", authRequired, requireRole("customer"), async (req, res) => {
+  const enquiryId = Number(req.params.id)
+  if (!enquiryId) {
+    return res.status(400).json({ message: "Invalid enquiry" })
+  }
+
+  try {
+    const [rows] = await pool.query(
+      "SELECT id, customer_id, quotation_file FROM bulk_order_enquiries WHERE id = ?",
+      [enquiryId]
+    )
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "Enquiry not found" })
+    }
+    if (rows[0].customer_id !== req.user.id) {
+      return res.status(403).json({ message: "Not authorized to delete this enquiry" })
+    }
+
+    // Delete quotation file if any
+    deleteQuotationFile(rows[0].quotation_file)
+
+    // Delete enquiry
+    await pool.query("DELETE FROM bulk_order_enquiries WHERE id = ?", [enquiryId])
+
+    res.json({ message: "Enquiry deleted successfully." })
+  } catch (error) {
+    console.error("Delete enquiry error:", error)
+    res.status(500).json({ message: "Failed to delete enquiry" })
+  }
+})
 
 export default router

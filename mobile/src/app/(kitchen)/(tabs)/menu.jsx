@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context"
 import {
   Plus,
+  Minus,
   Trash2,
   Edit2,
   UtensilsCrossed,
@@ -41,6 +42,8 @@ const emptyForm = {
   price: "",
   category: "food",
   itemType: "veg",
+  isCombo: false,
+  comboItems: [],
 }
 
 const MAX_IMAGES = 8
@@ -202,6 +205,11 @@ export default function KitchenMenuScreen() {
       price: String(item.price),
       category: item.category,
       itemType: item.item_type || "veg",
+      isCombo: Boolean(item.is_combo),
+      comboItems: (item.comboItems || []).map((ci) => ({
+        id: ci.id,
+        quantity: ci.quantity || 1,
+      })),
     })
     
     // Media urls are resolved, clean them before saving or keep as is (backend handles it)
@@ -306,6 +314,8 @@ export default function KitchenMenuScreen() {
         images,
         videos,
         image: images[0] || null,
+        isCombo: form.isCombo,
+        items: form.isCombo ? form.comboItems : [],
       }
 
       if (editingId) {
@@ -482,6 +492,13 @@ export default function KitchenMenuScreen() {
                       </View>
                     )}
                     <View className="absolute top-1 left-1 flex-col gap-0.5">
+                      {Boolean(item.is_combo || item.isCombo) && (
+                        <View className="bg-amber-500 px-1.5 py-0.5 rounded-full border border-amber-600/20">
+                          <Text className="text-[8px] font-poppins font-bold text-white uppercase">
+                            Combo
+                          </Text>
+                        </View>
+                      )}
                       <View className="bg-white/90 px-1.5 py-0.5 rounded-full border border-gray-light/20">
                         <Text className="text-[8px] font-poppins font-bold text-dark capitalize">
                           {item.category}
@@ -669,10 +686,10 @@ export default function KitchenMenuScreen() {
                             className={cn(
                               "font-poppins font-bold text-xs capitalize",
                               isSelected
-                                ? t === "veg"
-                                  ? "text-emerald-700"
-                                  : "text-red-700"
-                                : "text-gray"
+                               ? t === "veg"
+                                 ? "text-emerald-700"
+                                 : "text-red-700"
+                               : "text-gray"
                             )}
                           >
                             {t === "veg" ? "Veg" : "Non-Veg"}
@@ -682,6 +699,123 @@ export default function KitchenMenuScreen() {
                     })}
                   </View>
                 </View>
+
+                {/* Combo Toggle */}
+                <View className="mb-4 flex-row items-center justify-between bg-cream/35 p-3.5 rounded-xl border border-gray-light/50">
+                  <View className="flex-1 mr-2">
+                    <Text className="font-poppins text-xs font-bold text-dark">Is this a Combo?</Text>
+                    <Text className="font-nunito text-[10px] text-gray mt-0.5">Combine multiple items into a single package</Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => setForm({ ...form, isCombo: !form.isCombo })}
+                    className={cn(
+                      "w-12 h-6.5 rounded-full p-0.5 justify-center",
+                      form.isCombo ? "bg-primary items-end" : "bg-gray-300 items-start"
+                    )}
+                  >
+                    <View className="w-5.5 h-5.5 rounded-full bg-white shadow-sm" />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Combo Selector List */}
+                {form.isCombo && (
+                  <View className="mb-4">
+                    <Text className="font-poppins text-xs font-bold text-dark-light mb-2">
+                      Select items to include in this combo:
+                    </Text>
+                    {items.filter(i => i.id !== editingId && !i.is_combo && !i.isCombo).length === 0 ? (
+                      <View className="bg-cream/20 p-4 rounded-xl border border-dashed border-gray-light items-center">
+                        <Text className="font-nunito text-xs text-gray text-center">
+                          No selectable menu items found. Please add individual dishes first!
+                        </Text>
+                      </View>
+                    ) : (
+                      <View className="gap-2.5">
+                        {items
+                          .filter(i => i.id !== editingId && !i.is_combo && !i.isCombo)
+                          .map((selectable) => {
+                            const inCombo = form.comboItems.find((ci) => ci.id === selectable.id)
+                            const qty = inCombo ? inCombo.quantity : 0
+
+                            const handleToggleItem = () => {
+                              if (inCombo) {
+                                setForm({
+                                  ...form,
+                                  comboItems: form.comboItems.filter((ci) => ci.id !== selectable.id),
+                                })
+                              } else {
+                                setForm({
+                                  ...form,
+                                  comboItems: [...form.comboItems, { id: selectable.id, quantity: 1 }],
+                                })
+                              }
+                            }
+
+                            const handleUpdateQty = (amount) => {
+                              const newQty = qty + amount
+                              if (newQty <= 0) {
+                                setForm({
+                                  ...form,
+                                  comboItems: form.comboItems.filter((ci) => ci.id !== selectable.id),
+                                })
+                              } else {
+                                setForm({
+                                  ...form,
+                                  comboItems: form.comboItems.map((ci) =>
+                                    ci.id === selectable.id ? { ...ci, quantity: newQty } : ci
+                                  ),
+                                })
+                              }
+                            }
+
+                            return (
+                              <View
+                                key={selectable.id}
+                                className={cn(
+                                  "flex-row items-center justify-between p-3 rounded-xl border",
+                                  inCombo ? "border-primary bg-primary/5" : "border-gray-light bg-white"
+                                )}
+                              >
+                                <TouchableOpacity
+                                  onPress={handleToggleItem}
+                                  className="flex-1 flex-row items-center gap-2"
+                                >
+                                  <View
+                                    className={cn(
+                                      "w-4 h-4 rounded border flex items-center justify-center",
+                                      inCombo ? "border-primary bg-primary" : "border-gray"
+                                    )}
+                                  >
+                                    {inCombo && <View className="w-1.5 h-1.5 bg-white rounded-sm" />}
+                                  </View>
+                                  <Text className="font-nunito text-xs text-dark font-semibold flex-1" numberOfLines={1}>
+                                    {selectable.name}
+                                  </Text>
+                                  <Text className="font-poppins font-bold text-[10px] text-gray mr-2">
+                                    ₹{selectable.price}
+                                  </Text>
+                                </TouchableOpacity>
+
+                                {inCombo && (
+                                  <View className="flex-row items-center gap-2 bg-white border border-primary/20 rounded-lg px-1.5 py-0.5">
+                                    <TouchableOpacity onPress={() => handleUpdateQty(-1)} className="p-0.5">
+                                      <Minus size={10} color="#0B6B3A" strokeWidth={2.5} />
+                                    </TouchableOpacity>
+                                    <Text className="font-poppins font-bold text-primary text-xs min-w-[12] text-center mt-0.5">
+                                      {qty}
+                                    </Text>
+                                    <TouchableOpacity onPress={() => handleUpdateQty(1)} className="p-0.5">
+                                      <Plus size={10} color="#0B6B3A" strokeWidth={2.5} />
+                                    </TouchableOpacity>
+                                  </View>
+                                )}
+                              </View>
+                            )
+                          })}
+                      </View>
+                    )}
+                  </View>
+                )}
 
                 {/* Media Section: Photos */}
                 <View className="mb-4">

@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react"
-import { api, ApiError, registerKitchen as registerKitchenApi } from "../lib/api"
+import { api, ApiError, registerKitchen as registerKitchenApi, verifyRegisterOtp } from "../lib/api"
 import {
   initAuthStorage,
   writeStoredAuth,
@@ -48,10 +48,10 @@ export function AuthProvider({ children }) {
     [applySession]
   )
 
-  const loginKitchen = async (email, password) => {
+  const loginKitchen = async (identifier, password) => {
     const data = await api("/api/auth/kitchen/login", {
       method: "POST",
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ identifier, password }),
     })
     if (data.requiresOtp) {
       return data
@@ -60,18 +60,22 @@ export function AuthProvider({ children }) {
     return data
   }
 
-  const verifyKitchenLoginOtp = async (email, password, otp) => {
+  const verifyKitchenLoginOtp = async (identifier, password, otp) => {
     const data = await api("/api/auth/kitchen/login/verify-otp", {
       method: "POST",
-      body: JSON.stringify({ email, password, otp }),
+      body: JSON.stringify({ identifier, password, otp }),
     })
     await persist({ token: data.token, user: data.user, kitchen: data.kitchen })
     return data
   }
 
-  const registerKitchen = async (form, fssaiLicenseFile) => {
-    const data = await registerKitchenApi(form, fssaiLicenseFile)
-    await persist({ token: data.token, user: data.user, kitchen: data.kitchen })
+  const registerKitchen = async (form, fssaiLicenseFile, aadhaarCardFile, aadhaarCardBackFile, panCardFile) => {
+    const data = await registerKitchenApi(form, fssaiLicenseFile, aadhaarCardFile, aadhaarCardBackFile, panCardFile)
+    return data
+  }
+
+  const verifyKitchenRegisterOtp = async (userId, otp) => {
+    const data = await verifyRegisterOtp(userId, otp)
     return data
   }
 
@@ -230,6 +234,7 @@ export function AuthProvider({ children }) {
         loginKitchen,
         verifyKitchenLoginOtp,
         registerKitchen,
+        verifyKitchenRegisterOtp,
         loginAdmin,
         registerCustomer,
         signupCustomer,

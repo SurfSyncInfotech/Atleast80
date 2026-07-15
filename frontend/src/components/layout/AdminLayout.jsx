@@ -20,6 +20,8 @@ import {
 
   ShoppingBag,
 
+  Settings,
+
   LogOut,
 
   Menu,
@@ -51,6 +53,8 @@ const links = [
   { to: "/admin/alerts", label: "Alerts", icon: Bell },
 
   { to: "/admin/customers", label: "Customers", icon: Users },
+
+  { to: "/admin/settings", label: "Settings", icon: Settings },
 
 ]
 

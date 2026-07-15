@@ -168,6 +168,20 @@ export default function MenuItemDetailModal({ item, onClose }) {
               </Text>
             ) : null}
 
+            {Boolean(item.isCombo || item.is_combo) && item.comboItems && item.comboItems.length > 0 ? (
+              <View className="mt-4 bg-cream/35 border border-primary/10 rounded-xl p-4">
+                <Text className="font-poppins font-bold text-dark text-sm mb-2.5">Combo Includes:</Text>
+                <View className="gap-2">
+                  {item.comboItems.map((ci, idx) => (
+                    <View key={`combo-item-${idx}`} className="flex-row justify-between items-center bg-white px-3 py-2 rounded-lg border border-gray-100">
+                      <Text className="font-nunito text-xs text-dark font-semibold">{ci.name}</Text>
+                      <Text className="font-poppins font-bold text-xs text-primary bg-primary/10 px-2 py-0.5 rounded">Qty: {ci.quantity}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ) : null}
+
             {item.kitchen ? (
               <View className="mt-4 bg-gray-50 rounded-xl p-3 border border-gray-100 flex-row items-center justify-between">
                 <Text className="font-nunito text-xs text-gray-500 font-medium">Prepared fresh by</Text>

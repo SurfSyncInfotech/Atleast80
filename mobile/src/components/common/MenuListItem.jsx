@@ -59,7 +59,14 @@ export default function MenuListItem({ item, className, onOpen, variant = "list"
         {/* Content */}
         <View className="p-3 flex-1 flex-col justify-between">
           <View>
-            <View className="flex-row items-center mb-1">
+            <View className="flex-row items-center mb-1 gap-1">
+              {Boolean(item.is_combo || item.isCombo) && (
+                <View className="bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                  <Text className="text-[7.5px] font-poppins font-bold uppercase tracking-wider text-amber-700">
+                    Combo
+                  </Text>
+                </View>
+              )}
               {item.category === "grocery" ? (
                 <View className="bg-primary/5 px-1.5 py-0.5 rounded border border-primary/10">
                   <Text className="text-[7.5px] font-poppins font-bold uppercase tracking-wider text-primary">
@@ -145,6 +152,14 @@ export default function MenuListItem({ item, className, onOpen, variant = "list"
               className="w-2 h-2 rounded-full"
             />
           </View>
+
+          {Boolean(item.is_combo || item.isCombo) && (
+            <View className="bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
+              <Text className="text-[9px] font-poppins font-bold uppercase tracking-wider text-amber-700">
+                Combo
+              </Text>
+            </View>
+          )}
 
           {item.category === "grocery" ? (
             <View className="bg-primary/5 px-2 py-0.5 rounded-md border border-primary/10">

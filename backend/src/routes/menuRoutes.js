@@ -11,9 +11,24 @@ import { menuUpload, getPublicFileUrl, isImageMime, isVideoMime } from "../middl
 import { formatMenuItem, normalizeMediaPayload } from "../utils/menuItem.js"
 import { normalizePublicUrl } from "../utils/mediaUrl.js"
 
-
-
 const router = Router()
+
+async function populateComboItems(items) {
+  const formattedItems = items.map(formatMenuItem)
+  for (const item of formattedItems) {
+    if (item.is_combo) {
+      const [links] = await pool.query(
+        `SELECT ci.quantity, m.* 
+         FROM combo_items ci
+         INNER JOIN menu_items m ON m.id = ci.item_id
+         WHERE ci.combo_id = ?`,
+        [item.id]
+      )
+      item.comboItems = links.map(formatMenuItem)
+    }
+  }
+  return formattedItems
+}
 
 
 
@@ -89,7 +104,7 @@ router.get(
 
       )
 
-      res.json({ items: items.map(formatMenuItem) })
+      res.json({ items: await populateComboItems(items) })
 
     } catch (error) {
 
@@ -117,7 +132,7 @@ router.post(
 
   async (req, res) => {
 
-    const { name, description, price, category, itemType, offer } = req.body
+    const { name, description, price, category, itemType, offer, isCombo, items } = req.body
 
     const media = normalizeMediaPayload(req.body)
 
@@ -139,13 +154,19 @@ router.post(
 
 
 
+    const connection = await pool.getConnection()
+
     try {
 
-      const [result] = await pool.query(
+      await connection.beginTransaction()
 
-        `INSERT INTO menu_items (kitchen_id, name, description, price, offer, category, item_type, image, images, videos)
 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+
+      const [result] = await connection.query(
+
+        `INSERT INTO menu_items (kitchen_id, name, description, price, offer, category, item_type, image, images, videos, is_combo)
+
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 
         [
 
@@ -169,21 +190,59 @@ router.post(
 
           JSON.stringify(media.videos),
 
+          isCombo ? 1 : 0,
+
         ]
 
       )
 
 
 
-      const [items] = await pool.query("SELECT * FROM menu_items WHERE id = ?", [result.insertId])
+      const comboId = result.insertId
 
-      res.status(201).json({ message: "Menu item added", item: formatMenuItem(items[0]) })
+
+
+      if (isCombo && Array.isArray(items)) {
+
+        for (const item of items) {
+
+          await connection.query(
+
+            "INSERT INTO combo_items (combo_id, item_id, quantity) VALUES (?, ?, ?)",
+
+            [comboId, item.id, Number(item.quantity) || 1]
+
+          )
+
+        }
+
+      }
+
+
+
+      await connection.commit()
+
+
+
+      const [dbItems] = await pool.query("SELECT * FROM menu_items WHERE id = ?", [comboId])
+
+      const populated = await populateComboItems(dbItems)
+
+
+
+      res.status(201).json({ message: "Menu item added", item: populated[0] })
 
     } catch (error) {
+
+      await connection.rollback()
 
       console.error("Add menu item error:", error)
 
       res.status(500).json({ message: "Failed to add menu item" })
+
+    } finally {
+
+      connection.release()
 
     }
 
@@ -205,7 +264,7 @@ router.put(
 
   async (req, res) => {
 
-    const { name, description, price, category, itemType, isAvailable, offer } = req.body
+    const { name, description, price, category, itemType, isAvailable, offer, isCombo, items } = req.body
 
 
 
@@ -238,80 +297,150 @@ router.put(
 
 
       const nextOffer =
+
         offer !== undefined ? (offer?.trim() || null) : current.offer
 
+
+
       const contentChanged =
+
         (name !== undefined && name?.trim() !== current.name) ||
+
         (description !== undefined && (description?.trim() || null) !== (current.description || null)) ||
+
         (price !== undefined && Number(price) !== Number(current.price)) ||
+
         (category !== undefined && category !== current.category) ||
+
         (itemType !== undefined && itemType !== current.item_type) ||
+
         hasMediaUpdate
 
+
+
       const resetApproval =
+
         contentChanged && (existing[0].approval_status === "approved" || existing[0].approval_status === "rejected")
 
-      await pool.query(
 
-        `UPDATE menu_items SET
 
-          name = COALESCE(?, name),
+      const connection = await pool.getConnection()
 
-          description = COALESCE(?, description),
+      try {
 
-          price = COALESCE(?, price),
-
-          offer = ?,
-
-          category = COALESCE(?, category),
-
-          item_type = COALESCE(?, item_type),
-
-          image = ?,
-
-          images = ?,
-
-          videos = ?,
-
-          is_available = COALESCE(?, is_available)${resetApproval ? ", approval_status = 'pending', reviewed_at = NULL, reviewed_by = NULL, review_comment = NULL" : ""}
-
-         WHERE id = ? AND kitchen_id = ?`,
-
-        [
-
-          name?.trim(),
-
-          description?.trim(),
-
-          price !== undefined ? Number(price) : null,
-
-          nextOffer,
-
-          category,
-
-          itemType,
-
-          media.image,
-
-          JSON.stringify(media.images),
-
-          JSON.stringify(media.videos),
-
-          isAvailable !== undefined ? Boolean(isAvailable) : null,
-
-          req.params.id,
-
-          req.kitchenId,
-
-        ]
-
-      )
+        await connection.beginTransaction()
 
 
 
-      const [items] = await pool.query("SELECT * FROM menu_items WHERE id = ?", [req.params.id])
+        await connection.query(
 
-      res.json({ message: "Menu item updated", item: formatMenuItem(items[0]) })
+          `UPDATE menu_items SET
+
+            name = COALESCE(?, name),
+
+            description = COALESCE(?, description),
+
+            price = COALESCE(?, price),
+
+            offer = ?,
+
+            category = COALESCE(?, category),
+
+            item_type = COALESCE(?, item_type),
+
+            image = ?,
+
+            images = ?,
+
+            videos = ?,
+
+            is_available = COALESCE(?, is_available),
+
+            is_combo = COALESCE(?, is_combo)${resetApproval ? ", approval_status = 'pending', reviewed_at = NULL, reviewed_by = NULL, review_comment = NULL" : ""}
+
+           WHERE id = ? AND kitchen_id = ?`,
+
+          [
+
+            name?.trim(),
+
+            description?.trim(),
+
+            price !== undefined ? Number(price) : null,
+
+            nextOffer,
+
+            category,
+
+            itemType,
+
+            media.image,
+
+            JSON.stringify(media.images),
+
+            JSON.stringify(media.videos),
+
+            isAvailable !== undefined ? Boolean(isAvailable) : null,
+
+            isCombo !== undefined ? (isCombo ? 1 : 0) : null,
+
+            req.params.id,
+
+            req.kitchenId,
+
+          ]
+
+        )
+
+
+
+        if (isCombo !== undefined && Array.isArray(items)) {
+
+          await connection.query("DELETE FROM combo_items WHERE combo_id = ?", [req.params.id])
+
+          if (isCombo) {
+
+            for (const item of items) {
+
+              await connection.query(
+
+                "INSERT INTO combo_items (combo_id, item_id, quantity) VALUES (?, ?, ?)",
+
+                [req.params.id, item.id, Number(item.quantity) || 1]
+
+              )
+
+            }
+
+          }
+
+        }
+
+
+
+        await connection.commit()
+
+
+
+        const [dbItems] = await pool.query("SELECT * FROM menu_items WHERE id = ?", [req.params.id])
+
+        const populated = await populateComboItems(dbItems)
+
+
+
+        res.json({ message: "Menu item updated", item: populated[0] })
+
+      } catch (err) {
+
+        await connection.rollback()
+
+        throw err
+
+      } finally {
+
+        connection.release()
+
+      }
 
     } catch (error) {
 
@@ -403,7 +532,7 @@ router.get("/kitchen/:kitchenId", async (req, res) => {
 
     const [items] = await pool.query(query, [req.params.kitchenId])
 
-    res.json({ items: items.map(formatMenuItem) })
+    res.json({ items: await populateComboItems(items) })
 
   } catch (error) {
 
@@ -433,10 +562,11 @@ router.get("/popular", async (req, res) => {
       [limit]
     )
 
+    const populated = await populateComboItems(items)
     res.json({
-      items: items.map((row) => ({
-        ...formatMenuItem(row),
-        kitchen_name: row.kitchen_name,
+      items: populated.map((row, idx) => ({
+        ...row,
+        kitchen_name: items[idx].kitchen_name,
       })),
     })
   } catch (error) {

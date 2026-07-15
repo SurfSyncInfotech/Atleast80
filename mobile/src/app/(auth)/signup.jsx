@@ -292,7 +292,7 @@ export default function SignupPage() {
           >
             {/* Back Button */}
             <TouchableOpacity
-              onPress={() => router.back()}
+              onPress={() => router.canGoBack() ? router.back() : router.replace("/(customer)/home")}
               style={{
                 width: 40,
                 height: 40,

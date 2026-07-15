@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react"
 import { useLocation } from "react-router-dom"
-import { api, ApiError, registerKitchen as registerKitchenApi } from "../lib/api"
+import { api, ApiError, registerKitchen as registerKitchenApi, verifyRegisterOtp } from "../lib/api"
 import {
   inferRoleFromPath,
   readSessionForRole,
@@ -66,18 +66,36 @@ export function AuthProvider({ children }) {
     [applyRoleSession]
   )
 
-  const loginKitchen = async (email, password) => {
+  const loginKitchen = async (identifier, password) => {
     const data = await api("/api/auth/kitchen/login", {
       method: "POST",
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ identifier, password }),
+    }, "kitchen")
+
+    if (data.requiresOtp) {
+      return data
+    }
+
+    persistRole("kitchen", { token: data.token, user: data.user, kitchen: data.kitchen })
+    return data
+  }
+
+  const verifyKitchenLoginOtp = async (identifier, password, otp) => {
+    const data = await api("/api/auth/kitchen/login/verify-otp", {
+      method: "POST",
+      body: JSON.stringify({ identifier, password, otp }),
     }, "kitchen")
     persistRole("kitchen", { token: data.token, user: data.user, kitchen: data.kitchen })
     return data
   }
 
-  const registerKitchen = async (form, fssaiLicenseFile) => {
-    const data = await registerKitchenApi(form, fssaiLicenseFile)
-    persistRole("kitchen", { token: data.token, user: data.user, kitchen: data.kitchen })
+  const registerKitchen = async (form, fssaiLicenseFile, aadhaarCardFile, aadhaarCardBackFile, panCardFile) => {
+    const data = await registerKitchenApi(form, fssaiLicenseFile, aadhaarCardFile, aadhaarCardBackFile, panCardFile)
+    return data
+  }
+
+  const verifyKitchenRegisterOtp = async (userId, otp) => {
+    const data = await verifyRegisterOtp(userId, otp)
     return data
   }
 
@@ -234,7 +252,9 @@ export function AuthProvider({ children }) {
       isCustomer: Boolean(customerUser),
       isKitchen: Boolean(kitchenPartnerUser),
       loginKitchen,
+      verifyKitchenLoginOtp,
       registerKitchen,
+      verifyKitchenRegisterOtp,
       loginAdmin,
       registerCustomer,
       signupCustomer,
@@ -249,7 +269,7 @@ export function AuthProvider({ children }) {
       logoutKitchen,
       refreshKitchen,
     }),
-    [user, kitchen, customerUser, adminUser, kitchenPartnerUser, sessionReady, currentRole, logout, logoutCustomer, logoutAdmin, logoutKitchen, refreshKitchen]
+    [user, kitchen, customerUser, adminUser, kitchenPartnerUser, sessionReady, currentRole, logout, logoutCustomer, logoutAdmin, logoutKitchen, refreshKitchen, verifyKitchenRegisterOtp]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

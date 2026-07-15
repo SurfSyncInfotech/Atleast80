@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { View, Text, ScrollView, Image, TouchableOpacity, ActivityIndicator, Platform, Linking, Modal, TextInput, Pressable } from "react-native"
+import { View, Text, ScrollView, Image, TouchableOpacity, ActivityIndicator, Platform, Linking, Modal, TextInput, Pressable, Alert } from "react-native"
 import { useLocalSearchParams, useRouter } from "expo-router"
 import { SafeAreaView } from "react-native-safe-area-context"
 import { ArrowLeft, Star, ShieldCheck, Clock, Share2, MapPin, Phone, ShoppingCart, ChevronRight, UtensilsCrossed, ShoppingBag, Tag, Sparkles, X, ChefHat, ArrowRight, ClipboardList, CheckCircle } from "lucide-react-native"
@@ -7,6 +7,7 @@ import { LinearGradient } from "expo-linear-gradient"
 import MenuListItem from "../../../../components/common/MenuListItem"
 import MenuItemDetailModal from "../../../../components/common/MenuItemDetailModal"
 import { useCart } from "../../../../context/CartContext"
+import { useAuth } from "../../../../context/AuthContext"
 import { api } from "../../../../lib/api"
 import { resolveMenuItemMedia, resolveMediaUrl } from "../../../../lib/media"
 import { cn } from "../../../../lib/utils"
@@ -16,8 +17,17 @@ const KITCHEN_TYPE = { veg: "Pure Veg", non_veg: "Non-Veg", both: "Veg & Non-Veg
 const tabs = [
   { id: "food", label: "Food", icon: UtensilsCrossed },
   { id: "grocery", label: "Ration", icon: ShoppingBag },
+  { id: "combo", label: "Combo", icon: Sparkles },
   { id: "offers", label: "Offers", icon: Tag },
 ]
+
+function showAlert(title, message) {
+  if (Platform.OS === "web") {
+    window.alert(`${title}: ${message}`)
+  } else {
+    Alert.alert(title, message)
+  }
+}
 
 export default function KitchenDetailScreen() {
   const { id } = useLocalSearchParams()
@@ -38,6 +48,8 @@ export default function KitchenDetailScreen() {
   const [activeEnquiry, setActiveEnquiry] = useState(null)
   const [successModalVisible, setSuccessModalVisible] = useState(false)
 
+  const { user, loading: authLoading } = useAuth()
+
   useEffect(() => {
     if (!id) return
     let cancelled = false
@@ -45,16 +57,22 @@ export default function KitchenDetailScreen() {
     async function load() {
       setLoading(true)
       try {
+        const fetchEnquiry = (!authLoading && user)
+          ? api(`/api/bulk-enquiries/kitchen/${id}`).catch(() => null)
+          : Promise.resolve(null)
+
         const [kitchenRes, menuRes, enquiryRes] = await Promise.all([
           api(`/api/kitchens/${id}`),
           api(`/api/menu/kitchen/${id}`),
-          api(`/api/bulk-enquiries/kitchen/${id}`).catch(() => null),
+          fetchEnquiry,
         ])
 
         if (cancelled) return
 
         if (enquiryRes && enquiryRes.enquiry) {
           setActiveEnquiry(enquiryRes.enquiry)
+        } else {
+          setActiveEnquiry(null)
         }
 
         const k = kitchenRes.kitchen
@@ -96,16 +114,24 @@ export default function KitchenDetailScreen() {
             videos: item.videos,
             kitchen: k.name,
             kitchenId: k.id,
+            isCombo: item.isCombo || item.is_combo,
+            comboItems: item.comboItems || [],
           })
         )
         setMenu(mappedMenu)
 
         // Set default active tab dynamically based on availability
-        const hasFood = (mappedKitchen.isFreshFoodActive !== 0) && mappedMenu.some(item => item.category === "food")
-        const hasGrocery = (mappedKitchen.isGroceryActive !== 0) && mappedMenu.some(item => item.category === "grocery")
-        if (!hasFood && hasGrocery) {
+        const hasFood = (mappedKitchen.isFreshFoodActive !== 0) && mappedMenu.some(item => item.category === "food" && !(item.isCombo || item.is_combo))
+        const hasGrocery = (mappedKitchen.isGroceryActive !== 0) && mappedMenu.some(item => item.category === "grocery" && !(item.isCombo || item.is_combo))
+        const hasCombo = mappedMenu.some(item => item.isCombo || item.is_combo)
+
+        if (hasFood) {
+          setActiveTab("food")
+        } else if (hasGrocery) {
           setActiveTab("grocery")
-        } else if (!hasFood && !hasGrocery) {
+        } else if (hasCombo) {
+          setActiveTab("combo")
+        } else {
           setActiveTab("offers")
         }
       } catch (err) {
@@ -119,7 +145,7 @@ export default function KitchenDetailScreen() {
     return () => {
       cancelled = true
     }
-  }, [id])
+  }, [id, authLoading, user])
 
   const submitEnquiry = async () => {
     const val = Number(enquiryValue)
@@ -159,8 +185,108 @@ export default function KitchenDetailScreen() {
     }
   }
 
-  const foodItems = menu.filter((i) => i.category === "food")
-  const groceryItems = menu.filter((i) => i.category === "grocery")
+  const handleAcceptQuotation = async () => {
+    try {
+      await api(`/api/bulk-enquiries/${activeEnquiry.id}/accept`, {
+        method: "POST",
+      })
+      const updated = await api(`/api/bulk-enquiries/kitchen/${kitchen.id}`)
+      setActiveEnquiry(updated.enquiry)
+      showAlert("Success", "You have accepted the quotation.")
+    } catch (err) {
+      showAlert("Error", err.message || "Failed to accept quotation")
+    }
+  }
+
+  const handleRejectQuotation = async () => {
+    try {
+      await api(`/api/bulk-enquiries/${activeEnquiry.id}/reject`, {
+        method: "POST",
+      })
+      const updated = await api(`/api/bulk-enquiries/kitchen/${kitchen.id}`)
+      setActiveEnquiry(updated.enquiry)
+      showAlert("Success", "You have rejected the quotation. You can now coordinate with the seller.")
+    } catch (err) {
+      showAlert("Error", err.message || "Failed to reject quotation")
+    }
+  }
+
+  const handlePayQuotation = () => {
+    const processPayment = async () => {
+      try {
+        await api(`/api/bulk-enquiries/${activeEnquiry.id}/pay`, {
+          method: "POST",
+        })
+        const updated = await api(`/api/bulk-enquiries/kitchen/${kitchen.id}`)
+        setActiveEnquiry(updated.enquiry)
+        showAlert("Payment Success", "Thank you! Your payment for the bulk order is successful.")
+      } catch (err) {
+        showAlert("Error", err.message || "Failed to process payment")
+      }
+    }
+
+    if (Platform.OS === "web") {
+      const ok = window.confirm(`Proceed to pay ₹${activeEnquiry.quotationAmount} for bulk order enquiry #${activeEnquiry.id}?`)
+      if (ok) {
+        processPayment()
+      }
+    } else {
+      Alert.alert(
+        "Payment",
+        `Proceed to pay ₹${activeEnquiry.quotationAmount} for bulk order enquiry #${activeEnquiry.id}?`,
+        [
+          { text: "Cancel", style: "cancel" },
+          { 
+            text: "Pay Now", 
+            onPress: processPayment
+          }
+        ]
+      )
+    }
+  }
+
+  const handleChatWithSeller = () => {
+    if (kitchen.phone) {
+      const formattedPhone = kitchen.phone.replace(/[^0-9]/g, "")
+      const phoneWithCode = formattedPhone.length === 10 ? `91${formattedPhone}` : formattedPhone
+      Linking.openURL(`https://wa.me/${phoneWithCode}?text=Hello, I am contacting you regarding bulk order enquiry #${activeEnquiry.id}`)
+    } else {
+      showAlert("Not Available", "This kitchen does not have a contact number listed.")
+    }
+  }
+
+  const handleDeleteEnquiry = async () => {
+    const performDelete = async () => {
+      try {
+        await api(`/api/bulk-enquiries/${activeEnquiry.id}`, {
+          method: "DELETE",
+        })
+        setActiveEnquiry(null)
+        setEnquiryModalVisible(false)
+        showAlert("Success", "Your enquiry has been deleted.")
+      } catch (err) {
+        showAlert("Error", err.message || "Failed to delete enquiry")
+      }
+    }
+
+    if (Platform.OS === "web") {
+      const ok = window.confirm("Are you sure you want to delete this bulk order enquiry?")
+      if (ok) performDelete()
+    } else {
+      Alert.alert(
+        "Delete Enquiry",
+        "Are you sure you want to delete this bulk order enquiry?",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Delete", style: "destructive", onPress: performDelete }
+        ]
+      )
+    }
+  }
+
+  const foodItems = menu.filter((i) => i.category === "food" && !(i.isCombo || i.is_combo))
+  const groceryItems = menu.filter((i) => i.category === "grocery" && !(i.isCombo || i.is_combo))
+  const comboItems = menu.filter((i) => i.isCombo || i.is_combo)
   const offerItems = menu.filter((i) => i.offer)
   const offerCount = (kitchen?.offer ? 1 : 0) + offerItems.length
 
@@ -173,6 +299,9 @@ export default function KitchenDetailScreen() {
     if (tab.id === "grocery") {
       const isGroceryActive = kitchen?.isGroceryActive ?? 1
       return isGroceryActive !== 0 && groceryItems.length > 0
+    }
+    if (tab.id === "combo") {
+      return comboItems.length > 0
     }
     return true
   })
@@ -685,6 +814,29 @@ export default function KitchenDetailScreen() {
             </View>
           ) : null}
 
+          {activeTab === "combo" ? (
+            <View>
+              <Text className="font-poppins font-extrabold text-dark text-lg mb-0.5">Combos & Packages</Text>
+              <Text className="font-nunito font-semibold text-gray/80 text-[11px] mb-5">
+                Constituent items in one package · {comboItems.length} combos
+              </Text>
+              {comboItems.length === 0 ? (
+                <View className="py-12 items-center">
+                  <Sparkles size={36} color="#E8E8E8" />
+                  <Text className="font-nunito text-gray text-xs mt-2">No combos listed yet</Text>
+                </View>
+              ) : (
+                <View className="flex-row flex-wrap -mx-1.5">
+                  {comboItems.map((item) => (
+                    <View key={item.id} className="w-1/2 p-1.5">
+                      <MenuListItem item={item} onOpen={setSelectedItem} variant="grid" />
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+          ) : null}
+
           {activeTab === "offers" ? (
             <View>
               <Text className="font-poppins font-extrabold text-dark text-lg mb-0.5">Offers & Deals</Text>
@@ -885,20 +1037,35 @@ export default function KitchenDetailScreen() {
                         ENQUIRY STATUS
                       </Text>
                       <View style={{
-                        backgroundColor: activeEnquiry.status === "pending" ? "#FAF4EB" : "#EAF7EE",
+                        backgroundColor:
+                          activeEnquiry.status === "pending" ? "#FAF4EB" :
+                          activeEnquiry.status === "quoted" ? "#EBF5FB" :
+                          activeEnquiry.status === "accepted" ? "#EAF7EE" :
+                          activeEnquiry.status === "completed" ? "#D1E7DD" : "#FDEDEC",
                         paddingHorizontal: 10,
                         paddingVertical: 4,
                         borderRadius: 8,
                         borderWidth: 1,
-                        borderColor: activeEnquiry.status === "pending" ? "#FDECB2" : "#D6EAE7"
+                        borderColor:
+                          activeEnquiry.status === "pending" ? "#FDECB2" :
+                          activeEnquiry.status === "quoted" ? "#D6E6F2" :
+                          activeEnquiry.status === "accepted" ? "#D6EAE7" :
+                          activeEnquiry.status === "completed" ? "#A3CFBB" : "#FCD2D1"
                       }}>
                         <Text style={{
                           fontSize: 10,
                           fontFamily: "Poppins",
                           fontWeight: "bold",
-                          color: activeEnquiry.status === "pending" ? "#FAF4EB" && "#D35400" : "#0B6B3A"
+                          color:
+                            activeEnquiry.status === "pending" ? "#D35400" :
+                            activeEnquiry.status === "quoted" ? "#2980B9" :
+                            activeEnquiry.status === "accepted" ? "#0B6B3A" :
+                            activeEnquiry.status === "completed" ? "#0F5132" : "#C0392B"
                         }}>
-                          {activeEnquiry.status === "pending" ? "UNDER REVIEW" : "QUOTED"}
+                          {activeEnquiry.status === "pending" ? "UNDER REVIEW" :
+                           activeEnquiry.status === "quoted" ? "QUOTED" :
+                           activeEnquiry.status === "accepted" ? "ACCEPTED" :
+                           activeEnquiry.status === "completed" ? "ORDER PLACED (PAID)" : "REJECTED"}
                         </Text>
                       </View>
                     </View>
@@ -913,7 +1080,7 @@ export default function KitchenDetailScreen() {
                   </View>
 
                   {/* Quotation Details */}
-                  {activeEnquiry.status === "quoted" ? (
+                  {(activeEnquiry.status === "quoted" || activeEnquiry.status === "accepted" || activeEnquiry.status === "rejected" || activeEnquiry.status === "completed") ? (
                     <View style={{ backgroundColor: "#EAF7EE", borderRadius: 20, padding: 18, borderWidth: 1, borderColor: "#D6EAE7", marginBottom: 24 }}>
                       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 }}>
                         <ClipboardList size={16} color="#0B6B3A" />
@@ -936,19 +1103,130 @@ export default function KitchenDetailScreen() {
                         <TouchableOpacity
                           onPress={() => Linking.openURL(activeEnquiry.quotationFile)}
                           style={{
-                            backgroundColor: "#0B6B3A",
+                            backgroundColor: "#FFFFFF",
                             borderRadius: 12,
-                            paddingVertical: 12,
+                            paddingVertical: 10,
                             alignItems: "center",
                             justifyContent: "center",
-                            marginTop: 16,
+                            marginTop: 12,
+                            borderWidth: 1,
+                            borderColor: "#0B6B3A",
                           }}
                         >
-                          <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins", fontSize: 13 }}>
+                          <Text style={{ color: "#0B6B3A", fontWeight: "bold", fontFamily: "Poppins", fontSize: 12 }}>
                             Download Quotation Document
                           </Text>
                         </TouchableOpacity>
                       ) : null}
+
+                      {/* Accept / Reject buttons */}
+                      {activeEnquiry.status === "quoted" && (
+                        <View style={{ flexDirection: "row", gap: 12, marginTop: 18 }}>
+                          <TouchableOpacity
+                            onPress={handleRejectQuotation}
+                            style={{
+                              flex: 1,
+                              backgroundColor: "#FDEDEC",
+                              borderWidth: 1,
+                              borderColor: "#FCD2D1",
+                              borderRadius: 12,
+                              paddingVertical: 12,
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
+                          >
+                            <Text style={{ color: "#C0392B", fontWeight: "bold", fontFamily: "Poppins", fontSize: 13 }}>
+                              Reject
+                            </Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            onPress={handleAcceptQuotation}
+                            style={{
+                              flex: 1,
+                              backgroundColor: "#0B6B3A",
+                              borderRadius: 12,
+                              paddingVertical: 12,
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
+                          >
+                            <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins", fontSize: 13 }}>
+                              Accept
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+
+                      {/* Pay button */}
+                      {activeEnquiry.status === "accepted" && (
+                        <TouchableOpacity
+                          onPress={handlePayQuotation}
+                          style={{
+                            backgroundColor: "#F4C400",
+                            borderRadius: 12,
+                            paddingVertical: 14,
+                            alignItems: "center",
+                            justifyContent: "center",
+                            marginTop: 18,
+                          }}
+                        >
+                          <Text style={{ color: "#0a1f13", fontWeight: "bold", fontFamily: "Poppins", fontSize: 14 }}>
+                            PROCEED TO PAY ₹{activeEnquiry.quotationAmount}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+
+                      {/* Completed success message */}
+                      {activeEnquiry.status === "completed" && (
+                        <View style={{ backgroundColor: "#D1E7DD", borderRadius: 12, padding: 14, alignItems: "center", marginTop: 18, borderWidth: 1, borderColor: "#A3CFBB" }}>
+                          <Text style={{ color: "#0F5132", fontWeight: "bold", fontFamily: "Poppins", fontSize: 13 }}>
+                            Payment Successful!
+                          </Text>
+                          <Text style={{ color: "#0F5132", fontFamily: "Nunito", fontSize: 11, textAlign: "center", marginTop: 4 }}>
+                            Your order has been placed. The kitchen will begin preparation.
+                          </Text>
+                        </View>
+                      )}
+
+                      {/* Rejected coordination options */}
+                      {activeEnquiry.status === "rejected" && (
+                        <View style={{ marginTop: 18, gap: 10 }}>
+                          <TouchableOpacity
+                            onPress={handleChatWithSeller}
+                            style={{
+                              backgroundColor: "#25D366",
+                              borderRadius: 12,
+                              paddingVertical: 12,
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexDirection: "row",
+                              gap: 6,
+                            }}
+                          >
+                            <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins", fontSize: 13 }}>
+                              Chat further with Seller (WhatsApp)
+                            </Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            onPress={handleAcceptQuotation}
+                            style={{
+                              backgroundColor: "#FFFFFF",
+                              borderWidth: 1,
+                              borderColor: "#0B6B3A",
+                              borderRadius: 12,
+                              paddingVertical: 12,
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
+                          >
+                            <Text style={{ color: "#0B6B3A", fontWeight: "bold", fontFamily: "Poppins", fontSize: 13 }}>
+                              Accept Quote Instead
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
                     </View>
                   ) : (
                     <View style={{ alignItems: "center", paddingVertical: 12 }}>
@@ -957,6 +1235,25 @@ export default function KitchenDetailScreen() {
                       </Text>
                     </View>
                   )}
+
+                  <TouchableOpacity
+                    onPress={handleDeleteEnquiry}
+                    style={{
+                      backgroundColor: "#FDEDEC",
+                      borderWidth: 1,
+                      borderColor: "#FCD2D1",
+                      borderRadius: 16,
+                      paddingVertical: 14,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      marginTop: 12,
+                      marginBottom: 20,
+                    }}
+                  >
+                    <Text style={{ color: "#C0392B", fontWeight: "bold", fontFamily: "Poppins", fontSize: 14 }}>
+                      Delete Enquiry
+                    </Text>
+                  </TouchableOpacity>
                 </View>
               )}
             </ScrollView>

@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import {
@@ -17,11 +17,14 @@ import {
   CheckCircle,
   Upload,
   FileText,
+  Download,
+  FileCheck,
 } from "lucide-react"
 import Button from "../../components/ui/Button"
 import PasswordInput from "../../components/ui/PasswordInput"
 import StateCitySelect from "../../components/common/StateCitySelect"
 import { useAuth } from "../../context/AuthContext"
+import { getPartnerAgreement } from "../../lib/api"
 import { cn } from "../../lib/utils"
 
 const initialForm = {
@@ -39,12 +42,16 @@ const initialForm = {
   pincode: "",
   openingTime: "",
   description: "",
+  aadhaarNumber: "",
+  panNumber: "",
 }
 
 const steps = [
   { id: 1, title: "Kitchen Info", icon: Store },
   { id: 2, title: "Account", icon: User },
   { id: 3, title: "Location", icon: MapPin },
+  { id: 4, title: "Agreement", icon: FileCheck },
+  { id: 5, title: "KYC Verify", icon: ShieldCheck },
 ]
 
 const perks = [
@@ -55,14 +62,57 @@ const perks = [
 
 export default function KitchenSignupPage() {
   const navigate = useNavigate()
-  const { registerKitchen } = useAuth()
+  const { registerKitchen, verifyKitchenRegisterOtp } = useAuth()
   const [form, setForm] = useState(initialForm)
+  const [identifierType, setIdentifierType] = useState("phone")
   const [fssaiLicenseFile, setFssaiLicenseFile] = useState(null)
   const [step, setStep] = useState(1)
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
 
+  const [signupOtpVisible, setSignupOtpVisible] = useState(false)
+  const [signupUserId, setSignupUserId] = useState(null)
+  const [signupOtp, setSignupOtp] = useState(["", "", "", ""])
+  const [signupDemoOtp, setSignupDemoOtp] = useState("")
+  const [signupOtpError, setSignupOtpError] = useState("")
+  const [otpVerifying, setOtpVerifying] = useState(false)
+
+  const [aadhaarCardFile, setAadhaarCardFile] = useState(null)
+  const [aadhaarCardBackFile, setAadhaarCardBackFile] = useState(null)
+  const [panCardFile, setPanCardFile] = useState(null)
+
+  const signupOtpRefs = [useRef(null), useRef(null), useRef(null), useRef(null)]
+
+  const [agreement, setAgreement] = useState(null)
+  const [agreementLoading, setAgreementLoading] = useState(false)
+  const [agreementAccepted, setAgreementAccepted] = useState(false)
+  const [agreementViewed, setAgreementViewed] = useState(false)
+  const [videoWatched, setVideoWatched] = useState(false)
+
   const update = (field) => (e) => setForm({ ...form, [field]: e.target.value })
+
+  const switchIdentifierType = (type) => {
+    setIdentifierType(type)
+    setForm((f) => ({ ...f, email: type === "email" ? f.email : "", phone: type === "phone" ? f.phone : "" }))
+  }
+
+  const loadAgreement = async () => {
+    if (agreement || agreementLoading) return
+    setAgreementLoading(true)
+    try {
+      const data = await getPartnerAgreement()
+      setAgreement(data)
+    } catch {
+      setError("Failed to load Partner Agreement. Please try again.")
+    } finally {
+      setAgreementLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (step === 4) loadAgreement()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step])
 
   const validateStep = () => {
     if (step === 1) {
@@ -72,11 +122,12 @@ export default function KitchenSignupPage() {
       }
     }
     if (step === 2) {
-      if (!form.email.trim() || !form.phone.trim() || !form.password || !fssaiLicenseFile) {
-        setError("Email, phone, password, and FSSAI license upload are required")
+      const identifierValue = identifierType === "email" ? form.email.trim() : form.phone.trim()
+      if (!identifierValue || !form.password || !fssaiLicenseFile) {
+        setError(`${identifierType === "email" ? "Email" : "Phone"}, password, and FSSAI license upload are required`)
         return false
       }
-      if (form.phone.length !== 10) {
+      if (identifierType === "phone" && form.phone.length !== 10) {
         setError("Phone number must be 10 digits")
         return false
       }
@@ -103,12 +154,44 @@ export default function KitchenSignupPage() {
         return false
       }
     }
+    if (step === 4) {
+      if (!agreement?.url) {
+        setError("Partner Agreement is still loading. Please wait a moment.")
+        return false
+      }
+      if (!agreementViewed) {
+        setError("Please view the Partner Agreement PDF first.")
+        return false
+      }
+      if (agreement?.videoUrl && !videoWatched) {
+        setError("Please watch the training video first.")
+        return false
+      }
+      if (!agreementAccepted) {
+        setError("Please tick the confirmation checkbox to continue")
+        return false
+      }
+    }
+    if (step === 5) {
+      if (!form.aadhaarNumber.trim() || !form.panNumber.trim() || !aadhaarCardFile || !aadhaarCardBackFile || !panCardFile) {
+        setError("Aadhaar Number, Aadhaar Front & Back files, PAN Number, and PAN Card file are required")
+        return false
+      }
+      if (!/^\d{12}$/.test(form.aadhaarNumber.trim())) {
+        setError("Aadhaar number must be exactly 12 digits")
+        return false
+      }
+      if (!/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(form.panNumber.trim().toUpperCase())) {
+        setError("PAN number must be a valid 10-character alphanumeric PAN")
+        return false
+      }
+    }
     setError("")
     return true
   }
 
   const nextStep = () => {
-    if (validateStep()) setStep((s) => Math.min(s + 1, 3))
+    if (validateStep()) setStep((s) => Math.min(s + 1, 5))
   }
 
   const prevStep = () => {
@@ -119,8 +202,8 @@ export default function KitchenSignupPage() {
   const handleSubmit = async (e) => {
     e.preventDefault()
 
-    // Enter key or accidental submit on steps 1–2 should advance, not register
-    if (step < 3) {
+    // Enter key or accidental submit on steps 1–4 should advance, not register
+    if (step < 5) {
       nextStep()
       return
     }
@@ -130,12 +213,47 @@ export default function KitchenSignupPage() {
     setError("")
     setLoading(true)
     try {
-      await registerKitchen(form, fssaiLicenseFile)
-      navigate("/kitchen/dashboard", { state: { newSignup: true } })
+      const data = await registerKitchen(
+        { ...form, agreementVersion: agreement.version },
+        fssaiLicenseFile,
+        aadhaarCardFile,
+        aadhaarCardBackFile,
+        panCardFile
+      )
+      if (data?.requiresOtp) {
+        setSignupUserId(data.userId)
+        if (data.demoOtp) setSignupDemoOtp(data.demoOtp)
+        setSignupOtp(["", "", "", ""])
+        setSignupOtpError("")
+        setSignupOtpVisible(true)
+      } else {
+        navigate("/kitchen/dashboard", { state: { newSignup: true } })
+      }
     } catch (err) {
-      setError(err.message)
+      setError(err.message || "Registration failed")
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleVerifySignupOtp = async (e) => {
+    e.preventDefault()
+    const otpVal = signupOtp.join("")
+    if (otpVal.length !== 4) {
+      setSignupOtpError("Please enter the 4-digit OTP")
+      return
+    }
+    setSignupOtpError("")
+    setOtpVerifying(true)
+    try {
+      const data = await verifyKitchenRegisterOtp(signupUserId, otpVal)
+      setSignupOtpVisible(false)
+      alert(data.message || "Your registration is submitted. Please log in to verify your identity.")
+      navigate("/kitchen/login")
+    } catch (err) {
+      setSignupOtpError(err.message || "Invalid or expired OTP")
+    } finally {
+      setOtpVerifying(false)
     }
   }
 
@@ -229,7 +347,7 @@ export default function KitchenSignupPage() {
             </div>
             <div>
               <h1 className="font-poppins font-bold text-xl text-dark">Register Kitchen</h1>
-              <p className="font-nunito text-gray text-sm">Step {step} of 3</p>
+              <p className="font-nunito text-gray text-sm">Step {step} of 4</p>
             </div>
           </div>
         </div>
@@ -373,26 +491,60 @@ export default function KitchenSignupPage() {
                       title="Create your account"
                       subtitle="You'll use these credentials to manage your kitchen"
                     />
-                    <Field label="Email" required icon={Mail}>
-                      <input
-                        type="email"
-                        className={inputClass}
-                        value={form.email}
-                        onChange={update("email")}
-                        placeholder="kitchen@example.com"
-                        required
-                      />
-                    </Field>
-                    <Field label="Phone" required icon={Phone}>
-                      <input
-                        className={inputClass}
-                        value={form.phone}
-                        onChange={update("phone")}
-                        placeholder="10-digit mobile number"
-                        maxLength={10}
-                        required
-                      />
-                    </Field>
+                    <div>
+                      <label className="font-poppins text-sm font-medium text-dark-light block mb-2">
+                        Register with <span className="text-accent">*</span>
+                      </label>
+                      <div className="flex gap-2 mb-3">
+                        <button
+                          type="button"
+                          onClick={() => switchIdentifierType("phone")}
+                          className={cn(
+                            "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border font-poppins text-sm font-medium transition-colors",
+                            identifierType === "phone"
+                              ? "bg-primary text-white border-primary"
+                              : "bg-white border-gray-light text-gray hover:border-primary/40"
+                          )}
+                        >
+                          <Phone size={15} /> Phone
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => switchIdentifierType("email")}
+                          className={cn(
+                            "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border font-poppins text-sm font-medium transition-colors",
+                            identifierType === "email"
+                              ? "bg-primary text-white border-primary"
+                              : "bg-white border-gray-light text-gray hover:border-primary/40"
+                          )}
+                        >
+                          <Mail size={15} /> Email
+                        </button>
+                      </div>
+                      {identifierType === "phone" ? (
+                        <Field label="Phone" required icon={Phone}>
+                          <input
+                            className={inputClass}
+                            value={form.phone}
+                            onChange={update("phone")}
+                            placeholder="10-digit mobile number"
+                            maxLength={10}
+                            required
+                          />
+                        </Field>
+                      ) : (
+                        <Field label="Email" required icon={Mail}>
+                          <input
+                            type="email"
+                            className={inputClass}
+                            value={form.email}
+                            onChange={update("email")}
+                            placeholder="kitchen@example.com"
+                            required
+                          />
+                        </Field>
+                      )}
+                    </div>
                     <div>
                       <label className="font-poppins text-sm font-medium text-dark-light block mb-2">
                         Password <span className="text-accent">*</span>
@@ -463,7 +615,7 @@ export default function KitchenSignupPage() {
                     </Field>
                     <div className="grid sm:grid-cols-3 gap-5">
                       <div className="sm:col-span-2">
-                        <Field label="State & City" required icon={MapPin}>
+                        <Field label="State & City" required>
                           <StateCitySelect
                             state={form.state}
                             city={form.city}
@@ -514,9 +666,291 @@ export default function KitchenSignupPage() {
                         <SummaryRow label="Speciality" value={form.speciality} />
                         <SummaryRow label="Signature Dish" value={form.bestItem} />
                         <SummaryRow label="FSSAI" value={fssaiLicenseFile?.name || "Not uploaded"} />
-                        <SummaryRow label="Contact" value={`${form.email} · ${form.phone}`} />
+                        <SummaryRow label="Contact" value={identifierType === "email" ? form.email : form.phone} />
                         <SummaryRow label="Location" value={`${form.address}, ${form.city}, ${form.state} - ${form.pincode}`} />
                         <SummaryRow label="Hours" value={form.openingTime} />
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {step === 4 && (
+                  <motion.div
+                    key="step4"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    transition={{ duration: 0.25 }}
+                    className="space-y-5"
+                  >
+                    <SectionTitle
+                      title="Partner Agreement & Terms"
+                      subtitle="Please review the agreement before submitting your application"
+                    />
+{
+                      agreementLoading && (
+                        <div className="flex items-center justify-center py-16 text-gray font-nunito text-sm">
+                          Loading agreement...
+                        </div>
+                      )
+                    }
+                    {!agreementLoading && agreement?.url && (
+                      <>
+                        <div className="space-y-6">
+                          {/* Step 1: Read Agreement */}
+                          <div className="border border-gray-light bg-white rounded-2xl p-5 space-y-3">
+                            <h3 className="font-poppins font-semibold text-sm text-dark flex items-center gap-2">
+                              <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs flex items-center justify-center font-bold">1</span>
+                              Review Partner Agreement PDF
+                            </h3>
+                            <p className="font-nunito text-xs text-gray">
+                              Please view the terms of partnering with us. You must open the document to unlock the confirmation.
+                            </p>
+                            <div className="flex items-center gap-3">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  window.open(agreement.url, "_blank");
+                                  setAgreementViewed(true);
+                                  setError("");
+                                }}
+                                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-primary text-primary font-poppins text-xs font-semibold hover:bg-primary/5 transition-colors cursor-pointer"
+                              >
+                                <FileText size={14} /> Open Partner Agreement PDF
+                              </button>
+                              {agreementViewed ? (
+                                <span className="text-xs text-primary font-poppins font-semibold bg-primary/10 px-2.5 py-1 rounded-full">
+                                  ✓ Viewed
+                                </span>
+                              ) : (
+                                <span className="text-xs text-amber-600 font-poppins font-semibold bg-amber-50 px-2.5 py-1 rounded-full border border-amber-100">
+                                  Required
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Step 2: Training Video */}
+                          {agreement.videoUrl ? (
+                            <div className="border border-gray-light bg-white rounded-2xl p-5 space-y-4">
+                              <h3 className="font-poppins font-semibold text-sm text-dark flex items-center gap-2">
+                                <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs flex items-center justify-center font-bold">2</span>
+                                Watch Mandatory Training Video
+                              </h3>
+                              <p className="font-nunito text-xs text-gray">
+                                Learn about our hygiene standards, delivery process, and dashboard management tools.
+                              </p>
+                              
+                              <div className="rounded-xl overflow-hidden bg-black max-w-[480px]">
+                                <video
+                                  src={agreement.videoUrl}
+                                  controls
+                                  onPlay={() => {
+                                    setVideoWatched(true);
+                                    setError("");
+                                  }}
+                                  className="w-full h-auto max-h-[260px]"
+                                />
+                              </div>
+
+                              <div className="flex items-center gap-3">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    window.open(agreement.videoUrl, "_blank");
+                                    setVideoWatched(true);
+                                    setError("");
+                                  }}
+                                  className="inline-flex items-center gap-2 text-xs text-gray font-nunito hover:underline"
+                                >
+                                  Open video in new tab
+                                </button>
+                                {videoWatched ? (
+                                  <span className="text-xs text-primary font-poppins font-semibold bg-primary/10 px-2.5 py-1 rounded-full">
+                                    ✓ Watched
+                                  </span>
+                                ) : (
+                                  <span className="text-xs text-amber-600 font-poppins font-semibold bg-amber-50 px-2.5 py-1 rounded-full border border-amber-100">
+                                    Required
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ) : null}
+
+                          {/* Step 3: Acceptance Checkbox */}
+                          <div className="bg-cream rounded-2xl p-4 border border-gray-light/50 space-y-2">
+                            <label className={`flex items-start gap-3 ${(!agreementViewed || (agreement.videoUrl && !videoWatched)) ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}>
+                              <input
+                                type="checkbox"
+                                checked={agreementAccepted}
+                                disabled={!agreementViewed || (agreement.videoUrl ? !videoWatched : false)}
+                                onChange={(e) => {
+                                  setAgreementAccepted(e.target.checked)
+                                  setError("")
+                                }}
+                                className="mt-1 w-4 h-4 accent-primary"
+                              />
+                              <span className="font-nunito text-sm text-dark">
+                                I confirm that I have read the Partner Agreement and watched the Training Video, and I agree to the onboarding terms.
+                              </span>
+                            </label>
+                            {(!agreementViewed || (agreement.videoUrl && !videoWatched)) && (
+                              <p className="text-[11px] font-nunito text-amber-800 ml-7">
+                                * Complete Steps 1 & 2 above to unlock this confirmation.
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {!agreementLoading && !agreement?.url && (
+                      <div className="rounded-2xl border border-gray-light bg-cream p-6 text-center text-gray font-nunito text-sm">
+                        Partner Agreement is not available yet. Please try again shortly.
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+                           {step === 5 && (
+                  <motion.div
+                    key="step5"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    transition={{ duration: 0.25 }}
+                    className="space-y-5"
+                  >
+                    <SectionTitle
+                      title="KYC Verification Details"
+                      subtitle="Upload your government issued identity documents to activate your kitchen"
+                    />
+
+                    <Field label="Aadhaar Card Number" required icon={FileText}>
+                      <input
+                        className={inputClass}
+                        value={form.aadhaarNumber}
+                        onChange={update("aadhaarNumber")}
+                        placeholder="12-digit Aadhaar number"
+                        maxLength={12}
+                        required
+                      />
+                    </Field>
+
+                    <Field label="Aadhaar Card File (Front Side)" required icon={ShieldCheck}>
+                      <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-gray-200 rounded-xl p-6 cursor-pointer hover:border-primary/40 hover:bg-primary/5 transition-colors">
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0]
+                            setAadhaarCardFile(file || null)
+                            setError("")
+                          }}
+                        />
+                        {aadhaarCardFile ? (
+                          <>
+                            <FileText size={28} className="text-primary" />
+                            <span className="font-nunito text-sm text-dark text-center break-all px-2">
+                              {aadhaarCardFile.name}
+                            </span>
+                            <span className="font-nunito text-xs text-gray">Tap to change file</span>
+                          </>
+                        ) : (
+                          <>
+                            <Upload size={28} className="text-gray" />
+                            <span className="font-nunito text-sm text-gray text-center">
+                              Upload Aadhaar Front (JPG, PNG, or PDF)
+                            </span>
+                          </>
+                        )}
+                      </label>
+                    </Field>
+
+                    <Field label="Aadhaar Card File (Back Side)" required icon={ShieldCheck}>
+                      <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-gray-200 rounded-xl p-6 cursor-pointer hover:border-primary/40 hover:bg-primary/5 transition-colors">
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0]
+                            setAadhaarCardBackFile(file || null)
+                            setError("")
+                          }}
+                        />
+                        {aadhaarCardBackFile ? (
+                          <>
+                            <FileText size={28} className="text-primary" />
+                            <span className="font-nunito text-sm text-dark text-center break-all px-2">
+                              {aadhaarCardBackFile.name}
+                            </span>
+                            <span className="font-nunito text-xs text-gray">Tap to change file</span>
+                          </>
+                        ) : (
+                          <>
+                            <Upload size={28} className="text-gray" />
+                            <span className="font-nunito text-sm text-gray text-center">
+                              Upload Aadhaar Back (JPG, PNG, or PDF)
+                            </span>
+                          </>
+                        )}
+                      </label>
+                    </Field>
+
+                    <Field label="PAN Card Number" required icon={FileText}>
+                      <input
+                        className={inputClass}
+                        value={form.panNumber}
+                        onChange={(e) => setForm({ ...form, panNumber: e.target.value.toUpperCase() })}
+                        placeholder="10-character alphanumeric PAN number"
+                        maxLength={10}
+                        required
+                      />
+                    </Field>
+
+                    <Field label="PAN Card File" required icon={ShieldCheck}>
+                      <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-gray-200 rounded-xl p-6 cursor-pointer hover:border-primary/40 hover:bg-primary/5 transition-colors">
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0]
+                            setPanCardFile(file || null)
+                            setError("")
+                          }}
+                        />
+                        {panCardFile ? (
+                          <>
+                            <FileText size={28} className="text-primary" />
+                            <span className="font-nunito text-sm text-dark text-center break-all px-2">
+                              {panCardFile.name}
+                            </span>
+                            <span className="font-nunito text-xs text-gray">Tap to change file</span>
+                          </>
+                        ) : (
+                          <>
+                            <Upload size={28} className="text-gray" />
+                            <span className="font-nunito text-sm text-gray text-center">
+                              Upload PAN Card (JPG, PNG, or PDF)
+                            </span>
+                          </>
+                        )}
+                      </label>
+                    </Field>
+
+                    <div className="bg-cream rounded-2xl p-5 border border-gray-light/50">
+                      <p className="font-poppins text-xs font-semibold text-gray uppercase tracking-wide mb-3">
+                        Review KYC Information
+                      </p>
+                      <div className="space-y-2 text-sm font-nunito">
+                        <SummaryRow label="Aadhaar Number" value={form.aadhaarNumber} />
+                        <SummaryRow label="Aadhaar Front" value={aadhaarCardFile?.name || "Not uploaded"} />
+                        <SummaryRow label="Aadhaar Back" value={aadhaarCardBackFile?.name || "Not uploaded"} />
+                        <SummaryRow label="PAN Number" value={form.panNumber} />
+                        <SummaryRow label="PAN Document" value={panCardFile?.name || "Not uploaded"} />
                       </div>
                     </div>
                   </motion.div>
@@ -541,7 +975,7 @@ export default function KitchenSignupPage() {
                     Back
                   </Button>
                 )}
-                {step < 3 ? (
+                {step < 5 ? (
                   <Button type="button" size="lg" onClick={nextStep} className="flex-1">
                     Continue
                     <ArrowRight size={18} />
@@ -564,6 +998,82 @@ export default function KitchenSignupPage() {
           </form>
         </div>
       </div>
+
+      {/* Signup OTP Verification Modal */}
+      {signupOtpVisible && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl flex flex-col items-center">
+            <h3 className="font-poppins font-bold text-lg text-dark mb-2 text-center">
+              Verify Registration
+            </h3>
+            <p className="font-nunito text-xs text-gray text-center mb-6 leading-relaxed">
+              Enter the 4-digit code sent to verify your contact information.
+            </p>
+
+            {signupOtpError && (
+              <div className="mb-4 w-full rounded-xl border border-red-200 bg-red-50 px-4 py-2.5">
+                <p className="font-nunito text-xs text-red-700 text-center">{signupOtpError}</p>
+              </div>
+            )}
+
+            {signupDemoOtp && (
+              <div className="mb-4 w-full rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5">
+                <p className="font-nunito text-xs text-amber-900 text-center">
+                  Demo OTP: <span className="font-poppins font-bold tracking-widest">{signupDemoOtp}</span>
+                </p>
+              </div>
+            )}
+
+            {/* OTP Digits */}
+            <div className="flex gap-3 justify-center py-2">
+              {signupOtp.map((digit, i) => (
+                <input
+                  key={i}
+                  ref={signupOtpRefs[i]}
+                  type="text"
+                  maxLength="1"
+                  pattern="\d*"
+                  value={digit}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    if (!/^\d?$/.test(val)) return
+                    const next = [...signupOtp]
+                    next[i] = val
+                    setSignupOtp(next)
+                    if (val && i < 3) {
+                      signupOtpRefs[i + 1].current?.focus()
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Backspace" && !signupOtp[i] && i > 0) {
+                      signupOtpRefs[i - 1].current?.focus()
+                    }
+                  }}
+                  className="w-12 h-12 bg-gray-50 border border-gray-200 rounded-xl text-center text-xl font-poppins font-bold text-dark focus:outline-none focus:border-primary"
+                />
+              ))}
+            </div>
+
+            <div className="flex gap-3 mt-6 w-full">
+              <button
+                type="button"
+                onClick={() => setSignupOtpVisible(false)}
+                className="flex-1 py-3 bg-gray-100 rounded-xl font-poppins font-bold text-sm text-gray-700 hover:bg-gray-200 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleVerifySignupOtp}
+                disabled={otpVerifying || signupOtp.some(d => !d)}
+                className="flex-1 py-3 bg-primary rounded-xl font-poppins font-bold text-sm text-white hover:bg-primary-dark disabled:opacity-60 transition-colors cursor-pointer"
+              >
+                {otpVerifying ? "Verifying..." : "Verify"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

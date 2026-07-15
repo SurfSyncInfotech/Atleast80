@@ -159,16 +159,39 @@ export async function uploadKitchenCover(file) {
   return uploadFormData("/api/kitchens/me/cover", formData)
 }
 
-export async function registerKitchen(form, fssaiLicenseFile) {
+export async function registerKitchen(form, fssaiLicenseFile, aadhaarCardFile, aadhaarCardBackFile, panCardFile) {
   const formData = new FormData()
   Object.entries(form).forEach(([key, value]) => {
     if (value !== undefined && value !== null) {
       formData.append(key, String(value))
     }
   })
-  const uploadFile = await getUploadFile(fssaiLicenseFile)
-  formData.append("fssaiLicense", uploadFile)
+  formData.append("appVersion", "1.0.0")
+  
+  const fssaiUploadFile = await getUploadFile(fssaiLicenseFile)
+  formData.append("fssaiLicense", fssaiUploadFile)
+
+  const aadhaarUploadFile = await getUploadFile(aadhaarCardFile)
+  formData.append("aadhaarCard", aadhaarUploadFile)
+
+  const aadhaarBackUploadFile = await getUploadFile(aadhaarCardBackFile)
+  formData.append("aadhaarCardBack", aadhaarBackUploadFile)
+
+  const panUploadFile = await getUploadFile(panCardFile)
+  formData.append("panCard", panUploadFile)
+
   return uploadFormData("/api/auth/kitchen/register", formData)
+}
+
+export async function verifyRegisterOtp(userId, otp) {
+  return api("/api/auth/kitchen/register/verify-otp", {
+    method: "POST",
+    body: JSON.stringify({ userId, otp }),
+  })
+}
+
+export async function getPartnerAgreement() {
+  return api("/api/kitchens/partner-agreement")
 }
 
 export async function uploadFiles(path, files) {

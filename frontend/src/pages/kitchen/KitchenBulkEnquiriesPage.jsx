@@ -89,6 +89,9 @@ export default function KitchenBulkEnquiriesPage() {
 
   const pending = enquiries.filter((e) => e.status === "pending")
   const quoted = enquiries.filter((e) => e.status === "quoted")
+  const accepted = enquiries.filter((e) => e.status === "accepted")
+  const completed = enquiries.filter((e) => e.status === "completed")
+  const rejected = enquiries.filter((e) => e.status === "rejected")
 
   return (
     <>
@@ -151,9 +154,56 @@ export default function KitchenBulkEnquiriesPage() {
                     <EnquiryCard
                       key={enquiry.id}
                       enquiry={enquiry}
-                      quoted
                       onDeleteQuotation={handleDeleteQuotation}
                       deleting={deletingId === enquiry.id}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {accepted.length > 0 && (
+              <section>
+                <h2 className="font-poppins font-semibold text-dark mb-3">
+                  Accepted & Awaiting Payment ({accepted.length})
+                </h2>
+                <div className="space-y-4">
+                  {accepted.map((enquiry) => (
+                    <EnquiryCard
+                      key={enquiry.id}
+                      enquiry={enquiry}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {completed.length > 0 && (
+              <section>
+                <h2 className="font-poppins font-semibold text-dark mb-3">
+                  Confirmed Orders (Paid) ({completed.length})
+                </h2>
+                <div className="space-y-4">
+                  {completed.map((enquiry) => (
+                    <EnquiryCard
+                      key={enquiry.id}
+                      enquiry={enquiry}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {rejected.length > 0 && (
+              <section>
+                <h2 className="font-poppins font-semibold text-dark mb-3">
+                  Rejected ({rejected.length})
+                </h2>
+                <div className="space-y-4">
+                  {rejected.map((enquiry) => (
+                    <EnquiryCard
+                      key={enquiry.id}
+                      enquiry={enquiry}
                     />
                   ))}
                 </div>
@@ -221,7 +271,6 @@ function EnquiryCard({
   onFormChange,
   onUpload,
   uploading,
-  quoted,
   onDeleteQuotation,
   deleting,
 }) {
@@ -245,12 +294,64 @@ function EnquiryCard({
         </p>
       </div>
 
-      {quoted ? (
-        <div className="px-4 md:px-5 py-4 bg-green-50/50 border-t border-gray-50">
+      {enquiry.status === "pending" && (
+        <div className="px-4 md:px-5 py-4 bg-gray-50/80 border-t border-gray-100 space-y-3">
+          <p className="font-poppins font-medium text-sm text-dark">Upload quotation</p>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <div>
+              <label className="font-nunito text-xs text-gray block mb-1">Amount (₹)</label>
+              <div className="relative">
+                <IndianRupee size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray" />
+                <input
+                  type="number"
+                  min="1"
+                  value={form?.amount || ""}
+                  onChange={(e) => onFormChange?.(enquiry.id, "amount", e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 rounded-xl border border-gray-light font-nunito text-sm bg-white"
+                  placeholder="Quotation total"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="font-nunito text-xs text-gray block mb-1">Notes (optional)</label>
+              <input
+                type="text"
+                value={form?.notes || ""}
+                onChange={(e) => onFormChange?.(enquiry.id, "notes", e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-gray-light font-nunito text-sm bg-white"
+                placeholder="Valid for 7 days, includes delivery..."
+              />
+            </div>
+          </div>
+          <div>
+            <label className="font-nunito text-xs text-gray block mb-1">Quotation file (PDF or image)</label>
+            <input
+              type="file"
+              accept="image/*,.pdf"
+              onChange={(e) => onFormChange?.(enquiry.id, "file", e.target.files?.[0] || null)}
+              className="w-full text-sm font-nunito file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-primary/10 file:text-primary file:font-semibold"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => onUpload?.(enquiry.id)}
+            disabled={uploading}
+            className={cn(
+              "inline-flex items-center gap-2 bg-primary text-white font-poppins font-semibold text-sm px-4 py-2.5 rounded-xl hover:bg-primary-dark disabled:opacity-60 cursor-pointer"
+            )}
+          >
+            {uploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+            {uploading ? "Uploading..." : "Send quotation to customer"}
+          </button>
+        </div>
+      )}
+
+      {enquiry.status === "quoted" && (
+        <div className="px-4 md:px-5 py-4 bg-blue-50/50 border-t border-gray-50">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="font-nunito text-xs text-gray">Quotation sent</p>
-              <p className="font-poppins font-bold text-green-800">₹{enquiry.quotationAmount}</p>
+              <p className="font-poppins font-bold text-blue-800">₹{enquiry.quotationAmount}</p>
               {enquiry.quotationNotes && (
                 <p className="font-nunito text-xs text-gray mt-1">{enquiry.quotationNotes}</p>
               )}
@@ -279,55 +380,60 @@ function EnquiryCard({
             </div>
           </div>
         </div>
-      ) : (
-        <div className="px-4 md:px-5 py-4 bg-gray-50/80 border-t border-gray-100 space-y-3">
-          <p className="font-poppins font-medium text-sm text-dark">Upload quotation</p>
-          <div className="grid sm:grid-cols-2 gap-3">
-            <div>
-              <label className="font-nunito text-xs text-gray block mb-1">Amount (₹)</label>
-              <div className="relative">
-                <IndianRupee size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray" />
-                <input
-                  type="number"
-                  min="1"
-                  value={form.amount || ""}
-                  onChange={(e) => onFormChange(enquiry.id, "amount", e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 rounded-xl border border-gray-light font-nunito text-sm bg-white"
-                  placeholder="Quotation total"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="font-nunito text-xs text-gray block mb-1">Notes (optional)</label>
-              <input
-                type="text"
-                value={form.notes || ""}
-                onChange={(e) => onFormChange(enquiry.id, "notes", e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-gray-light font-nunito text-sm bg-white"
-                placeholder="Valid for 7 days, includes delivery..."
-              />
-            </div>
-          </div>
+      )}
+
+      {enquiry.status === "accepted" && (
+        <div className="px-4 md:px-5 py-4 bg-amber-50/50 border-t border-gray-50 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <label className="font-nunito text-xs text-gray block mb-1">Quotation file (PDF or image)</label>
-            <input
-              type="file"
-              accept="image/*,.pdf"
-              onChange={(e) => onFormChange(enquiry.id, "file", e.target.files?.[0] || null)}
-              className="w-full text-sm font-nunito file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-primary/10 file:text-primary file:font-semibold"
-            />
+            <p className="font-poppins font-semibold text-amber-900 text-sm">Quotation Accepted (Awaiting Payment)</p>
+            <p className="font-nunito text-xs text-amber-800 mt-1">
+              Customer accepted quote of <span className="font-bold">₹{enquiry.quotationAmount}</span>. Waiting for payment from customer.
+            </p>
           </div>
-          <button
-            type="button"
-            onClick={() => onUpload(enquiry.id)}
-            disabled={uploading}
-            className={cn(
-              "inline-flex items-center gap-2 bg-primary text-white font-poppins font-semibold text-sm px-4 py-2.5 rounded-xl hover:bg-primary-dark disabled:opacity-60 cursor-pointer"
-            )}
-          >
-            {uploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-            {uploading ? "Uploading..." : "Send quotation to customer"}
-          </button>
+          {enquiry.quotationFile && (
+            <a
+              href={resolveMediaUrl(enquiry.quotationFile)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-sm font-poppins font-semibold text-primary hover:underline"
+            >
+              <FileText size={16} />
+              View quotation
+            </a>
+          )}
+        </div>
+      )}
+
+      {enquiry.status === "completed" && (
+        <div className="px-4 md:px-5 py-4 bg-green-50 border-t border-green-100 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="font-poppins font-semibold text-green-950 text-sm">Order Confirmed (Paid)</p>
+            <p className="font-nunito text-xs text-green-800 mt-1">
+              Payment of <span className="font-bold">₹{enquiry.quotationAmount}</span> is successful. Please prepare and dispatch the order.
+            </p>
+          </div>
+          {enquiry.quotationFile && (
+            <a
+              href={resolveMediaUrl(enquiry.quotationFile)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-sm font-poppins font-semibold text-primary hover:underline"
+            >
+              <FileText size={16} />
+              View quotation details
+            </a>
+          )}
+        </div>
+      )}
+
+      {enquiry.status === "rejected" && (
+        <div className="px-4 md:px-5 py-4 bg-red-50 border-t border-red-100 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="font-poppins font-semibold text-red-900 text-sm">Quotation Rejected</p>
+            <p className="font-nunito text-xs text-red-800 mt-1">
+              Customer rejected the quotation of <span className="font-bold">₹{enquiry.quotationAmount}</span>.
+            </p>
+          </div>
         </div>
       )}
     </article>

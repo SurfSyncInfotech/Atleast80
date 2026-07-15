@@ -40,15 +40,11 @@ const KITCHEN_TYPE = { veg: "Pure Veg", non_veg: "Non-Veg", both: "Veg & Non-Veg
 
 
 const tabs = [
-
   { id: "food", label: "Food", icon: UtensilsCrossed },
-
   { id: "grocery", label: "Ration", icon: ShoppingBag },
-
+  { id: "combo", label: "Combo", icon: Sparkles },
   { id: "offers", label: "Offers", icon: Tag },
-
   { id: "hygiene", label: "Check Hygiene", icon: ShieldCheck },
-
 ]
 
 function mapApiKitchen(k) {
@@ -61,6 +57,8 @@ function mapApiKitchen(k) {
     openingTime: k.opening_time,
     phone: k.phone,
     image: k.image || null,
+    isFreshFoodActive: k.is_fresh_food_active ?? 1,
+    isGroceryActive: k.is_grocery_active ?? 1,
   }
 }
 
@@ -80,6 +78,8 @@ function mapApiMenuItem(item, kitchenName, kitchenId) {
     videos: item.videos,
     kitchen: kitchenName,
     kitchenId: kitchenId || item.kitchen_id,
+    isCombo: item.isCombo || item.is_combo,
+    comboItems: item.comboItems || [],
   })
 }
 
@@ -187,9 +187,25 @@ export default function KitchenPage() {
 
         setKitchen(k)
 
-        setMenu(menuRes.items.map((item) => mapApiMenuItem(item, k.name, k.id)))
+        const mappedMenu = menuRes.items.map((item) => mapApiMenuItem(item, k.name, k.id))
+        setMenu(mappedMenu)
 
         setHygieneData(hygieneRes)
+
+        // Set default active tab dynamically based on availability
+        const hasFood = (k.isFreshFoodActive !== 0) && mappedMenu.some(item => item.category === "food" && !(item.isCombo || item.is_combo))
+        const hasGrocery = (k.isGroceryActive !== 0) && mappedMenu.some(item => item.category === "grocery" && !(item.isCombo || item.is_combo))
+        const hasCombo = mappedMenu.some(item => item.isCombo || item.is_combo)
+
+        if (hasFood) {
+          setActiveTab("food")
+        } else if (hasGrocery) {
+          setActiveTab("grocery")
+        } else if (hasCombo) {
+          setActiveTab("combo")
+        } else {
+          setActiveTab("offers")
+        }
 
       } catch {
 
@@ -245,12 +261,10 @@ export default function KitchenPage() {
 
 
 
-  const foodItems = menu.filter((i) => i.category === "food")
-
-  const groceryItems = menu.filter((i) => i.category === "grocery")
-
+  const foodItems = menu.filter((i) => i.category === "food" && !(i.isCombo || i.is_combo))
+  const groceryItems = menu.filter((i) => i.category === "grocery" && !(i.isCombo || i.is_combo))
+  const comboItems = menu.filter((i) => i.isCombo || i.is_combo)
   const offerItems = menu.filter((i) => i.offer)
-
   const offerCount = (kitchen?.offer ? 1 : 0) + offerItems.length
 
 
@@ -446,7 +460,12 @@ export default function KitchenPage() {
 
           <div className="flex gap-2 p-1.5 bg-white rounded-2xl shadow-sm border border-gray-100 max-w-2xl">
 
-            {tabs.map((tab) => {
+            {tabs.filter(tab => {
+              if (tab.id === "food" && kitchen?.isFreshFoodActive === 0) return false
+              if (tab.id === "grocery" && kitchen?.isGroceryActive === 0) return false
+              if (tab.id === "combo" && comboItems.length === 0) return false
+              return true
+            }).map((tab) => {
 
               const Icon = tab.icon
 
@@ -531,17 +550,19 @@ export default function KitchenPage() {
             )}
 
             {activeTab === "grocery" && (
-
               <MenuSection title="Ration & Grocery" subtitle="Daily essentials from this kitchen" count={groceryItems.length} empty="No ration items listed yet">
-
                 {groceryItems.map((item) => (
-
                   <MenuListItem key={item.id} item={item} onOpen={setSelectedItem} />
-
                 ))}
-
               </MenuSection>
+            )}
 
+            {activeTab === "combo" && (
+              <MenuSection title="Combos & Packages" subtitle="Constituent items in one package" count={comboItems.length} empty="No combos listed yet">
+                {comboItems.map((item) => (
+                  <MenuListItem key={item.id} item={item} onOpen={setSelectedItem} />
+                ))}
+              </MenuSection>
             )}
 
             {activeTab === "offers" && (

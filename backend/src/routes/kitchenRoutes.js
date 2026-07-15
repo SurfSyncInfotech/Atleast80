@@ -14,6 +14,28 @@ import { getKitchenRatingStats, withPublicRating, withPublicRatings, SQL_RATING_
 
 const router = Router()
 
+router.get("/partner-agreement", async (_req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT partner_agreement_url, partner_agreement_version, partner_agreement_updated_at,
+              training_video_url, training_video_version, training_video_updated_at
+       FROM site_settings WHERE id = 1`
+    )
+    const row = rows[0] || {}
+    res.json({
+      url: row.partner_agreement_url || null,
+      version: row.partner_agreement_version || 0,
+      updatedAt: row.partner_agreement_updated_at || null,
+      videoUrl: row.training_video_url || null,
+      videoVersion: row.training_video_version || 0,
+      videoUpdatedAt: row.training_video_updated_at || null,
+    })
+  } catch (error) {
+    console.error("Fetch partner agreement error:", error)
+    res.status(500).json({ message: "Failed to fetch partner agreement assets" })
+  }
+})
+
 router.post("/me/logo", authRequired, requireRole("kitchen"), (req, res) => {
   kitchenLogoUpload.single("logo")(req, res, async (err) => {
     if (err) {
@@ -374,7 +396,7 @@ router.get("/", async (_req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT k.id, k.name, k.owner_name, k.speciality, k.description, k.image, k.rating,
+      `SELECT k.id, k.name, k.owner_name, k.phone, k.speciality, k.description, k.image, k.rating,
               k.delivery_time, k.hygiene_score, k.offer, k.best_item, k.city, k.status, k.reviewed_at, k.visibility_status, k.is_active,
               ${SQL_RATING_COUNT}
        FROM kitchens k

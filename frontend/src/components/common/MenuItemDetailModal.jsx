@@ -157,6 +157,20 @@ export default function MenuItemDetailModal({ item, onClose, adminView = false }
               </p>
             )}
 
+            {Boolean(item.isCombo || item.is_combo) && item.comboItems && item.comboItems.length > 0 && (
+              <div className="mt-4 bg-[#fbfbfb] border border-emerald-600/10 rounded-xl p-4">
+                <h4 className="font-poppins font-bold text-dark text-sm mb-2.5">Combo Includes:</h4>
+                <div className="space-y-2">
+                  {item.comboItems.map((ci, idx) => (
+                    <div key={`combo-item-${idx}`} className="flex justify-between items-center bg-white px-3 py-2 rounded-lg border border-gray-100 text-xs">
+                      <span className="font-nunito text-dark font-semibold">{ci.name}</span>
+                      <span className="font-poppins font-bold text-primary bg-primary/10 px-2 py-0.5 rounded">Qty: {ci.quantity}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {item.offer && (
               <p className="inline-flex mt-3 text-[11px] font-poppins font-semibold px-2.5 py-1 rounded-full bg-accent/15 text-accent">
                 {item.offer}

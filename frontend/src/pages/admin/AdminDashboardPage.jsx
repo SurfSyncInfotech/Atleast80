@@ -633,20 +633,79 @@ function KitchenDrawer({ kitchen: k, onClose, onApprove, onReject, onDelete, act
 
           </DrawerSection>
 
-          <DrawerSection title="Compliance" icon={FileText}>
+          <DrawerSection title="Compliance & KYC" icon={FileText}>
             <DrawerField label="FSSAI No." value={k.fssai_number || "—"} />
             {k.fssai_license ? (
               <a
                 href={k.fssai_license}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 mt-2 text-sm font-nunito text-primary hover:underline"
+                className="inline-flex items-center gap-1.5 mt-2 text-sm font-nunito text-primary hover:underline block mb-3"
               >
                 <FileText size={14} /> View FSSAI license
               </a>
             ) : (
-              <p className="font-nunito text-xs text-gray mt-1">No license file uploaded</p>
+              <p className="font-nunito text-xs text-gray mt-1 mb-3">No FSSAI file uploaded</p>
             )}
+
+            <div className="border-t border-[#f0f0f0] my-3" />
+
+            <DrawerField label="Aadhaar No." value={k.aadhaar_number || "—"} />
+            <div className="flex flex-col gap-2 mt-2">
+              {k.aadhaar_card ? (
+                <a
+                  href={k.aadhaar_card}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-sm font-nunito text-primary hover:underline block"
+                >
+                  <FileText size={14} /> View Aadhaar Front
+                </a>
+              ) : (
+                <p className="font-nunito text-xs text-gray">No Aadhaar Front uploaded</p>
+              )}
+              {k.aadhaar_card_back ? (
+                <a
+                  href={k.aadhaar_card_back}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-sm font-nunito text-primary hover:underline block"
+                >
+                  <FileText size={14} /> View Aadhaar Back
+                </a>
+              ) : (
+                <p className="font-nunito text-xs text-gray">No Aadhaar Back uploaded</p>
+              )}
+            </div>
+
+            <div className="border-t border-[#f0f0f0] my-3" />
+
+            <DrawerField label="PAN No." value={k.pan_number || "—"} />
+            {k.pan_card ? (
+              <a
+                href={k.pan_card}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 mt-2 text-sm font-nunito text-primary hover:underline block"
+              >
+                <FileText size={14} /> View PAN Card
+              </a>
+            ) : (
+              <p className="font-nunito text-xs text-gray mt-1">No PAN file uploaded</p>
+            )}
+          </DrawerSection>
+
+          <DrawerSection title="Agreement Acceptance Log" icon={ShieldCheck}>
+            <DrawerField label="Accepted" value={k.agreement_accepted_version ? "Yes" : "No"} />
+            {k.agreement_accepted_version ? (
+              <>
+                <DrawerField label="Accepted Version" value={`v${k.agreement_accepted_version}.0`} />
+                <DrawerField label="Accepted At" value={k.agreement_accepted_at_log ? new Date(k.agreement_accepted_at_log).toLocaleString("en-IN") : (k.agreement_accepted_at ? new Date(k.agreement_accepted_at).toLocaleString("en-IN") : "—")} />
+                <DrawerField label="IP Address" value={k.agreement_ip || "—"} />
+                <DrawerField label="Device" value={k.agreement_device || "—"} />
+                <DrawerField label="App Version" value={k.agreement_app_version || "—"} />
+              </>
+            ) : null}
           </DrawerSection>
 
           {k.description && (

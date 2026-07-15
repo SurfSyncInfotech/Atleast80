@@ -1,4 +1,5 @@
 import { isSmsConfigured, sendOtpSms } from "./smsService.js"
+import { isEmailConfigured, sendOtpEmail } from "./emailService.js"
 
 const DEMO_OTP = process.env.DEMO_OTP || "1234"
 const OTP_TTL_MS = 10 * 60 * 1000
@@ -6,15 +7,19 @@ const OTP_TTL_MS = 10 * 60 * 1000
 /** @type {Map<string, { otp: string, expiresAt: number }>} */
 const store = new Map()
 
+function isChannelConfigured() {
+  return isSmsConfigured() || isEmailConfigured()
+}
+
 function generateOtp() {
-  if (isSmsConfigured()) {
+  if (isChannelConfigured()) {
     return String(Math.floor(1000 + Math.random() * 9000))
   }
   return DEMO_OTP
 }
 
 export function getDemoOtp() {
-  return isSmsConfigured() ? null : DEMO_OTP
+  return isChannelConfigured() ? null : DEMO_OTP
 }
 
 export function createOtp(key) {
@@ -23,10 +28,17 @@ export function createOtp(key) {
   return otp
 }
 
-export async function createAndSendOtp(key, phone) {
+/**
+ * @param {string} key
+ * @param {{ phone?: string, email?: string }} contact
+ */
+export async function createAndSendOtp(key, contact) {
+  const { phone, email } = typeof contact === "string" ? { phone: contact } : contact || {}
   const otp = createOtp(key)
-  if (isSmsConfigured()) {
+  if (phone && isSmsConfigured()) {
     await sendOtpSms(phone, otp)
+  } else if (email && isEmailConfigured()) {
+    await sendOtpEmail(email, otp)
   }
   return otp
 }

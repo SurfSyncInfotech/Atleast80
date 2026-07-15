@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react"
 import { View, Text, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, TextInput } from "react-native"
 import { useRouter } from "expo-router"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import { ChefHat, ArrowLeft, Mail, Lock, ArrowRight } from "lucide-react-native"
+import { ChefHat, ArrowLeft, User, Lock, ArrowRight } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import Button from "../../components/ui/Button"
 import Input from "../../components/ui/Input"
@@ -12,7 +12,7 @@ import { useAuth } from "../../context/AuthContext"
 export default function KitchenLoginPage() {
   const router = useRouter()
   const { loginKitchen, verifyKitchenLoginOtp, user } = useAuth()
-  const [email, setEmail] = useState("")
+  const [identifier, setIdentifier] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
@@ -20,7 +20,8 @@ export default function KitchenLoginPage() {
   // OTP states
   const [step, setStep] = useState("credentials") // "credentials" or "otp"
   const [otp, setOtp] = useState(["", "", "", ""])
-  const [phoneHint, setPhoneHint] = useState("")
+  const [hint, setHint] = useState("")
+  const [channel, setChannel] = useState("phone")
   const [demoOtp, setDemoOtp] = useState("")
 
   const otpRefs = [useRef(null), useRef(null), useRef(null), useRef(null)]
@@ -36,16 +37,17 @@ export default function KitchenLoginPage() {
   if (user?.role === "kitchen") return null
 
   const handleSubmit = async () => {
-    if (!email || !password) {
+    if (!identifier || !password) {
       setError("Please fill in all fields")
       return
     }
     setError("")
     setLoading(true)
     try {
-      const data = await loginKitchen(email, password)
+      const data = await loginKitchen(identifier, password)
       if (data?.requiresOtp) {
-        setPhoneHint(data.phoneHint || "")
+        setChannel(data.channel || "phone")
+        setHint((data.channel === "email" ? data.emailHint : data.phoneHint) || "")
         if (data.demoOtp) setDemoOtp(data.demoOtp)
         setStep("otp")
         setOtp(["", "", "", ""])
@@ -68,7 +70,7 @@ export default function KitchenLoginPage() {
     setError("")
     setLoading(true)
     try {
-      await verifyKitchenLoginOtp(email, password, otpValue)
+      await verifyKitchenLoginOtp(identifier, password, otpValue)
       router.replace("/(kitchen)/dashboard")
     } catch (err) {
       setError(err.message || "Failed to verify OTP")
@@ -98,7 +100,7 @@ export default function KitchenLoginPage() {
     setError("")
     setLoading(true)
     try {
-      const data = await loginKitchen(email, password)
+      const data = await loginKitchen(identifier, password)
       setError("")
       if (data?.demoOtp) setDemoOtp(data.demoOtp)
       setOtp(["", "", "", ""])
@@ -173,7 +175,7 @@ export default function KitchenLoginPage() {
             className="font-nunito text-white/70 text-sm"
           >
             {step === "otp"
-              ? `One-time verification sent to ${phoneHint || "your phone"}`
+              ? `One-time verification sent to ${hint || (channel === "email" ? "your email" : "your phone")}`
               : "Sign in to manage orders, menu, and\nyour kitchen profile."}
           </Text>
         </LinearGradient>
@@ -208,13 +210,12 @@ export default function KitchenLoginPage() {
               {step === "credentials" ? (
                 <View className="gap-4">
                   <View>
-                    <Text className="font-poppins font-medium text-xs text-dark-light mb-2">Email</Text>
+                    <Text className="font-poppins font-medium text-xs text-dark-light mb-2">Phone or Email</Text>
                     <Input
-                      value={email}
-                      onChangeText={setEmail}
-                      placeholder="kitchen@example.com"
-                      icon={Mail}
-                      keyboardType="email-address"
+                      value={identifier}
+                      onChangeText={setIdentifier}
+                      placeholder="Phone number or email"
+                      icon={User}
                     />
                   </View>
 

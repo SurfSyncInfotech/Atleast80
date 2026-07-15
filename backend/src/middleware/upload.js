@@ -9,8 +9,9 @@ export const KITCHEN_UPLOADS_DIR = path.join(__dirname, "../../uploads/kitchen")
 export const STORIES_UPLOADS_DIR = path.join(__dirname, "../../uploads/stories")
 export const HYGIENE_UPLOADS_DIR = path.join(__dirname, "../../uploads/hygiene")
 export const QUOTATION_UPLOADS_DIR = path.join(__dirname, "../../uploads/quotations")
+export const AGREEMENT_UPLOADS_DIR = path.join(__dirname, "../../uploads/agreements")
 
-for (const dir of [UPLOADS_DIR, KITCHEN_UPLOADS_DIR, STORIES_UPLOADS_DIR, HYGIENE_UPLOADS_DIR, QUOTATION_UPLOADS_DIR]) {
+for (const dir of [UPLOADS_DIR, KITCHEN_UPLOADS_DIR, STORIES_UPLOADS_DIR, HYGIENE_UPLOADS_DIR, QUOTATION_UPLOADS_DIR, AGREEMENT_UPLOADS_DIR]) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
 }
 
@@ -109,6 +110,28 @@ export const fssaiLicenseUpload = multer({
   fileFilter: fssaiLicenseFilter,
 })
 
+const onboardingDocumentsStorage = multer.diskStorage({
+  destination(_req, _file, cb) {
+    cb(null, KITCHEN_UPLOADS_DIR)
+  },
+  filename(_req, file, cb) {
+    const ext = path.extname(file.originalname).toLowerCase() || ".pdf"
+    const prefix = file.fieldname === "aadhaarCard"
+      ? "aadhaar_front"
+      : file.fieldname === "aadhaarCardBack"
+      ? "aadhaar_back"
+      : file.fieldname === "panCard"
+      ? "pan"
+      : "fssai"
+    cb(null, `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}${ext}`)
+  },
+})
+
+export const onboardingDocumentsUpload = multer({
+  storage: onboardingDocumentsStorage,
+  fileFilter: fssaiLicenseFilter,
+})
+
 export function getKitchenFileUrl(req, filename) {
   return `${getPublicBaseUrl(req)}/uploads/kitchen/${filename}`
 }
@@ -192,4 +215,54 @@ export const quotationUpload = multer({
 
 export function getQuotationFileUrl(req, filename) {
   return `${getPublicBaseUrl(req)}/uploads/quotations/${filename}`
+}
+
+const agreementStorage = multer.diskStorage({
+  destination(_req, _file, cb) {
+    cb(null, AGREEMENT_UPLOADS_DIR)
+  },
+  filename(_req, file, cb) {
+    const ext = path.extname(file.originalname).toLowerCase() || ".pdf"
+    cb(null, `agreement-${Date.now()}-${Math.random().toString(36).slice(2, 9)}${ext}`)
+  },
+})
+
+function agreementFileFilter(_req, file, cb) {
+  if (file.mimetype === "application/pdf") cb(null, true)
+  else cb(new Error("Partner Agreement must be a PDF file"))
+}
+
+export const agreementUpload = multer({
+  storage: agreementStorage,
+  fileFilter: agreementFileFilter,
+  limits: { fileSize: 10 * 1024 * 1024 },
+})
+
+export function getAgreementFileUrl(req, filename) {
+  return `${getPublicBaseUrl(req)}/uploads/agreements/${filename}`
+}
+
+const trainingVideoStorage = multer.diskStorage({
+  destination(_req, _file, cb) {
+    cb(null, AGREEMENT_UPLOADS_DIR)
+  },
+  filename(_req, file, cb) {
+    const ext = path.extname(file.originalname).toLowerCase() || ".mp4"
+    cb(null, `training-video-${Date.now()}-${Math.random().toString(36).slice(2, 9)}${ext}`)
+  },
+})
+
+function trainingVideoFileFilter(_req, file, cb) {
+  if (VIDEO_TYPES.includes(file.mimetype)) cb(null, true)
+  else cb(new Error("Training Video must be a video file (MP4, WebM, MOV)"))
+}
+
+export const trainingVideoUpload = multer({
+  storage: trainingVideoStorage,
+  fileFilter: trainingVideoFileFilter,
+  limits: { fileSize: 100 * 1024 * 1024 },
+})
+
+export function getTrainingVideoFileUrl(req, filename) {
+  return `${getPublicBaseUrl(req)}/uploads/agreements/${filename}`
 }

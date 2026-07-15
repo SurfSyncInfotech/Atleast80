@@ -9,6 +9,7 @@ import {
   Alert,
   Modal,
   TextInput,
+  Platform,
 } from "react-native"
 import { SafeAreaView } from "react-native-safe-area-context"
 import * as DocumentPicker from "expo-document-picker"
@@ -40,6 +41,14 @@ function formatDate(value) {
   })
 }
 
+function showAlert(title, message) {
+  if (Platform.OS === "web") {
+    window.alert(`${title}: ${message}`)
+  } else {
+    Alert.alert(title, message)
+  }
+}
+
 export default function KitchenEnquiriesScreen() {
   const [enquiries, setEnquiries] = useState([])
   const [loading, setLoading] = useState(true)
@@ -54,6 +63,7 @@ export default function KitchenEnquiriesScreen() {
   const [quoteNotes, setQuoteNotes] = useState("")
   const [quoteFile, setQuoteFile] = useState(null)
   const [successModalVisible, setSuccessModalVisible] = useState(false)
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null)
 
   const loadEnquiries = useCallback(async () => {
     setError("")
@@ -92,18 +102,18 @@ export default function KitchenEnquiriesScreen() {
         setQuoteFile(result.assets[0])
       }
     } catch (err) {
-      Alert.alert("File selection error", err.message || "Failed to select file")
+      showAlert("File selection error", err.message || "Failed to select file")
     }
   }
 
   const handleUploadQuotation = async () => {
     if (!activeEnquiry) return
     if (!quoteFile) {
-      Alert.alert("Required", "Please select a quotation file (PDF or Image)")
+      showAlert("Required", "Please select a quotation file (PDF or Image)")
       return
     }
     if (!quoteAmount || Number(quoteAmount) <= 0) {
-      Alert.alert("Required", "Please enter a valid quotation amount")
+      showAlert("Required", "Please enter a valid quotation amount")
       return
     }
 
@@ -117,7 +127,7 @@ export default function KitchenEnquiriesScreen() {
       await loadEnquiries()
       setSuccessModalVisible(true)
     } catch (err) {
-      Alert.alert("Upload Failed", err.message || "Failed to upload quotation")
+      showAlert("Upload Failed", err.message || "Failed to upload quotation")
     } finally {
       setUploadingId(null)
     }
@@ -128,39 +138,28 @@ export default function KitchenEnquiriesScreen() {
     try {
       await api(`/api/bulk-enquiries/${enquiryId}/quotation`, { method: "DELETE" }, "kitchen")
       await loadEnquiries(false)
-      Alert.alert("Success", "Quotation deleted successfully.")
+      showAlert("Success", "Quotation deleted successfully.")
     } catch (err) {
-      Alert.alert("Error", err.message || "Failed to delete quotation")
+      showAlert("Error", err.message || "Failed to delete quotation")
     } finally {
       setDeletingId(null)
     }
   }
 
   const handleDeleteQuotation = (enquiryId) => {
-    Alert.alert(
-      "Delete Quotation?",
-      "Are you sure you want to delete this quotation? The enquiry will move back to Pending.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => performDeleteQuotation(enquiryId),
-        },
-      ]
-    )
+    setDeleteConfirmId(enquiryId)
   }
 
   const handleCall = (phone) => {
     if (phone) {
-      Linking.openURL(`tel:+91${phone}`).catch(() => {
-        Alert.alert("Error", "Unable to place phone call")
-      })
+      Linking.openURL(`tel:${phone}`)
+    } else {
+      showAlert("Error", "Customer contact number not available")
     }
   }
 
   const pending = enquiries.filter((e) => e.status === "pending")
-  const quoted = enquiries.filter((e) => e.status === "quoted")
+  const quoted = enquiries.filter((e) => e.status !== "pending")
 
   // State for segment control (Pending vs Quoted)
   const [segment, setSegment] = useState("pending")
@@ -286,11 +285,29 @@ export default function KitchenEnquiriesScreen() {
                 </Text>
               </View>
 
-              {/* Quoted specific details */}
-              {enquiry.status === "quoted" && (
+              {/* Quoted / Accepted / Rejected / Completed specific details */}
+              {(enquiry.status === "quoted" || enquiry.status === "accepted" || enquiry.status === "rejected" || enquiry.status === "completed") && (
                 <View className="border-t border-gray-light/20 pt-3 mb-3 gap-2">
                   <View className="flex-row justify-between items-center">
-                    <Text className="font-poppins font-semibold text-xs text-dark">Your quote amount</Text>
+                    <View className="flex-row items-center gap-2">
+                      <Text className="font-poppins font-semibold text-xs text-dark">Your quote amount</Text>
+                      {/* Status Badge */}
+                      <View className={cn(
+                        "px-2 py-0.5 rounded-lg border",
+                        enquiry.status === "quoted" ? "bg-blue-50 border-blue-100" :
+                        enquiry.status === "accepted" ? "bg-green-50 border-green-100" :
+                        enquiry.status === "completed" ? "bg-emerald-50 border-emerald-100" : "bg-red-50 border-red-100"
+                      )}>
+                        <Text className={cn(
+                          "font-poppins font-bold text-[9px] uppercase",
+                          enquiry.status === "quoted" ? "text-blue-700" :
+                          enquiry.status === "accepted" ? "text-green-700" :
+                          enquiry.status === "completed" ? "text-emerald-700" : "text-red-700"
+                        )}>
+                          {enquiry.status === "completed" ? "paid" : enquiry.status}
+                        </Text>
+                      </View>
+                    </View>
                     <Text className="font-poppins font-bold text-sm text-primary">₹{enquiry.quotationAmount}</Text>
                   </View>
                   {enquiry.quotationNotes ? (
@@ -325,6 +342,11 @@ export default function KitchenEnquiriesScreen() {
                   <Upload size={14} color="#FFFFFF" />
                   <Text className="font-poppins font-bold text-xs text-white">Send Quotation</Text>
                 </TouchableOpacity>
+              ) : enquiry.status === "completed" ? (
+                <View className="w-full py-2.5 bg-emerald-550/10 border border-emerald-200 rounded-xl items-center justify-center flex-row gap-1.5 bg-emerald-50">
+                  <CheckCircle size={14} color="#0F5132" />
+                  <Text className="font-poppins font-bold text-xs text-emerald-800">Order Confirmed (Paid)</Text>
+                </View>
               ) : (
                 <TouchableOpacity
                   onPress={() => handleDeleteQuotation(enquiry.id)}
@@ -483,6 +505,43 @@ export default function KitchenEnquiriesScreen() {
             >
               <Text className="font-poppins font-bold text-sm text-white">Got it</Text>
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Custom Delete Confirmation Modal */}
+      <Modal
+        visible={deleteConfirmId !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDeleteConfirmId(null)}
+      >
+        <View className="flex-1 bg-black/60 justify-center items-center px-6">
+          <View className="bg-white rounded-3xl p-6 w-full max-w-xs shadow-2xl items-center">
+            <Text className="font-poppins font-bold text-lg text-dark mb-2 text-center">
+              Delete Quotation?
+            </Text>
+            <Text className="font-nunito text-sm text-gray mb-6 leading-5 text-center">
+              Are you sure you want to delete this quotation? The enquiry will move back to Pending.
+            </Text>
+            <View className="flex-row gap-3 w-full">
+              <TouchableOpacity
+                onPress={() => setDeleteConfirmId(null)}
+                className="flex-1 py-3 bg-gray-100 rounded-xl items-center justify-center"
+              >
+                <Text className="font-poppins font-bold text-sm text-gray-700">Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  const id = deleteConfirmId
+                  setDeleteConfirmId(null)
+                  performDeleteQuotation(id)
+                }}
+                className="flex-1 py-3 bg-red-500 rounded-xl items-center justify-center"
+              >
+                <Text className="font-poppins font-bold text-sm text-white">Delete</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>

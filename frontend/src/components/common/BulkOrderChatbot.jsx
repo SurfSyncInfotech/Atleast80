@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { MessageCircle, X, Send, FileText, IndianRupee, Loader2 } from "lucide-react"
+import { MessageCircle, X, Send, FileText, IndianRupee, Loader2, Trash2 } from "lucide-react"
 import { useAuth } from "../../context/AuthContext"
 import { api } from "../../lib/api"
 import { resolveMediaUrl } from "../../lib/media"
@@ -19,10 +19,20 @@ export default function BulkOrderChatbot({ kitchenId, kitchenName, cartVisible =
   const [estimatedValue, setEstimatedValue] = useState(String(MIN_BULK_VALUE))
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
+  const [kitchenPhone, setKitchenPhone] = useState("")
 
   useEffect(() => {
     if (!open || !customerUser || !kitchenId) return
     let cancelled = false
+
+    api(`/api/kitchens/${kitchenId}`)
+      .then((data) => {
+        if (!cancelled && data.kitchen) {
+          setKitchenPhone(data.kitchen.phone || "")
+        }
+      })
+      .catch((err) => console.log("Failed to load kitchen details:", err))
+
     setLoadingEnquiry(true)
     api(`/api/bulk-enquiries/kitchen/${kitchenId}`, {}, "customer")
       .then((data) => {
@@ -36,6 +46,60 @@ export default function BulkOrderChatbot({ kitchenId, kitchenName, cartVisible =
       })
     return () => { cancelled = true }
   }, [open, customerUser, kitchenId])
+
+  const handleAccept = async () => {
+    try {
+      await api(`/api/bulk-enquiries/${enquiry.id}/accept`, { method: "POST" })
+      const data = await api(`/api/bulk-enquiries/kitchen/${kitchenId}`)
+      setEnquiry(data.enquiry)
+    } catch (err) {
+      alert(err.message || "Failed to accept quotation")
+    }
+  }
+
+  const handleReject = async () => {
+    try {
+      await api(`/api/bulk-enquiries/${enquiry.id}/reject`, { method: "POST" })
+      const data = await api(`/api/bulk-enquiries/kitchen/${kitchenId}`)
+      setEnquiry(data.enquiry)
+    } catch (err) {
+      alert(err.message || "Failed to reject quotation")
+    }
+  }
+
+  const handlePay = async () => {
+    const ok = window.confirm(`Proceed to pay ₹${enquiry.quotationAmount} for bulk order enquiry #${enquiry.id}?`)
+    if (!ok) return
+    try {
+      await api(`/api/bulk-enquiries/${enquiry.id}/pay`, { method: "POST" })
+      const data = await api(`/api/bulk-enquiries/kitchen/${kitchenId}`)
+      setEnquiry(data.enquiry)
+      alert("Thank you! Your payment for the bulk order is successful.")
+    } catch (err) {
+      alert(err.message || "Failed to process payment")
+    }
+  }
+
+  const handleChat = () => {
+    if (kitchenPhone) {
+      const formatted = kitchenPhone.replace(/[^0-9]/g, "")
+      const phoneWithCode = formatted.length === 10 ? `91${formatted}` : formatted
+      window.open(`https://wa.me/${phoneWithCode}?text=Hello, I am contacting you regarding bulk order enquiry #${enquiry.id}`)
+    } else {
+      alert("This kitchen does not have a contact number listed.")
+    }
+  }
+
+  const handleDelete = async () => {
+    const ok = window.confirm("Are you sure you want to delete this bulk order enquiry?")
+    if (!ok) return
+    try {
+      await api(`/api/bulk-enquiries/${enquiry.id}`, { method: "DELETE" })
+      setEnquiry(null)
+    } catch (err) {
+      alert(err.message || "Failed to delete enquiry")
+    }
+  }
 
   const handleOpen = () => {
     if (!customerUser) {
@@ -126,10 +190,17 @@ export default function BulkOrderChatbot({ kitchenId, kitchenName, cartVisible =
                 <div className="flex justify-center py-6">
                   <Loader2 size={22} className="animate-spin text-primary" />
                 </div>
-              ) : enquiry?.status === "quoted" ? (
-                <QuotedView enquiry={enquiry} />
+              ) : (enquiry?.status === "quoted" || enquiry?.status === "accepted" || enquiry?.status === "rejected") ? (
+                <QuotedView
+                  enquiry={enquiry}
+                  onAccept={handleAccept}
+                  onReject={handleReject}
+                  onPay={handlePay}
+                  onChat={handleChat}
+                  onDelete={handleDelete}
+                />
               ) : enquiry?.status === "pending" ? (
-                <PendingView enquiry={enquiry} />
+                <PendingView enquiry={enquiry} onDelete={handleDelete} />
               ) : (
                 <form onSubmit={handleSubmit} className="space-y-3">
                   <div>
@@ -198,7 +269,7 @@ export default function BulkOrderChatbot({ kitchenId, kitchenName, cartVisible =
   )
 }
 
-function PendingView({ enquiry }) {
+function PendingView({ enquiry, onDelete }) {
   return (
     <div className="space-y-2">
       <div className="bg-amber-50 border border-amber-100 rounded-xl px-3 py-2.5">
@@ -212,19 +283,47 @@ function PendingView({ enquiry }) {
         <p className="font-nunito text-dark mt-1">{enquiry.message}</p>
         <p className="font-poppins font-semibold text-primary text-sm mt-2">₹{enquiry.estimatedValue}</p>
       </div>
+      <button
+        type="button"
+        onClick={onDelete}
+        className="w-full py-2 flex items-center justify-center gap-1.5 text-xs font-poppins font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-100 rounded-xl cursor-pointer transition-colors mt-2"
+      >
+        <Trash2 size={13} />
+        Delete Enquiry
+      </button>
     </div>
   )
 }
 
-function QuotedView({ enquiry }) {
+function QuotedView({ enquiry, onAccept, onReject, onPay, onChat, onDelete }) {
   const fileUrl = enquiry.quotationFile ? resolveMediaUrl(enquiry.quotationFile) : null
   const isPdf = fileUrl?.toLowerCase().includes(".pdf")
 
+  const getStatusText = () => {
+    switch(enquiry.status) {
+      case "quoted": return "Quotation received"
+      case "accepted": return "Quotation accepted"
+      case "rejected": return "Quotation rejected"
+      case "completed": return "Order placed (Paid)"
+      default: return "Quotation"
+    }
+  }
+
+  const getStatusColor = () => {
+    switch(enquiry.status) {
+      case "quoted": return "bg-blue-50 border-blue-100 text-blue-900"
+      case "accepted": return "bg-green-50 border-green-100 text-green-900"
+      case "rejected": return "bg-red-50 border-red-100 text-red-900"
+      case "completed": return "bg-emerald-50 border-emerald-100 text-emerald-900"
+      default: return "bg-gray-50 border-gray-100 text-gray-900"
+    }
+  }
+
   return (
     <div className="space-y-2">
-      <div className="bg-green-50 border border-green-100 rounded-xl px-3 py-2.5">
-        <p className="font-poppins font-semibold text-green-900 text-sm">Quotation received</p>
-        <p className="font-nunito text-xs text-green-800 mt-1">
+      <div className={cn("border rounded-xl px-3 py-2.5", getStatusColor())}>
+        <p className="font-poppins font-semibold text-sm">{getStatusText()}</p>
+        <p className="font-nunito text-[11px] mt-0.5 opacity-80">
           {enquiry.quotedAt
             ? `Uploaded ${new Date(enquiry.quotedAt).toLocaleString("en-IN")}`
             : "From the kitchen"}
@@ -242,16 +341,86 @@ function QuotedView({ enquiry }) {
           href={fileUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl border border-primary/20 bg-primary/5 text-primary font-poppins font-semibold text-sm hover:bg-primary/10"
+          className="flex items-center justify-center gap-2 w-full px-3 py-2 rounded-xl border border-primary/20 bg-primary/5 text-primary font-poppins font-semibold text-sm hover:bg-primary/10"
         >
-          <FileText size={16} />
+          <FileText size={14} />
           {isPdf ? "View quotation PDF" : "View quotation"}
         </a>
       )}
+
+      {/* Accept / Reject controls */}
+      {enquiry.status === "quoted" && (
+        <div className="flex gap-2.5 pt-1.5">
+          <button
+            type="button"
+            onClick={onReject}
+            className="flex-1 py-2 text-center text-xs font-poppins font-bold text-red-700 bg-red-50 border border-red-100 rounded-xl hover:bg-red-100 cursor-pointer"
+          >
+            Reject
+          </button>
+          <button
+            type="button"
+            onClick={onAccept}
+            className="flex-1 py-2 text-center text-xs font-poppins font-bold text-white bg-primary rounded-xl hover:bg-primary-dark cursor-pointer"
+          >
+            Accept
+          </button>
+        </div>
+      )}
+
+      {/* Pay control */}
+      {enquiry.status === "accepted" && (
+        <button
+          type="button"
+          onClick={onPay}
+          className="w-full py-2.5 text-center text-xs font-poppins font-bold text-dark bg-[#F4C400] rounded-xl hover:bg-[#E5B800] cursor-pointer mt-1"
+        >
+          PROCEED TO PAY ₹{enquiry.quotationAmount}
+        </button>
+      )}
+
+      {enquiry.status === "completed" && (
+        <div className="bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2.5 text-center mt-1">
+          <p className="font-poppins font-semibold text-emerald-900 text-xs">Payment Successful</p>
+          <p className="font-nunito text-[11px] text-emerald-800 mt-0.5">
+            Your order has been placed. The kitchen will begin preparation.
+          </p>
+        </div>
+      )}
+
+      {/* Chat control */}
+      {enquiry.status === "rejected" && (
+        <div className="space-y-2 pt-1.5">
+          <button
+            type="button"
+            onClick={onChat}
+            className="w-full py-2.5 text-center text-xs font-poppins font-bold text-white bg-[#25D366] rounded-xl hover:bg-[#20BA5A] cursor-pointer flex items-center justify-center gap-1.5"
+          >
+            Chat further (WhatsApp)
+          </button>
+          <button
+            type="button"
+            onClick={onAccept}
+            className="w-full py-2 text-center text-xs font-poppins font-bold text-primary bg-white border border-primary/20 rounded-xl hover:bg-gray-50 cursor-pointer"
+          >
+            Accept Quote Instead
+          </button>
+        </div>
+      )}
+
       <div className="rounded-xl border border-gray-100 px-3 py-2.5 text-sm opacity-80">
-        <p className="font-nunito text-gray text-xs">Your enquiry</p>
+        <p className="font-nunito text-gray text-[10px]">Your enquiry</p>
         <p className="font-nunito text-dark text-xs mt-1 line-clamp-3">{enquiry.message}</p>
       </div>
+
+      <button
+        type="button"
+        onClick={onDelete}
+        className="w-full py-2 flex items-center justify-center gap-1.5 text-xs font-poppins font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-100 rounded-xl cursor-pointer transition-colors mt-2"
+      >
+        <Trash2 size={13} />
+        Delete Enquiry
+      </button>
     </div>
   )
 }

@@ -4,6 +4,7 @@ import { authRequired, requireRole } from "../middleware/auth.js"
 import { normalizePublicUrl } from "../utils/mediaUrl.js"
 import { formatMenuItem } from "../utils/menuItem.js"
 import { getKitchenVisibilityInfo } from "../utils/hygieneCompliance.js"
+import { agreementUpload, getAgreementFileUrl, trainingVideoUpload, getTrainingVideoFileUrl } from "../middleware/upload.js"
 
 const router = Router()
 
@@ -237,9 +238,19 @@ router.get("/kitchens", async (req, res) => {
     const total = countRows[0].total
 
     const [rows] = await pool.query(
-      `SELECT k.*, u.email AS user_email
+      `SELECT k.*, u.email AS user_email,
+              sig.ip_address AS agreement_ip,
+              sig.device_info AS agreement_device,
+              sig.app_version AS agreement_app_version,
+              sig.accepted_at AS agreement_accepted_at_log
        FROM kitchens k
        JOIN users u ON u.id = k.user_id
+       LEFT JOIN (
+         SELECT s1.* FROM kitchen_agreement_signatures s1
+         INNER JOIN (
+           SELECT MAX(id) AS max_id FROM kitchen_agreement_signatures GROUP BY kitchen_id
+         ) s2 ON s1.id = s2.max_id
+       ) sig ON sig.kitchen_id = k.id
        ${whereClause}
        ORDER BY ${sortCol} ${sortOrder}
        LIMIT ? OFFSET ?`,
@@ -903,6 +914,148 @@ router.delete("/customers/:id", async (req, res) => {
   } catch (error) {
     console.error("Delete customer error:", error)
     res.status(500).json({ message: "Failed to delete customer" })
+  }
+})
+
+router.get("/settings/partner-agreement", async (_req, res) => {
+  try {
+    const [rows] = await pool.query(
+      "SELECT partner_agreement_url, partner_agreement_version, partner_agreement_updated_at FROM site_settings WHERE id = 1"
+    )
+    const row = rows[0] || {}
+    res.json({
+      url: row.partner_agreement_url || null,
+      version: row.partner_agreement_version || 0,
+      updatedAt: row.partner_agreement_updated_at || null,
+    })
+  } catch (error) {
+    console.error("Fetch partner agreement error:", error)
+    res.status(500).json({ message: "Failed to fetch partner agreement" })
+  }
+})
+
+router.post("/settings/partner-agreement", (req, res) => {
+  agreementUpload.single("agreement")(req, res, async (uploadErr) => {
+    if (uploadErr) {
+      return res.status(400).json({ message: uploadErr.message || "Agreement upload failed" })
+    }
+    if (!req.file) {
+      return res.status(400).json({ message: "PDF file is required" })
+    }
+
+    try {
+      const url = getAgreementFileUrl(req, req.file.filename)
+      await pool.query(
+        `UPDATE site_settings
+         SET partner_agreement_url = ?, partner_agreement_version = partner_agreement_version + 1, partner_agreement_updated_at = NOW()
+         WHERE id = 1`,
+        [url]
+      )
+
+      const [rows] = await pool.query(
+        "SELECT partner_agreement_url, partner_agreement_version, partner_agreement_updated_at FROM site_settings WHERE id = 1"
+      )
+
+      res.json({
+        message: "Partner Agreement updated",
+        url: rows[0].partner_agreement_url,
+        version: rows[0].partner_agreement_version,
+        updatedAt: rows[0].partner_agreement_updated_at,
+      })
+    } catch (error) {
+      console.error("Upload partner agreement error:", error)
+      res.status(500).json({ message: "Failed to upload Partner Agreement" })
+    }
+  })
+})
+
+router.get("/settings/training-video", async (_req, res) => {
+  try {
+    const [rows] = await pool.query(
+      "SELECT training_video_url, training_video_version, training_video_updated_at FROM site_settings WHERE id = 1"
+    )
+    const row = rows[0] || {}
+    res.json({
+      url: row.training_video_url || null,
+      version: row.training_video_version || 0,
+      updatedAt: row.training_video_updated_at || null,
+    })
+  } catch (error) {
+    console.error("Fetch training video error:", error)
+    res.status(500).json({ message: "Failed to fetch training video" })
+  }
+})
+
+router.post("/settings/training-video", (req, res) => {
+  trainingVideoUpload.single("video")(req, res, async (uploadErr) => {
+    if (uploadErr) {
+      return res.status(400).json({ message: uploadErr.message || "Training video upload failed" })
+    }
+    if (!req.file) {
+      return res.status(400).json({ message: "Video file is required" })
+    }
+
+    try {
+      const url = getTrainingVideoFileUrl(req, req.file.filename)
+      await pool.query(
+        `UPDATE site_settings
+         SET training_video_url = ?, training_video_version = training_video_version + 1, training_video_updated_at = NOW()
+         WHERE id = 1`,
+        [url]
+      )
+
+      const [rows] = await pool.query(
+        "SELECT training_video_url, training_video_version, training_video_updated_at FROM site_settings WHERE id = 1"
+      )
+
+      res.json({
+        message: "Training Video updated",
+        url: rows[0].training_video_url,
+        version: rows[0].training_video_version,
+        updatedAt: rows[0].training_video_updated_at,
+      })
+    } catch (error) {
+      console.error("Upload training video error:", error)
+      res.status(500).json({ message: "Failed to upload Training Video" })
+    }
+  })
+})
+
+router.delete("/settings/partner-agreement", async (_req, res) => {
+  try {
+    await pool.query(
+      `UPDATE site_settings
+       SET partner_agreement_url = NULL, partner_agreement_version = 0, partner_agreement_updated_at = NOW()
+       WHERE id = 1`
+    )
+    res.json({
+      message: "Partner Agreement deleted successfully",
+      url: null,
+      version: 0,
+      updatedAt: null,
+    })
+  } catch (error) {
+    console.error("Delete partner agreement error:", error)
+    res.status(500).json({ message: "Failed to delete Partner Agreement" })
+  }
+})
+
+router.delete("/settings/training-video", async (_req, res) => {
+  try {
+    await pool.query(
+      `UPDATE site_settings
+       SET training_video_url = NULL, training_video_version = 0, training_video_updated_at = NOW()
+       WHERE id = 1`
+    )
+    res.json({
+      message: "Training Video deleted successfully",
+      url: null,
+      version: 0,
+      updatedAt: null,
+    })
+  } catch (error) {
+    console.error("Delete training video error:", error)
+    res.status(500).json({ message: "Failed to delete training video" })
   }
 })
 

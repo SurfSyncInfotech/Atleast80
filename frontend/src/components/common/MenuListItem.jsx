@@ -32,6 +32,11 @@ export default function MenuListItem({ item, className, onOpen }) {
           >
             <span className={cn("w-[7px] h-[7px] rounded-full", isVeg ? "bg-emerald-600" : "bg-red-600")} />
           </span>
+          {Boolean(item.isCombo || item.is_combo) && (
+            <span className="text-[9px] font-poppins font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-700 border border-amber-500/20">
+              Combo
+            </span>
+          )}
           {item.category === "grocery" && (
             <span className="text-[9px] font-poppins font-bold uppercase tracking-widest text-primary/70">
               Ration

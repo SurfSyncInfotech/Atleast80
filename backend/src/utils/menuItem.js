@@ -21,6 +21,9 @@ export function formatMenuItem(item) {
 
   return {
     ...item,
+    is_combo: Boolean(item.is_combo),
+    isCombo: Boolean(item.is_combo),
+    comboItems: item.comboItems || [],
     approval_status: item.approval_status || "pending",
     approvalStatus: item.approval_status || "pending",
     review_comment: item.review_comment || null,

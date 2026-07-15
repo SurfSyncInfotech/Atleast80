@@ -111,15 +111,42 @@ export async function uploadKitchenFssaiLicense(file) {
   return uploadFormData("/api/kitchens/me/fssai-license", formData, "kitchen")
 }
 
-export async function registerKitchen(form, fssaiLicenseFile) {
+export async function registerKitchen(form, fssaiLicenseFile, aadhaarCardFile, aadhaarCardBackFile, panCardFile) {
   const formData = new FormData()
   Object.entries(form).forEach(([key, value]) => {
     if (value !== undefined && value !== null) {
       formData.append(key, value)
     }
   })
+  formData.append("appVersion", "1.0.0")
   formData.append("fssaiLicense", fssaiLicenseFile)
+  formData.append("aadhaarCard", aadhaarCardFile)
+  formData.append("aadhaarCardBack", aadhaarCardBackFile)
+  formData.append("panCard", panCardFile)
   return uploadFormData("/api/auth/kitchen/register", formData, "kitchen")
+}
+
+export async function verifyRegisterOtp(userId, otp) {
+  return api("/api/auth/kitchen/register/verify-otp", {
+    method: "POST",
+    body: JSON.stringify({ userId, otp }),
+  })
+}
+
+export async function getPartnerAgreement() {
+  return api("/api/kitchens/partner-agreement")
+}
+
+export async function uploadPartnerAgreementPdf(file) {
+  const formData = new FormData()
+  formData.append("agreement", file)
+  return uploadFormData("/api/admin/settings/partner-agreement", formData, "admin")
+}
+
+export async function uploadTrainingVideo(file) {
+  const formData = new FormData()
+  formData.append("video", file)
+  return uploadFormData("/api/admin/settings/training-video", formData, "admin")
 }
 
 export async function uploadFiles(path, files) {
@@ -128,4 +155,12 @@ export async function uploadFiles(path, files) {
   const formData = new FormData()
   files.forEach((file) => formData.append("files", file))
   return uploadFormData(path, formData)
+}
+
+export async function deletePartnerAgreementPdf() {
+  return api("/api/admin/settings/partner-agreement", { method: "DELETE" }, "admin")
+}
+
+export async function deleteTrainingVideo() {
+  return api("/api/admin/settings/training-video", { method: "DELETE" }, "admin")
 }

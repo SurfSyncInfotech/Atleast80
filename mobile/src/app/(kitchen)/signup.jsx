@@ -1,25 +1,63 @@
-import { useState } from "react"
-import { View, Text, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform } from "react-native"
+import { useState, useEffect, useRef } from "react"
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
+  Linking,
+  Modal,
+  TextInput,
+  Alert,
+  ActivityIndicator,
+  Pressable
+} from "react-native"
 import { useRouter } from "expo-router"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import { ChefHat, ArrowRight, ArrowLeft, Store, User, Mail, Phone, Lock, MapPin, ShieldCheck, Check, Upload, FileText, UtensilsCrossed } from "lucide-react-native"
+import {
+  ChefHat,
+  ArrowRight,
+  ArrowLeft,
+  Store,
+  User,
+  Mail,
+  Phone,
+  Lock,
+  MapPin,
+  Check,
+  Upload,
+  FileText,
+  UtensilsCrossed,
+  Eye,
+  Download,
+  ChevronDown,
+  X,
+  Video,
+  CheckCircle,
+  AlertTriangle,
+  Shield
+} from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import * as DocumentPicker from "expo-document-picker"
+import * as WebBrowser from "expo-web-browser"
 import Button from "../../components/ui/Button"
 import Input from "../../components/ui/Input"
 import PasswordInput from "../../components/ui/PasswordInput"
 import { useAuth } from "../../context/AuthContext"
-import { cn } from "../../lib/utils"
+import { api, getPartnerAgreement } from "../../lib/api"
 
 const steps = [
   { id: 1, title: "Kitchen Info", subtitle: "Tell Us About Your Kitchen", icon: Store },
   { id: 2, title: "Account", subtitle: "Create Your Account", icon: User },
   { id: 3, title: "Location", subtitle: "Location & Kitchen Details", icon: MapPin },
+  { id: 4, title: "Agreement", subtitle: "Agreement & Training Video", icon: CheckCircle },
+  { id: 5, title: "KYC Verify", subtitle: "KYC Documents Verification", icon: Shield },
 ]
 
 export default function KitchenSignupPage() {
   const router = useRouter()
-  const { registerKitchen } = useAuth()
+  const { registerKitchen, verifyKitchenRegisterOtp } = useAuth()
   const insets = useSafeAreaInsets()
   const [step, setStep] = useState(1)
   const [error, setError] = useState("")
@@ -41,8 +79,77 @@ export default function KitchenSignupPage() {
     pincode: "",
     openingTime: "",
     description: "",
+    aadhaarNumber: "",
+    panNumber: "",
   })
+  const [identifierType, setIdentifierType] = useState("phone")
   const [fssaiLicenseFile, setFssaiLicenseFile] = useState(null)
+  const [aadhaarCardFile, setAadhaarCardFile] = useState(null)
+  const [aadhaarCardBackFile, setAadhaarCardBackFile] = useState(null)
+  const [panCardFile, setPanCardFile] = useState(null)
+
+  // OTP Verification Modal States
+  const [signupOtpVisible, setSignupOtpVisible] = useState(false)
+  const [signupUserId, setSignupUserId] = useState(null)
+  const [signupOtp, setSignupOtp] = useState(["", "", "", ""])
+  const [signupDemoOtp, setSignupDemoOtp] = useState("")
+  const [signupOtpError, setSignupOtpError] = useState("")
+  const [otpVerifying, setOtpVerifying] = useState(false)
+  const signupOtpRefs = [useRef(null), useRef(null), useRef(null), useRef(null)]
+
+  // Location Picker States
+  const [statesList, setStatesList] = useState([])
+  const [citiesList, setCitiesList] = useState([])
+  const [statesLoading, setStatesLoading] = useState(false)
+  const [citiesLoading, setCitiesLoading] = useState(false)
+  const [statePickerVisible, setStatePickerVisible] = useState(false)
+  const [cityPickerVisible, setCityPickerVisible] = useState(false)
+
+  // Agreement & Training Video States
+  const [agreement, setAgreement] = useState(null)
+  const [agreementLoading, setAgreementLoading] = useState(false)
+  const [agreementAccepted, setAgreementAccepted] = useState(false)
+  const [agreementViewed, setAgreementViewed] = useState(false)
+  const [videoWatched, setVideoWatched] = useState(false)
+
+  // Load agreement and video metadata
+  useEffect(() => {
+    if (step !== 4 || agreement || agreementLoading) return
+    setAgreementLoading(true)
+    getPartnerAgreement()
+      .then(setAgreement)
+      .catch(() => setError("Failed to load Partner Agreement. Please try again."))
+      .finally(() => setAgreementLoading(false))
+  }, [step])
+
+  const loadStates = async () => {
+    if (statesList.length > 0) return
+    setStatesLoading(true)
+    try {
+      const data = await api("/api/locations/states")
+      setStatesList(data.states || [])
+    } catch (err) {
+      console.warn("Failed to load states:", err)
+    } finally {
+      setStatesLoading(false)
+    }
+  }
+
+  const handleSelectState = async (stateName, stateIso) => {
+    setForm((f) => ({ ...f, state: stateName, city: "" }))
+    setStatePickerVisible(false)
+
+    setCitiesLoading(true)
+    try {
+      const data = await api(`/api/locations/cities?state=${stateIso}`)
+      setCitiesList(data.cities || [])
+    } catch (err) {
+      console.warn("Failed to load cities:", err)
+      setCitiesList([])
+    } finally {
+      setCitiesLoading(false)
+    }
+  }
 
   const pickDocument = async () => {
     try {
@@ -58,6 +165,48 @@ export default function KitchenSignupPage() {
     }
   }
 
+  const pickAadhaarDocument = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ["image/*", "application/pdf"],
+      })
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        setAadhaarCardFile(result.assets[0])
+        setError("")
+      }
+    } catch (err) {
+      console.log("Error picking Aadhaar document", err)
+    }
+  }
+
+  const pickAadhaarBackDocument = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ["image/*", "application/pdf"],
+      })
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        setAadhaarCardBackFile(result.assets[0])
+        setError("")
+      }
+    } catch (err) {
+      console.log("Error picking Aadhaar Back document", err)
+    }
+  }
+
+  const pickPanDocument = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ["image/*", "application/pdf"],
+      })
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        setPanCardFile(result.assets[0])
+        setError("")
+      }
+    } catch (err) {
+      console.log("Error picking PAN document", err)
+    }
+  }
+
   const validateStep = () => {
     if (step === 1) {
       if (!form.name.trim() || !form.ownerName.trim() || !form.speciality.trim() || !form.bestItem.trim()) {
@@ -66,11 +215,12 @@ export default function KitchenSignupPage() {
       }
     }
     if (step === 2) {
-      if (!form.email.trim() || !form.phone.trim() || !form.password || !fssaiLicenseFile) {
-        setError("Email, phone, password, and FSSAI license upload are required")
+      const identifierValue = identifierType === "email" ? form.email.trim() : form.phone.trim()
+      if (!identifierValue || !form.password || !fssaiLicenseFile) {
+        setError(`${identifierType === "email" ? "Email" : "Phone"}, password, and FSSAI license upload are required`)
         return false
       }
-      if (form.phone.length !== 10) {
+      if (identifierType === "phone" && form.phone.length !== 10) {
         setError("Phone number must be 10 digits")
         return false
       }
@@ -97,12 +247,44 @@ export default function KitchenSignupPage() {
         return false
       }
     }
+    if (step === 4) {
+      if (!agreement?.url) {
+        setError("Partner Agreement is still loading. Please wait a moment.")
+        return false
+      }
+      if (!agreementViewed) {
+        setError("Please view the Partner Agreement PDF first.")
+        return false
+      }
+      if (agreement?.videoUrl && !videoWatched) {
+        setError("Please watch the training video first.")
+        return false
+      }
+      if (!agreementAccepted) {
+        setError("Please tick the confirmation checkbox to continue")
+        return false
+      }
+    }
+    if (step === 5) {
+      if (!form.aadhaarNumber.trim() || !form.panNumber.trim() || !aadhaarCardFile || !aadhaarCardBackFile || !panCardFile) {
+        setError("Aadhaar Number, Aadhaar Front & Back files, PAN Number, and PAN Card file are required")
+        return false
+      }
+      if (!/^\d{12}$/.test(form.aadhaarNumber.trim())) {
+        setError("Aadhaar number must be exactly 12 digits")
+        return false
+      }
+      if (!/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(form.panNumber.trim().toUpperCase())) {
+        setError("PAN number must be a valid 10-character alphanumeric PAN")
+        return false
+      }
+    }
     setError("")
     return true
   }
 
   const nextStep = () => {
-    if (validateStep()) setStep((s) => Math.min(s + 1, 3))
+    if (validateStep()) setStep((s) => Math.min(s + 1, 5))
   }
 
   const prevStep = () => {
@@ -111,7 +293,7 @@ export default function KitchenSignupPage() {
   }
 
   const handleSubmit = async () => {
-    if (step < 3) {
+    if (step < 5) {
       nextStep()
       return
     }
@@ -121,15 +303,62 @@ export default function KitchenSignupPage() {
     setError("")
     setLoading(true)
     try {
-      await registerKitchen(form, fssaiLicenseFile)
-      router.replace({
-        pathname: "/(kitchen)/dashboard",
-        params: { newSignup: "true" },
-      })
+      const data = await registerKitchen(
+        { ...form, agreementVersion: agreement.version },
+        fssaiLicenseFile,
+        aadhaarCardFile,
+        aadhaarCardBackFile,
+        panCardFile
+      )
+      if (data?.requiresOtp) {
+        setSignupUserId(data.userId)
+        if (data.demoOtp) setSignupDemoOtp(data.demoOtp)
+        setSignupOtp(["", "", "", ""])
+        setSignupOtpError("")
+        setSignupOtpVisible(true)
+      } else {
+        router.replace({
+          pathname: "/(kitchen)/dashboard",
+          params: { newSignup: "true" },
+        })
+      }
     } catch (err) {
       setError(err.message || "Registration failed")
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleVerifySignupOtp = async () => {
+    const otpVal = signupOtp.join("")
+    if (otpVal.length !== 4) {
+      setSignupOtpError("Please enter the 4-digit OTP")
+      return
+    }
+    setSignupOtpError("")
+    setOtpVerifying(true)
+    try {
+      const data = await verifyKitchenRegisterOtp(signupUserId, otpVal)
+      setSignupOtpVisible(false)
+      if (Platform.OS === "web") {
+        window.alert(data.message || "Your registration is submitted. Please log in to continue.")
+        router.replace("/(kitchen)/login")
+      } else {
+        Alert.alert(
+          "Verification Success",
+          data.message || "Your registration is submitted. Please log in to verify your identity.",
+          [
+            { 
+              text: "Go to Login", 
+              onPress: () => router.replace("/(kitchen)/login")
+            }
+          ]
+        )
+      }
+    } catch (err) {
+      setSignupOtpError(err.message || "Invalid or expired OTP")
+    } finally {
+      setOtpVerifying(false)
     }
   }
 
@@ -167,17 +396,11 @@ export default function KitchenSignupPage() {
               <ChefHat size={22} color="#F4C400" />
             </View>
             <View style={{ flex: 1 }}>
-              <Text
-                style={{ color: "#FFFFFF" }}
-                className="font-poppins font-bold text-lg"
-              >
+              <Text style={{ color: "#FFFFFF" }} className="font-poppins font-bold text-lg">
                 Register Your Kitchen
               </Text>
-              <Text
-                style={{ color: "rgba(255,255,255,0.75)", marginTop: 2 }}
-                className="font-nunito text-xs"
-              >
-                {`Step ${step} of 3: ${currentStepMeta?.subtitle}`}
+              <Text style={{ color: "rgba(255,255,255,0.75)", marginTop: 2 }} className="font-nunito text-xs">
+                {`Step ${step} of 5: ${currentStepMeta?.subtitle}`}
               </Text>
             </View>
           </View>
@@ -204,7 +427,7 @@ export default function KitchenSignupPage() {
         </LinearGradient>
 
         <View className="px-4 py-6 flex-1">
-          {/* Step Indicator (dots) */}
+          {/* Step Indicator dots */}
           <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 8, marginBottom: 20 }}>
             {steps.map((s, i) => {
               const isActive = step === s.id
@@ -244,7 +467,7 @@ export default function KitchenSignupPage() {
             })}
           </View>
 
-          {/* Form Content card */}
+          {/* Form Card */}
           <View className="bg-white rounded-2xl p-5 shadow-sm border border-gray-light/35">
             {error ? (
               <View className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
@@ -345,30 +568,69 @@ export default function KitchenSignupPage() {
                   Credentials to manage your kitchen business
                 </Text>
 
-                <View>
-                  <Text className="font-poppins text-xs font-semibold text-dark mb-1.5">Email *</Text>
-                  <Input
-                    value={form.email}
-                    onChangeText={(val) => setForm({ ...form, email: val })}
-                    placeholder="kitchen@example.com"
-                    icon={Mail}
-                    keyboardType="email-address"
-                    autoComplete="off"
-                    autoCorrect={false}
-                    textContentType="none"
-                  />
+                {/* Tabs */}
+                <View className="flex-row gap-2 bg-[#FAF9F6] p-1 rounded-full border border-[#E3DFD5] mb-2">
+                  {[
+                    { id: "phone", label: "Phone" },
+                    { id: "email", label: "Email" },
+                  ].map((opt) => (
+                    <TouchableOpacity
+                      key={opt.id}
+                      onPress={() => {
+                        setIdentifierType(opt.id)
+                        setForm((f) => ({
+                          ...f,
+                          phone: opt.id === "phone" ? f.phone : "",
+                          email: opt.id === "email" ? f.email : "",
+                        }))
+                      }}
+                      style={{
+                        flex: 1,
+                        paddingVertical: 10,
+                        borderRadius: 999,
+                        borderWidth: 1.5,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: identifierType === opt.id ? "#0B6B3A" : "#FFFFFF",
+                        borderColor: identifierType === opt.id ? "#0B6B3A" : "#E5E5E5",
+                      }}
+                    >
+                      <Text
+                        style={{ color: identifierType === opt.id ? "#FFFFFF" : "#2E2E2E" }}
+                        className="font-poppins font-bold text-xs"
+                      >
+                        {opt.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
 
-                <View>
-                  <Text className="font-poppins text-xs font-semibold text-dark mb-1.5">Phone Number *</Text>
-                  <Input
-                    value={form.phone}
-                    onChangeText={(val) => setForm({ ...form, phone: val.replace(/\D/g, "").slice(0, 10) })}
-                    placeholder="10-digit mobile number"
-                    icon={Phone}
-                    keyboardType="phone-pad"
-                  />
-                </View>
+                {identifierType === "phone" ? (
+                  <View>
+                    <Text className="font-poppins text-xs font-semibold text-dark mb-1.5">Phone Number *</Text>
+                    <Input
+                      value={form.phone}
+                      onChangeText={(val) => setForm({ ...form, phone: val.replace(/\D/g, "").slice(0, 10) })}
+                      placeholder="10-digit mobile number"
+                      icon={Phone}
+                      keyboardType="phone-pad"
+                    />
+                  </View>
+                ) : (
+                  <View>
+                    <Text className="font-poppins text-xs font-semibold text-dark mb-1.5">Email *</Text>
+                    <Input
+                      value={form.email}
+                      onChangeText={(val) => setForm({ ...form, email: val })}
+                      placeholder="kitchen@example.com"
+                      icon={Mail}
+                      keyboardType="email-address"
+                      autoComplete="off"
+                      autoCorrect={false}
+                      textContentType="none"
+                    />
+                  </View>
+                )}
 
                 <View>
                   <Text className="font-poppins text-xs font-semibold text-dark mb-1.5">Password *</Text>
@@ -437,14 +699,61 @@ export default function KitchenSignupPage() {
                   />
                 </View>
 
-                <View className="flex-row gap-2">
-                  <View className="flex-1">
-                    <Text className="font-poppins text-xs font-semibold text-dark mb-1.5">City *</Text>
-                    <Input value={form.city} onChangeText={(val) => setForm({ ...form, city: val })} placeholder="City" />
-                  </View>
+                {/* Dropdowns */}
+                <View className="flex-row gap-4 mb-2">
                   <View className="flex-1">
                     <Text className="font-poppins text-xs font-semibold text-dark mb-1.5">State *</Text>
-                    <Input value={form.state} onChangeText={(val) => setForm({ ...form, state: val })} placeholder="State" />
+                    <TouchableOpacity
+                      onPress={() => {
+                        loadStates()
+                        setStatePickerVisible(true)
+                      }}
+                      style={{
+                        height: 48,
+                        backgroundColor: "#FAF9F6",
+                        borderRadius: 12,
+                        borderWidth: 1.5,
+                        borderColor: "#E3DFD5",
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        paddingHorizontal: 16,
+                      }}
+                    >
+                      <Text style={{ fontSize: 14, color: form.state ? "#1F1F1F" : "#A3A3A3", fontFamily: "Nunito" }}>
+                        {form.state || "Select state"}
+                      </Text>
+                      <ChevronDown size={18} color="#7A7A7A" />
+                    </TouchableOpacity>
+                  </View>
+
+                  <View className="flex-1">
+                    <Text className="font-poppins text-xs font-semibold text-dark mb-1.5">City *</Text>
+                    <TouchableOpacity
+                      onPress={() => {
+                        if (!form.state) {
+                          Alert.alert("Notice", "Please select a state first")
+                          return
+                        }
+                        setCityPickerVisible(true)
+                      }}
+                      style={{
+                        height: 48,
+                        backgroundColor: "#FAF9F6",
+                        borderRadius: 12,
+                        borderWidth: 1.5,
+                        borderColor: "#E3DFD5",
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        paddingHorizontal: 16,
+                      }}
+                    >
+                      <Text style={{ fontSize: 14, color: form.city ? "#1F1F1F" : "#A3A3A3", fontFamily: "Nunito" }}>
+                        {form.city || "Select city"}
+                      </Text>
+                      <ChevronDown size={18} color="#7A7A7A" />
+                    </TouchableOpacity>
                   </View>
                 </View>
 
@@ -479,7 +788,7 @@ export default function KitchenSignupPage() {
                   />
                 </View>
 
-                {/* Summary Box */}
+                {/* Detailed 9-Row Review Summary Box */}
                 <View className="bg-cream rounded-xl p-4 border border-gray-light/50 mt-4">
                   <Text className="font-poppins text-[10px] font-bold text-gray uppercase mb-2">
                     Review summary
@@ -494,9 +803,353 @@ export default function KitchenSignupPage() {
                       <Text className="text-xs text-dark font-poppins font-semibold">{form.ownerName || "—"}</Text>
                     </View>
                     <View className="flex-row justify-between">
+                      <Text className="text-xs text-gray font-nunito">Type</Text>
+                      <Text className="text-xs text-dark font-poppins font-semibold">
+                        {form.kitchenType === "veg" ? "Pure Veg" : form.kitchenType === "non_veg" ? "Non-Veg" : "Veg & Non-Veg"}
+                      </Text>
+                    </View>
+                    <View className="flex-row justify-between">
+                      <Text className="text-xs text-gray font-nunito">Speciality</Text>
+                      <Text className="text-xs text-dark font-poppins font-semibold">{form.speciality || "—"}</Text>
+                    </View>
+                    <View className="flex-row justify-between">
+                      <Text className="text-xs text-gray font-nunito">Signature Dish</Text>
+                      <Text className="text-xs text-dark font-poppins font-semibold">{form.bestItem || "—"}</Text>
+                    </View>
+                    <View className="flex-row justify-between">
                       <Text className="text-xs text-gray font-nunito">FSSAI File</Text>
                       <Text className="text-xs text-dark font-poppins font-semibold truncate flex-1 text-right ml-4">
                         {fssaiLicenseFile?.name || "—"}
+                      </Text>
+                    </View>
+                    <View className="flex-row justify-between">
+                      <Text className="text-xs text-gray font-nunito">Contact</Text>
+                      <Text className="text-xs text-dark font-poppins font-semibold">
+                        {identifierType === "email" ? form.email : form.phone}
+                      </Text>
+                    </View>
+                    <View className="flex-row justify-between">
+                      <Text className="text-xs text-gray font-nunito">Location</Text>
+                      <Text className="text-xs text-dark font-poppins font-semibold truncate flex-1 text-right ml-4">
+                        {form.address ? `${form.address}, ${form.city}, ${form.state} - ${form.pincode}` : "—"}
+                      </Text>
+                    </View>
+                    <View className="flex-row justify-between">
+                      <Text className="text-xs text-gray font-nunito">Hours</Text>
+                      <Text className="text-xs text-dark font-poppins font-semibold">{form.openingTime || "—"}</Text>
+                    </View>
+                  </View>
+                </View>
+              </View>
+            ) : null}
+
+            {step === 4 ? (
+              <View className="space-y-5">
+                <Text className="font-poppins font-bold text-lg text-dark mb-1">
+                  Partner Agreement & Onboarding
+                </Text>
+                <Text className="font-nunito text-gray text-xs mb-4">
+                  Please review the agreement and training video to complete registration
+                </Text>
+
+                {agreementLoading ? (
+                  <Text className="font-nunito text-sm text-gray text-center py-8">Loading onboarding assets...</Text>
+                ) : agreement?.url ? (
+                  <View className="space-y-4">
+                    {/* Compliance Step 1: Read Agreement */}
+                    <View className="border border-[#E5E5E5] bg-white rounded-xl p-4 space-y-3">
+                      <Text className="font-poppins font-semibold text-xs text-dark">
+                        1. Review Partner Agreement PDF
+                      </Text>
+                      <Text className="font-nunito text-[11px] text-gray leading-4">
+                        Please view the terms of partnering with us. You must open the document to unlock the confirmation.
+                      </Text>
+                      <View className="flex-row items-center gap-3">
+                        <TouchableOpacity
+                          onPress={() => {
+                            WebBrowser.openBrowserAsync(agreement.url)
+                            setAgreementViewed(true)
+                            setError("")
+                          }}
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 8,
+                            paddingHorizontal: 16,
+                            paddingVertical: 10,
+                            borderRadius: 12,
+                            borderWidth: 1.5,
+                            borderColor: "#0B6B3A",
+                          }}
+                        >
+                          <FileText size={14} color="#0B6B3A" />
+                          <Text className="text-primary font-poppins font-bold text-xs">Open Agreement PDF</Text>
+                        </TouchableOpacity>
+
+                        {agreementViewed ? (
+                          <View className="bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100">
+                            <Text className="text-[10px] text-emerald-800 font-poppins font-bold">✓ Opened</Text>
+                          </View>
+                        ) : (
+                          <View className="bg-amber-50 px-3 py-1 rounded-full border border-amber-100">
+                            <Text className="text-[10px] text-amber-800 font-poppins font-bold">Required</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+
+                    {/* Compliance Step 2: Training Video */}
+                    {agreement.videoUrl ? (
+                      <View className="border border-[#E5E5E5] bg-white rounded-xl p-4 space-y-3">
+                        <Text className="font-poppins font-semibold text-xs text-dark">
+                          2. Watch Mandatory Training Video
+                        </Text>
+                        <Text className="font-nunito text-[11px] text-gray leading-4">
+                          Watch this quick video to learn about our hygiene standards and partner operations.
+                        </Text>
+                        <View className="flex-row items-center gap-3">
+                          <TouchableOpacity
+                            onPress={() => {
+                              WebBrowser.openBrowserAsync(agreement.videoUrl)
+                              setVideoWatched(true)
+                              setError("")
+                            }}
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 8,
+                              paddingHorizontal: 16,
+                              paddingVertical: 10,
+                              borderRadius: 12,
+                              borderWidth: 1.5,
+                              borderColor: "#0B6B3A",
+                            }}
+                          >
+                            <Video size={14} color="#0B6B3A" />
+                            <Text className="text-primary font-poppins font-bold text-xs">Watch Training Video</Text>
+                          </TouchableOpacity>
+
+                          {videoWatched ? (
+                            <View className="bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100">
+                              <Text className="text-[10px] text-emerald-800 font-poppins font-bold">✓ Watched</Text>
+                            </View>
+                          ) : (
+                            <View className="bg-amber-50 px-3 py-1 rounded-full border border-amber-100">
+                              <Text className="text-[10px] text-amber-800 font-poppins font-bold">Required</Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                    ) : null}
+
+                    {/* Compliance Step 3: Acceptance Checkbox */}
+                    <TouchableOpacity
+                      disabled={!agreementViewed || (agreement.videoUrl ? !videoWatched : false)}
+                      onPress={() => {
+                        setAgreementAccepted((v) => !v)
+                        setError("")
+                      }}
+                      style={{
+                        flexDirection: "row",
+                        items: "start",
+                        gap: 12,
+                        backgroundColor: "#FAF9F6",
+                        borderRadius: 12,
+                        padding: 16,
+                        borderWidth: 1.5,
+                        borderColor: "#E3DFD5",
+                        opacity: (!agreementViewed || (agreement.videoUrl && !videoWatched)) ? 0.5 : 1,
+                      }}
+                    >
+                      <View
+                        style={{
+                          width: 20,
+                          height: 20,
+                          borderRadius: 6,
+                          borderWidth: 1.5,
+                          borderColor: "#0B6B3A",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          backgroundColor: agreementAccepted ? "#0B6B3A" : "transparent",
+                          marginTop: 2,
+                        }}
+                      >
+                        {agreementAccepted ? <Check size={14} color="#FFFFFF" /> : null}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text className="font-nunito text-xs text-dark leading-4">
+                          I confirm that I have reviewed the Partner Agreement and watched the onboarding guidelines, and agree to the terms.
+                        </Text>
+                        {(!agreementViewed || (agreement.videoUrl && !videoWatched)) && (
+                          <Text style={{ color: "#8D7E50", fontSize: 10, fontFamily: "Nunito", marginTop: 4 }}>
+                            * Open PDF and video above to unlock checkbox.
+                          </Text>
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <Text className="font-nunito text-sm text-gray text-center py-8">
+                    Partner onboarding assets are not configured. Please contact support.
+                  </Text>
+                )}
+              </View>
+            ) : null}
+
+            {step === 5 ? (
+              <View className="space-y-5">
+                <Text className="font-poppins font-bold text-lg text-dark mb-1">
+                  KYC Verification
+                </Text>
+                <Text className="font-nunito text-gray text-xs mb-4">
+                  Please upload your government issued Aadhaar & PAN details to verify your identity
+                </Text>
+
+                <View>
+                  <Text className="font-poppins font-medium text-xs text-dark-light mb-2">Aadhaar Card Number</Text>
+                  <Input
+                    value={form.aadhaarNumber}
+                    onChangeText={(val) => setForm({ ...form, aadhaarNumber: val })}
+                    placeholder="12-digit Aadhaar number"
+                    keyboardType="numeric"
+                    maxLength={12}
+                  />
+                </View>
+
+                <View className="space-y-2">
+                  <Text className="font-poppins font-medium text-xs text-dark-light block mb-2">Aadhaar Card File (Front Side)</Text>
+                  <TouchableOpacity
+                    onPress={pickAadhaarDocument}
+                    style={{
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      borderWidth: 2,
+                      borderColor: "#D1D5DB",
+                      borderStyle: "dashed",
+                      borderRadius: 12,
+                      padding: 24,
+                      backgroundColor: "#FFFFFF",
+                    }}
+                  >
+                    {aadhaarCardFile ? (
+                      <>
+                        <FileText size={28} color="#0B6B3A" />
+                        <Text className="font-nunito text-sm text-dark mt-2 text-center break-all">{aadhaarCardFile.name}</Text>
+                        <Text className="font-nunito text-xs text-gray mt-1">Tap to change file</Text>
+                      </>
+                    ) : (
+                      <>
+                        <Upload size={28} color="#7A7A7A" />
+                        <Text className="font-nunito text-sm text-gray mt-2 text-center">Upload Aadhaar Front (PDF or Image)</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+
+                <View className="space-y-2">
+                  <Text className="font-poppins font-medium text-xs text-dark-light block mb-2">Aadhaar Card File (Back Side)</Text>
+                  <TouchableOpacity
+                    onPress={pickPanDocument} // Wait, let's make sure it calls pickAadhaarBackDocument? Oh wait! We used pickPanDocument for back side? No, let's make a new helper or reuse pickPanDocument but for Back side? Let's check: we had pickPanDocument, pickAadhaarDocument, and pickDocument. Oh, we need to create pickAadhaarBackDocument! Wait, let's check what we did inside step 2. We can just define pickAadhaarBackDocument! Let's write the code for pickAadhaarBackDocument below.
+                    // Wait, let's make sure we define pickAadhaarBackDocument first! Let's check what we have for picking documents.
+                    // Yes, we will define pickAadhaarBackDocument in the file. Let's look at chunk 3 where we added pickAadhaarDocument. We can define pickAadhaarBackDocument there. Let's verify that.
+                    onPress={pickAadhaarBackDocument}
+                    style={{
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      borderWidth: 2,
+                      borderColor: "#D1D5DB",
+                      borderStyle: "dashed",
+                      borderRadius: 12,
+                      padding: 24,
+                      backgroundColor: "#FFFFFF",
+                    }}
+                  >
+                    {aadhaarCardBackFile ? (
+                      <>
+                        <FileText size={28} color="#0B6B3A" />
+                        <Text className="font-nunito text-sm text-dark mt-2 text-center break-all">{aadhaarCardBackFile.name}</Text>
+                        <Text className="font-nunito text-xs text-gray mt-1">Tap to change file</Text>
+                      </>
+                    ) : (
+                      <>
+                        <Upload size={28} color="#7A7A7A" />
+                        <Text className="font-nunito text-sm text-gray mt-2 text-center">Upload Aadhaar Back (PDF or Image)</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+
+                <View>
+                  <Text className="font-poppins font-medium text-xs text-dark-light mb-2">PAN Card Number</Text>
+                  <Input
+                    value={form.panNumber}
+                    onChangeText={(val) => setForm({ ...form, panNumber: val.toUpperCase() })}
+                    placeholder="10-character alphanumeric PAN"
+                    maxLength={10}
+                    autoCapitalize="characters"
+                  />
+                </View>
+
+                <View className="space-y-2">
+                  <Text className="font-poppins font-medium text-xs text-dark-light block mb-2">PAN Card File</Text>
+                  <TouchableOpacity
+                    onPress={pickPanDocument}
+                    style={{
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      borderWidth: 2,
+                      borderColor: "#D1D5DB",
+                      borderStyle: "dashed",
+                      borderRadius: 12,
+                      padding: 24,
+                      backgroundColor: "#FFFFFF",
+                    }}
+                  >
+                    {panCardFile ? (
+                      <>
+                        <FileText size={28} color="#0B6B3A" />
+                        <Text className="font-nunito text-sm text-dark mt-2 text-center break-all">{panCardFile.name}</Text>
+                        <Text className="font-nunito text-xs text-gray mt-1">Tap to change file</Text>
+                      </>
+                    ) : (
+                      <>
+                        <Upload size={28} color="#7A7A7A" />
+                        <Text className="font-nunito text-sm text-gray mt-2 text-center">Upload PAN Card (PDF or Image)</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+
+                <View className="bg-white rounded-xl p-4 border border-[#e8e8e8] space-y-2">
+                  <Text className="font-poppins font-semibold text-xs text-[#999] uppercase tracking-wide">Review KYC</Text>
+                  <View className="space-y-1.5">
+                    <View className="flex-row justify-between">
+                      <Text className="text-xs text-gray font-nunito">Aadhaar No.</Text>
+                      <Text className="text-xs text-dark font-poppins font-semibold">{form.aadhaarNumber || "—"}</Text>
+                    </View>
+                    <View className="flex-row justify-between">
+                      <Text className="text-xs text-gray font-nunito">Aadhaar Front</Text>
+                      <Text className="text-xs text-dark font-poppins font-semibold truncate flex-1 text-right ml-4">
+                        {aadhaarCardFile?.name || "—"}
+                      </Text>
+                    </View>
+                    <View className="flex-row justify-between">
+                      <Text className="text-xs text-gray font-nunito">Aadhaar Back</Text>
+                      <Text className="text-xs text-dark font-poppins font-semibold truncate flex-1 text-right ml-4">
+                        {aadhaarCardBackFile?.name || "—"}
+                      </Text>
+                    </View>
+                    <View className="flex-row justify-between">
+                      <Text className="text-xs text-gray font-nunito">PAN No.</Text>
+                      <Text className="text-xs text-dark font-poppins font-semibold">{form.panNumber || "—"}</Text>
+                    </View>
+                    <View className="flex-row justify-between">
+                      <Text className="text-xs text-gray font-nunito">PAN File</Text>
+                      <Text className="text-xs text-dark font-poppins font-semibold truncate flex-1 text-right ml-4">
+                        {panCardFile?.name || "—"}
                       </Text>
                     </View>
                   </View>
@@ -526,7 +1179,7 @@ export default function KitchenSignupPage() {
                 </TouchableOpacity>
               ) : null}
 
-              {step < 3 ? (
+              {step < 5 ? (
                 <TouchableOpacity
                   onPress={nextStep}
                   style={{
@@ -564,6 +1217,166 @@ export default function KitchenSignupPage() {
           </View>
         </View>
       </ScrollView>
+
+      {/* State Picker Modal */}
+      <Modal visible={statePickerVisible} animationType="slide" transparent>
+        <View style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.5)", justifyContent: "flex-end" }}>
+          <View style={{ backgroundColor: "#FFFFFF", borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingVertical: 24, maxHeight: "75%" }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <Text style={{ fontSize: 18, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>Select State</Text>
+              <TouchableOpacity onPress={() => setStatePickerVisible(false)}>
+                <X size={20} color="#7A7A7A" />
+              </TouchableOpacity>
+            </View>
+            {statesLoading ? (
+              <ActivityIndicator size="large" color="#0B6B3A" style={{ marginVertical: 40 }} />
+            ) : (
+              <ScrollView>
+                {statesList.map((st) => (
+                  <TouchableOpacity
+                    key={st.iso2}
+                    onPress={() => handleSelectState(st.name, st.iso2)}
+                    style={{ paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: "#F5F5F3" }}
+                  >
+                    <Text style={{ fontSize: 15, color: "#1F1F1F", fontFamily: "Nunito" }}>{st.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* City Picker Modal */}
+      <Modal visible={cityPickerVisible} animationType="slide" transparent>
+        <View style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.5)", justifyContent: "flex-end" }}>
+          <View style={{ backgroundColor: "#FFFFFF", borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingVertical: 24, maxHeight: "75%" }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <Text style={{ fontSize: 18, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>Select City</Text>
+              <TouchableOpacity onPress={() => setCityPickerVisible(false)}>
+                <X size={20} color="#7A7A7A" />
+              </TouchableOpacity>
+            </View>
+            {citiesLoading ? (
+              <ActivityIndicator size="large" color="#0B6B3A" style={{ marginVertical: 40 }} />
+            ) : (
+              <ScrollView>
+                {citiesList.map((ct) => (
+                  <TouchableOpacity
+                    key={ct.id || ct.name}
+                    onPress={() => {
+                      setForm((f) => ({ ...f, city: ct.name }))
+                      setCityPickerVisible(false)
+                    }}
+                    style={{ paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: "#F5F5F3" }}
+                  >
+                    <Text style={{ fontSize: 15, color: "#1F1F1F", fontFamily: "Nunito" }}>{ct.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Signup OTP Verification Modal */}
+      <Modal visible={signupOtpVisible} animationType="fade" transparent>
+        <View style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.6)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+          <View style={{ backgroundColor: "#FFFFFF", borderRadius: 24, width: "100%", maxWidth: 340, padding: 24, alignItems: "center", elevation: 5 }}>
+            <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: "#EAF7EE", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+              <CheckCircle size={24} color="#0B6B3A" />
+            </View>
+            <Text style={{ fontSize: 18, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins", marginBottom: 6 }}>Verify Registration</Text>
+            <Text style={{ fontSize: 12, color: "#7A7A7A", fontFamily: "Nunito", textAlign: "center", marginBottom: 20, lineHeight: 18 }}>
+              Enter the 4-digit code sent to your contact info to submit your application.
+            </Text>
+
+            {signupDemoOtp ? (
+              <View style={{ marginBottom: 16, borderRadius: 12, borderWidth: 1, borderColor: "#FCD2D1", backgroundColor: "#FDEDEC", paddingHorizontal: 16, paddingVertical: 10, width: "100%" }}>
+                <Text style={{ fontFamily: "Nunito", fontSize: 12, color: "#C0392B", textAlign: "center" }}>
+                  Demo OTP: <Text style={{ fontFamily: "Poppins", fontWeight: "bold", letterSpacing: 2 }}>{signupDemoOtp}</Text>
+                </Text>
+              </View>
+            ) : null}
+
+            {signupOtpError ? (
+              <View style={{ marginBottom: 16, borderRadius: 12, borderWidth: 1, borderColor: "#FCD2D1", backgroundColor: "#FDEDEC", paddingHorizontal: 16, paddingVertical: 10, width: "100%" }}>
+                <Text style={{ fontFamily: "Nunito", fontSize: 12, color: "#C0392B", textAlign: "center" }}>{signupOtpError}</Text>
+              </View>
+            ) : null}
+
+            {/* OTP Inputs */}
+            <View style={{ flexDirection: "row", gap: 12, justifyContent: "center", paddingVertical: 12 }}>
+              {signupOtp.map((digit, i) => (
+                <TextInput
+                  key={i}
+                  ref={signupOtpRefs[i]}
+                  keyboardType="number-pad"
+                  maxLength={1}
+                  value={digit}
+                  onChangeText={(val) => {
+                    if (!/^\d?$/.test(val)) return
+                    const next = [...signupOtp]
+                    next[i] = val
+                    setSignupOtp(next)
+                    if (val && i < 3) {
+                      signupOtpRefs[i + 1].current?.focus()
+                    }
+                  }}
+                  onKeyPress={({ nativeEvent }) => {
+                    if (nativeEvent.key === "Backspace" && !signupOtp[i] && i > 0) {
+                      signupOtpRefs[i - 1].current?.focus()
+                    }
+                  }}
+                  style={{
+                    width: 48,
+                    height: 48,
+                    backgroundColor: "#FAF9F6",
+                    borderRadius: 12,
+                    borderWidth: 1.5,
+                    borderColor: digit ? "#0B6B3A" : "#E3DFD5",
+                    textAlign: "center",
+                    fontSize: 18,
+                    fontWeight: "bold",
+                    color: "#1F1F1F",
+                    fontFamily: "Poppins",
+                  }}
+                />
+              ))}
+            </View>
+
+            <TouchableOpacity
+              onPress={handleVerifySignupOtp}
+              disabled={otpVerifying}
+              style={{
+                width: "100%",
+                backgroundColor: "#0B6B3A",
+                borderRadius: 999,
+                paddingVertical: 14,
+                alignItems: "center",
+                justifyContent: "center",
+                marginTop: 20,
+                opacity: otpVerifying ? 0.6 : 1,
+              }}
+            >
+              {otpVerifying ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins", fontSize: 14 }}>
+                  Verify & Register
+                </Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => setSignupOtpVisible(false)}
+              style={{ marginTop: 14 }}
+            >
+              <Text style={{ color: "#7A7A7A", fontFamily: "Nunito", fontSize: 13 }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   )
 }

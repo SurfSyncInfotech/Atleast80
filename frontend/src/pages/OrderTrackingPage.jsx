@@ -1,17 +1,17 @@
 import { useEffect, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { motion } from "framer-motion"
-import { ArrowLeft, CheckCircle, ChefHat, Bike, Home, Star, Clock } from "lucide-react"
+import { ArrowLeft, CheckCircle, ChefHat, Bike, Home, Star, Clock, Check, Phone } from "lucide-react"
 import Button from "../components/ui/Button"
 import { api } from "../lib/api"
 import { resolveMediaUrl } from "../lib/media"
 import { cn } from "../lib/utils"
 
 const STEPS = [
-  { id: "pending", label: "Order Placed", desc: "Waiting for kitchen to accept", icon: Clock },
-  { id: "confirmed", label: "Order Confirmed", desc: "Your order has been accepted", icon: CheckCircle },
-  { id: "preparing", label: "Being Prepared", desc: "Kitchen is cooking your food", icon: ChefHat },
-  { id: "out_for_delivery", label: "Out for Delivery", desc: "Rider is on the way", icon: Bike },
+  { id: "pending", label: "Order Placed", desc: "Your order has been placed successfully", icon: CheckCircle },
+  { id: "confirmed", label: "Order Confirmed", desc: "Your order has been accepted by the kitchen", icon: ChefHat },
+  { id: "preparing", label: "Being Prepared", desc: "Kitchen is cooking your delicious food", icon: Clock },
+  { id: "out_for_delivery", label: "Out for Delivery", desc: "Rider is on the way to you", icon: Bike },
   { id: "delivered", label: "Delivered", desc: "Enjoy your meal!", icon: Home },
 ]
 
@@ -60,7 +60,7 @@ function ReviewSection({ order, onReviewSubmitted }) {
 
   if (order.review) {
     return (
-      <div className="bg-white rounded-2xl p-5 shadow-sm">
+      <div className="bg-white rounded-[24px] p-5 shadow-sm border border-gray-100">
         <h3 className="font-poppins font-semibold text-sm text-dark mb-3">Your Review</h3>
         <StarRating value={order.review.rating} readonly />
         {order.review.review && (
@@ -97,7 +97,7 @@ function ReviewSection({ order, onReviewSubmitted }) {
   }
 
   return (
-    <div className="bg-white rounded-2xl p-5 shadow-sm border border-amber-100">
+    <div className="bg-white rounded-[24px] p-5 shadow-sm border border-amber-100">
       <h3 className="font-poppins font-semibold text-sm text-dark mb-1">Rate your experience</h3>
       <p className="font-nunito text-xs text-gray mb-4">How was your order from {order.kitchenName}?</p>
 
@@ -178,12 +178,10 @@ export default function OrderTrackingPage() {
     : order.status === "delivered"
     ? 100
     : order.status === "out_for_delivery"
-    ? 80
+    ? 75
     : order.status === "preparing"
-    ? 60
-    : order.status === "confirmed"
-    ? 40
-    : 20
+    ? 50
+    : 35
 
   return (
     <div className="min-h-screen bg-cream pb-24">
@@ -209,17 +207,17 @@ export default function OrderTrackingPage() {
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-white rounded-2xl p-5 shadow-sm text-center"
+            className="bg-white rounded-[24px] p-6 shadow-sm border border-gray-100 text-center"
           >
-            <p className="font-nunito text-gray text-sm">
-              {isActive ? "Estimated Arrival" : "Order Complete"}
+            <p className="font-poppins font-black text-[11px] text-gray-400 uppercase tracking-widest">
+              {isActive ? "Estimated Arrival" : "Order Status"}
             </p>
-            <p className="font-poppins font-bold text-3xl text-dark mt-1">
+            <p className="font-poppins font-extrabold text-3xl text-dark mt-1">
               {isActive ? "25-30 min" : "Delivered!"}
             </p>
-            <div className="w-full bg-gray-light rounded-full h-2 mt-4 overflow-hidden">
+            <div className="w-full bg-gray-200 rounded-full h-1.5 mt-4 overflow-hidden">
               <motion.div
-                className="h-full bg-gradient-to-r from-primary to-primary-light rounded-full"
+                className="h-full bg-[#0B6B3A] rounded-full"
                 initial={{ width: "0%" }}
                 animate={{ width: `${progress}%` }}
                 transition={{ duration: 1.5, ease: "easeOut" }}
@@ -229,36 +227,87 @@ export default function OrderTrackingPage() {
         )}
 
         {!isCancelled && (
-          <div className="bg-white rounded-2xl p-5 shadow-sm">
-            <h3 className="font-poppins font-semibold text-sm text-dark mb-4">Order Status</h3>
-            <div className="space-y-0">
+          <div className="bg-white rounded-[24px] p-5 shadow-sm border border-gray-100">
+            <h3 className="font-poppins font-bold text-dark text-base mb-6">Order Status</h3>
+            <div className="space-y-3">
               {STEPS.map((step, i) => {
                 const Icon = step.icon
                 const { done, active } = stepState(order.status, step.id)
+                const isCompleted = done && !active
+
                 return (
-                  <div key={step.id} className="flex gap-3">
-                    <div className="flex flex-col items-center">
+                  <div key={step.id} className="flex items-center gap-3 relative">
+                    {/* Connecting line between circles */}
+                    {i < STEPS.length - 1 && (
                       <div
-                        className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
-                          done ? "bg-primary text-white" : active ? "bg-primary/20 text-primary border-2 border-primary" : "bg-gray-light text-gray"
-                        }`}
-                      >
-                        <Icon size={18} />
-                      </div>
-                      {i < STEPS.length - 1 && (
-                        <div className={`w-0.5 h-12 ${done ? "bg-primary" : "bg-gray-light"}`} />
+                        className={cn(
+                          "absolute left-[17px] top-[36px] w-[2px] z-0",
+                          "h-[calc(100%+12px)]",
+                          isCompleted ? "bg-[#0B6B3A]" : "bg-gray-200"
+                        )}
+                      />
+                    )}
+
+                    {/* Icon Circle */}
+                    <div
+                      className={cn(
+                        "w-9 h-9 rounded-xl flex items-center justify-center z-10 flex-shrink-0 transition-all",
+                        isCompleted ? "bg-[#0B6B3A] text-white" : active ? "bg-white border-2 border-[#0B6B3A]" : "bg-[#FAF6F0]"
+                      )}
+                    >
+                      {isCompleted ? (
+                        <Check size={14} className="stroke-[3]" />
+                      ) : (
+                        <Icon size={14} className={active ? "text-[#0B6B3A]" : "text-[#8D7355]"} />
                       )}
                     </div>
-                    <div className="pt-2 pb-4">
-                      <p className={`font-poppins font-semibold text-sm ${done || active ? "text-dark" : "text-gray"}`}>
-                        {step.label}
-                      </p>
-                      <p className="font-nunito text-xs text-gray mt-0.5">{step.desc}</p>
-                      {active && (
-                        <span className="inline-block mt-1.5 text-xs font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-full">
-                          In Progress
-                        </span>
+
+                    {/* Step Card */}
+                    <div
+                      className={cn(
+                        "flex-1 border rounded-[20px] p-3 flex items-center justify-between transition-all",
+                        active
+                          ? "bg-[#EAF7EE] border-[#D6EAE7]"
+                          : "bg-[#FAF6F0] border-[#EADEC9]"
                       )}
+                    >
+                      <div className="flex-1 min-w-0 mr-2">
+                        <p
+                          className={cn(
+                            "font-poppins font-bold text-sm leading-tight",
+                            active ? "text-[#0B6B3A]" : "text-[#1F2937]"
+                          )}
+                        >
+                          {step.label}
+                        </p>
+                        <p
+                          className={cn(
+                            "font-nunito text-xs mt-1 leading-normal",
+                            active ? "text-[#0B6B3A]" : "text-gray-500"
+                          )}
+                        >
+                          {step.desc}
+                        </p>
+                        {active && (
+                          <span className="inline-block mt-2 bg-[#0B6B3A] text-white text-[9px] font-poppins font-bold px-2 py-0.5 rounded-lg">
+                            In Progress
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        className={cn(
+                          "w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0",
+                          isCompleted || active ? "bg-[#EADEC9]" : "bg-gray-200"
+                        )}
+                      >
+                        <Check
+                          size={10}
+                          className={cn(
+                            "stroke-[3]",
+                            isCompleted || active ? "text-[#8D7355]" : "text-gray-400"
+                          )}
+                        />
+                      </div>
                     </div>
                   </div>
                 )
@@ -267,38 +316,78 @@ export default function OrderTrackingPage() {
           </div>
         )}
 
-        <div className="bg-white rounded-2xl p-4 shadow-sm">
-          <h3 className="font-poppins font-semibold text-sm text-dark mb-3">Items</h3>
-          {order.items?.map((item) => (
-            <div key={item.id} className="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0">
-              <img
-                src={resolveMediaUrl(item.image)}
-                alt={item.name}
-                className="w-10 h-10 rounded-lg object-cover bg-gray-100"
-              />
-              <div className="flex-1 min-w-0">
-                <p className="font-nunito text-sm text-dark truncate">{item.name}</p>
-                <p className="text-xs text-gray">x{item.qty}</p>
+        <div className="bg-white rounded-[24px] p-5 shadow-sm border border-gray-100">
+          <h3 className="font-poppins font-bold text-dark text-base mb-4">Items</h3>
+          <div className="space-y-3.5">
+            {order.items?.map((item) => (
+              <div
+                key={item.id}
+                className="relative w-full h-[100px] rounded-[20px] overflow-hidden bg-gray-100"
+                style={{
+                  backgroundImage: `url(${resolveMediaUrl(item.image) || "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&h=200&fit=crop"})`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                }}
+              >
+                {/* Dark overlay */}
+                <div className="absolute inset-0 bg-black/50 p-4 flex flex-col justify-end">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <img
+                        src={resolveMediaUrl(item.image) || "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=200&h=200&fit=crop"}
+                        alt={item.name}
+                        className="w-10 h-10 rounded-[10px] object-cover border-2 border-white"
+                      />
+                      <div className="min-w-0">
+                        <p className="font-poppins font-bold text-sm text-white truncate max-w-[200px]">
+                          {item.name}
+                        </p>
+                        <p className="font-nunito text-xs text-white/80 mt-0.5">
+                          x{item.qty}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="font-poppins font-bold text-sm text-white">
+                      ₹{item.price * item.qty}
+                    </span>
+                  </div>
+                </div>
               </div>
-              <span className="font-poppins font-semibold text-sm">₹{item.price * item.qty}</span>
-            </div>
-          ))}
-          <div className="border-t border-gray-100 mt-2 pt-3 flex justify-between font-poppins font-bold">
+            ))}
+          </div>
+          <div className="border-t border-gray-100 mt-4 pt-3 flex justify-between font-poppins font-bold text-dark text-base">
             <span>Total</span>
             <span>₹{order.grandTotal}</span>
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl p-4 shadow-sm flex items-center gap-3">
-          <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
-            <ChefHat size={22} className="text-primary" />
+        <div className="bg-white rounded-[24px] p-5 shadow-sm border border-gray-100 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-11 h-11 rounded-xl bg-[#0C4240] flex items-center justify-center flex-shrink-0">
+              <ChefHat size={22} className="text-white" />
+            </div>
+            <div className="min-w-0">
+              <p className="font-poppins font-bold text-sm text-dark truncate">
+                {order.kitchenName}
+              </p>
+              <p className="font-nunito text-xs text-gray-500 mt-0.5">
+                {isActive ? "Preparing your order" : "Thank you for ordering!"}
+              </p>
+            </div>
           </div>
-          <div className="flex-1">
-            <p className="font-poppins font-semibold text-sm text-dark">{order.kitchenName}</p>
-            <p className="font-nunito text-xs text-gray">
-              {isActive ? "Preparing your order" : "Thank you for ordering!"}
-            </p>
-          </div>
+          {order.kitchenPhone && (
+            <a
+              href={`tel:${order.kitchenPhone}`}
+              className="flex items-center gap-2 bg-gradient-to-r from-[#FAF6F0] to-[#EADEC9] border border-[#EADEC9] px-3.5 py-2 rounded-full text-dark hover:brightness-95 transition-all flex-shrink-0 shadow-sm"
+            >
+              <span className="font-poppins font-bold text-xs text-[#1F2937]">
+                Contact Restaurant
+              </span>
+              <div className="w-6 h-6 rounded-full bg-[#1F2937] flex items-center justify-center">
+                <Phone size={10} className="text-white" />
+              </div>
+            </a>
+          )}
         </div>
 
         <ReviewSection
