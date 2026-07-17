@@ -1,0 +1,9 @@
+{
+  "ignore": [
+    "uploads/*",
+    "rider_debug.log",
+    "*.log",
+    "scratch/*",
+    "node_modules/*"
+  ]
+}

@@ -1059,4 +1059,90 @@ router.delete("/settings/training-video", async (_req, res) => {
   }
 })
 
+// Admin Get Riders list
+router.get("/riders", async (req, res) => {
+  const page = Math.max(1, parseInt(req.query.page) || 1)
+  const limit = Math.max(1, parseInt(req.query.limit) || 15)
+  const offset = (page - 1) * limit
+  const status = req.query.status
+  const search = req.query.search?.trim()
+
+  try {
+    let query = `
+      FROM riders r
+      JOIN users u ON r.user_id = u.id
+      WHERE 1=1
+    `
+    const params = []
+
+    if (status) {
+      query += " AND r.status = ?"
+      params.push(status)
+    }
+
+    if (search) {
+      query += " AND (u.name LIKE ? OR u.phone LIKE ? OR u.email LIKE ?)"
+      const searchVal = `%${search}%`
+      params.push(searchVal, searchVal, searchVal)
+    }
+
+    const [countRows] = await pool.query(`SELECT COUNT(*) AS total ${query}`, params)
+    const total = countRows[0].total
+
+    const [riders] = await pool.query(
+      `SELECT r.*, u.name, u.email, u.phone
+       ${query}
+       ORDER BY r.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
+    )
+
+    res.json({
+      riders,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    })
+  } catch (error) {
+    console.error("Admin fetch riders error:", error)
+    res.status(500).json({ message: "Failed to fetch riders list" })
+  }
+})
+
+// Approve Rider
+router.patch("/riders/:id/approve", async (req, res) => {
+  try {
+    await pool.query("UPDATE riders SET status = 'active' WHERE id = ?", [req.params.id])
+    res.json({ message: "Rider approved successfully" })
+  } catch (error) {
+    console.error("Admin approve rider error:", error)
+    res.status(500).json({ message: "Failed to approve rider" })
+  }
+})
+
+// Suspend Rider
+router.patch("/riders/:id/suspend", async (req, res) => {
+  try {
+    await pool.query("UPDATE riders SET status = 'suspended' WHERE id = ?", [req.params.id])
+    res.json({ message: "Rider suspended successfully" })
+  } catch (error) {
+    console.error("Admin suspend rider error:", error)
+    res.status(500).json({ message: "Failed to suspend rider" })
+  }
+})
+
+// Reject Rider
+router.patch("/riders/:id/reject", async (req, res) => {
+  try {
+    await pool.query("UPDATE riders SET status = 'suspended' WHERE id = ?", [req.params.id])
+    res.json({ message: "Rider rejected successfully" })
+  } catch (error) {
+    console.error("Admin reject rider error:", error)
+    res.status(500).json({ message: "Failed to reject rider" })
+  }
+})
+
 export default router

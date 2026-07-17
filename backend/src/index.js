@@ -14,6 +14,7 @@ import hygieneRoutes from "./routes/hygieneRoutes.js"
 import alertRoutes from "./routes/alertRoutes.js"
 import locationRoutes from "./routes/locationRoutes.js"
 import bulkEnquiryRoutes from "./routes/bulkEnquiryRoutes.js"
+import riderRoutes from "./routes/riderRoutes.js"
 import pool from "./config/db.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -72,6 +73,7 @@ app.use("/api/hygiene", hygieneRoutes)
 app.use("/api/alerts", alertRoutes)
 app.use("/api/locations", locationRoutes)
 app.use("/api/bulk-enquiries", bulkEnquiryRoutes)
+app.use("/api/rider", riderRoutes)
 
 async function startServer() {
   try {

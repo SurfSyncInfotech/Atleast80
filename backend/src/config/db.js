@@ -72,6 +72,81 @@ export async function connectDB() {
       console.error("❌ Auto-migration of kitchens KYC columns failed:", e.message)
     }
 
+    // Auto-migrate for delivery rider tables and columns
+    try {
+      // 1. Modify users role ENUM to support 'rider'
+      try {
+        await connection.query("ALTER TABLE users MODIFY COLUMN role ENUM('admin', 'kitchen', 'customer', 'rider') NOT NULL")
+      } catch (_) {}
+
+      // 2. Create riders table
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS riders (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          user_id INT NOT NULL,
+          vehicle_type VARCHAR(50) NOT NULL,
+          vehicle_number VARCHAR(50) DEFAULT NULL,
+          driving_license_number VARCHAR(50) DEFAULT NULL,
+          aadhaar_number VARCHAR(12) NOT NULL,
+          aadhaar_card VARCHAR(255) NOT NULL,
+          aadhaar_card_back VARCHAR(255) NOT NULL,
+          pan_number VARCHAR(10) NOT NULL,
+          pan_card VARCHAR(255) NOT NULL,
+          driving_license VARCHAR(255) DEFAULT NULL,
+          status ENUM('pending', 'active', 'suspended') NOT NULL DEFAULT 'pending',
+          is_online TINYINT(1) NOT NULL DEFAULT 0,
+          latitude DECIMAL(10, 8) DEFAULT NULL,
+          longitude DECIMAL(11, 8) DEFAULT NULL,
+          cash_collected DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `)
+
+      // 3. Create rider_agreement_signatures table
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS rider_agreement_signatures (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          rider_id INT NOT NULL,
+          user_id INT NOT NULL,
+          agreement_version INT NOT NULL,
+          accepted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          ip_address VARCHAR(45) NOT NULL,
+          device_info VARCHAR(255) NOT NULL,
+          app_version VARCHAR(20) NOT NULL,
+          FOREIGN KEY (rider_id) REFERENCES riders(id) ON DELETE CASCADE,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `)
+
+      // 4. Alter orders table to add delivery fields
+      try {
+        await connection.query("ALTER TABLE orders ADD COLUMN rider_id INT DEFAULT NULL")
+      } catch (_) {}
+      try {
+        await connection.query("ALTER TABLE orders ADD COLUMN delivery_status VARCHAR(50) DEFAULT NULL")
+      } catch (_) {}
+      try {
+        await connection.query("ALTER TABLE orders ADD COLUMN delivery_otp VARCHAR(6) DEFAULT NULL")
+      } catch (_) {}
+      try {
+        await connection.query("ALTER TABLE orders ADD COLUMN pickup_code VARCHAR(6) DEFAULT NULL")
+      } catch (_) {}
+      try {
+        await connection.query("ALTER TABLE orders ADD COLUMN delivery_fee DECIMAL(10, 2) NOT NULL DEFAULT 0.00")
+      } catch (_) {}
+      try {
+        await connection.query("ALTER TABLE orders ADD COLUMN rider_latitude DECIMAL(10, 8) DEFAULT NULL")
+      } catch (_) {}
+      try {
+        await connection.query("ALTER TABLE orders ADD COLUMN rider_longitude DECIMAL(11, 8) DEFAULT NULL")
+      } catch (_) {}
+
+      console.log("✅ Auto-migrated delivery rider tables and columns")
+    } catch (e) {
+      console.error("❌ Auto-migration of delivery rider tables failed:", e.message)
+    }
+
     connection.release()
     console.log("✅ Database connected successfully")
     return pool

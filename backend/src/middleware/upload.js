@@ -122,6 +122,8 @@ const onboardingDocumentsStorage = multer.diskStorage({
       ? "aadhaar_back"
       : file.fieldname === "panCard"
       ? "pan"
+      : file.fieldname === "drivingLicense"
+      ? "license"
       : "fssai"
     cb(null, `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}${ext}`)
   },
@@ -133,6 +135,10 @@ export const onboardingDocumentsUpload = multer({
 })
 
 export function getKitchenFileUrl(req, filename) {
+  return `${getPublicBaseUrl(req)}/uploads/kitchen/${filename}`
+}
+
+export function getRiderFileUrl(req, filename) {
   return `${getPublicBaseUrl(req)}/uploads/kitchen/${filename}`
 }
 

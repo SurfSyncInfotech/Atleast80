@@ -49,7 +49,16 @@ router.get("/me", authRequired, async (req, res) => {
       kitchen = rows[0] || null
     }
 
-    res.json({ user, kitchen })
+    let rider = null
+    if (user.role === "rider") {
+      const [rows] = await pool.query(
+        "SELECT * FROM riders WHERE user_id = ?",
+        [user.id]
+      )
+      rider = rows[0] || null
+    }
+
+    res.json({ user, kitchen, rider })
   } catch (error) {
     console.error("Auth me error:", error)
     res.status(500).json({ message: "Failed to verify session" })
@@ -725,6 +734,274 @@ router.post("/admin/login", async (req, res) => {
     })
   } catch (error) {
     console.error("Admin login error:", error)
+    res.status(500).json({ message: "Login failed" })
+  }
+})
+
+// Rider registration endpoint
+router.post("/rider/register", (req, res) => {
+  onboardingDocumentsUpload.fields([
+    { name: "aadhaarCard", maxCount: 1 },
+    { name: "aadhaarCardBack", maxCount: 1 },
+    { name: "panCard", maxCount: 1 },
+    { name: "drivingLicense", maxCount: 1 },
+  ])(req, res, async (uploadErr) => {
+    if (uploadErr) {
+      return res.status(400).json({ message: uploadErr.message || "Document upload failed" })
+    }
+
+    const aadhaarFile = req.files?.["aadhaarCard"]?.[0]
+    const aadhaarBackFile = req.files?.["aadhaarCardBack"]?.[0]
+    const panFile = req.files?.["panCard"]?.[0]
+    const dlFile = req.files?.["drivingLicense"]?.[0]
+
+    const {
+      name, password,
+      vehicleType, vehicleNumber, drivingLicenseNumber,
+      aadhaarNumber, panNumber,
+    } = req.body
+
+    const email = req.body.email?.toString().trim().toLowerCase() || null
+    const phone = req.body.phone?.toString().trim() || null
+    const appVersion = req.body.appVersion?.toString().trim() || "1.0.0"
+
+    if (!name || !password || !vehicleType || !aadhaarNumber || !panNumber) {
+      return res.status(400).json({ message: "Name, password, vehicle type, Aadhaar number, and PAN number are required" })
+    }
+
+    if (!email && !phone) {
+      return res.status(400).json({ message: "Enter a phone number or an email address" })
+    }
+
+    if (phone && phone.length !== 10) {
+      return res.status(400).json({ message: "Phone number must be 10 digits" })
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ message: "Password must be at least 6 characters" })
+    }
+
+    if (!/^\d{12}$/.test(aadhaarNumber)) {
+      return res.status(400).json({ message: "Aadhaar number must be exactly 12 digits" })
+    }
+
+    if (!/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(panNumber.toUpperCase())) {
+      return res.status(400).json({ message: "PAN number must be a valid 10-character alphanumeric PAN" })
+    }
+
+    if (vehicleType !== "bicycle") {
+      if (!drivingLicenseNumber || !dlFile) {
+        return res.status(400).json({ message: "Driving license details and document are required for motorized vehicles" })
+      }
+    }
+
+    if (!aadhaarFile || !aadhaarBackFile || !panFile) {
+      return res.status(400).json({ message: "Aadhaar Front, Aadhaar Back, and PAN Card documents are required" })
+    }
+
+    // Generate public file URLs
+    const { getRiderFileUrl } = await import("../middleware/upload.js")
+    const aadhaarCardUrl = getRiderFileUrl(req, aadhaarFile.filename)
+    const aadhaarCardBackUrl = getRiderFileUrl(req, aadhaarBackFile.filename)
+    const panCardUrl = getRiderFileUrl(req, panFile.filename)
+    const dlUrl = dlFile ? getRiderFileUrl(req, dlFile.filename) : null
+
+    // Signature Auditing
+    const ipAddress = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown"
+    const userAgent = req.headers["user-agent"] || ""
+    let device = "Web"
+    const ua = userAgent.toLowerCase()
+    if (ua.includes("iphone") || ua.includes("ipad") || ua.includes("ipod")) {
+      device = "iOS"
+    } else if (ua.includes("android")) {
+      device = "Android"
+    }
+
+    const connection = await pool.getConnection()
+    try {
+      await connection.beginTransaction()
+
+      // Log details to local file
+      const fs = await import("fs")
+      const path = await import("path")
+      const logFilePath = path.join(process.cwd(), "rider_debug.log")
+      
+      const logMsg = `\n--- [${new Date().toISOString()}] ---\nRequest email: ${email}, phone: ${phone}\n`
+      fs.appendFileSync(logFilePath, logMsg)
+
+      if (email) {
+        const [existingEmail] = await connection.query("SELECT id, account_verified FROM users WHERE email = ?", [email])
+        fs.appendFileSync(logFilePath, `Email check for ${email}: ${JSON.stringify(existingEmail)}\n`)
+        if (existingEmail.length > 0) {
+          if (existingEmail[0].account_verified === 0) {
+            await connection.rollback()
+            // Resend OTP for the existing unverified user
+            const { createAndSendOtp, getDemoOtp } = await import("../utils/otpStore.js")
+            const otpCode = await createAndSendOtp(`register:${existingEmail[0].id}`, phone || email)
+            const demoOtp = getDemoOtp(otpCode)
+            connection.release()
+            return res.status(201).json({
+              message: "Registration successful. Verification OTP sent.",
+              requiresOtp: true,
+              userId: existingEmail[0].id,
+              demoOtp,
+            })
+          }
+          await connection.rollback()
+          return res.status(409).json({ message: "Email already registered" })
+        }
+      }
+
+      if (phone) {
+        const [existingPhone] = await connection.query("SELECT id, account_verified FROM users WHERE phone = ?", [phone])
+        fs.appendFileSync(logFilePath, `Phone check for ${phone}: ${JSON.stringify(existingPhone)}\n`)
+        if (existingPhone.length > 0) {
+          if (existingPhone[0].account_verified === 0) {
+            await connection.rollback()
+            // Resend OTP for the existing unverified user
+            const { createAndSendOtp, getDemoOtp } = await import("../utils/otpStore.js")
+            const otpCode = await createAndSendOtp(`register:${existingPhone[0].id}`, phone || email)
+            const demoOtp = getDemoOtp(otpCode)
+            connection.release()
+            return res.status(201).json({
+              message: "Registration successful. Verification OTP sent.",
+              requiresOtp: true,
+              userId: existingPhone[0].id,
+              demoOtp,
+            })
+          }
+          await connection.rollback()
+          return res.status(409).json({ message: "Phone number already registered" })
+        }
+      }
+
+      const hash = await bcrypt.hash(password, 10)
+      const [userResult] = await connection.query(
+        "INSERT INTO users (role, name, email, phone, password_hash, account_verified) VALUES ('rider', ?, ?, ?, ?, 0)",
+        [name, email, phone, hash]
+      )
+
+      const userId = userResult.insertId
+
+      const [riderResult] = await connection.query(
+        `INSERT INTO riders (
+          user_id, vehicle_type, vehicle_number, driving_license_number,
+          aadhaar_number, aadhaar_card, aadhaar_card_back, pan_number, pan_card, driving_license, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+        [
+          userId, vehicleType, vehicleNumber || null, drivingLicenseNumber || null,
+          aadhaarNumber, aadhaarCardUrl, aadhaarCardBackUrl, panNumber.toUpperCase(), panCardUrl, dlUrl
+        ]
+      )
+
+      const riderId = riderResult.insertId
+
+      // Audit log for rider agreement
+      await connection.query(
+        `INSERT INTO rider_agreement_signatures (
+          rider_id, user_id, agreement_version, ip_address, device_info, app_version
+        ) VALUES (?, ?, 1, ?, ?, ?)`,
+        [riderId, userId, ipAddress, device, appVersion]
+      )
+
+      await connection.commit()
+
+      // Generate verification OTP
+      const otpCode = await createAndSendOtp(`register:${userId}`, phone || email)
+      const demoOtp = getDemoOtp(otpCode)
+
+      res.status(201).json({
+        message: "Rider registration successful. Verification OTP sent.",
+        requiresOtp: true,
+        userId,
+        demoOtp,
+      })
+    } catch (error) {
+      await connection.rollback()
+      console.error("Rider registration transaction error:", error)
+      res.status(500).json({ message: "Registration failed. Database error." })
+    } finally {
+      connection.release()
+    }
+  })
+})
+
+// Rider verify OTP
+router.post("/rider/register/verify-otp", async (req, res) => {
+  const { userId, otp } = req.body
+
+  if (!userId || !otp) {
+    return res.status(400).json({ message: "User ID and OTP are required" })
+  }
+
+  try {
+    const valid = checkOtp(`register:${userId}`, otp)
+    if (!valid) {
+      return res.status(400).json({ message: "Invalid or expired OTP" })
+    }
+
+    consumeOtp(`register:${userId}`)
+    await pool.query("UPDATE users SET account_verified = 1 WHERE id = ?", [userId])
+
+    res.json({
+      message: "OTP verified successfully. Your account is submitted for Admin review.",
+    })
+  } catch (error) {
+    console.error("Rider register verify OTP error:", error)
+    res.status(500).json({ message: "OTP verification failed" })
+  }
+})
+
+// Rider login
+router.post("/rider/login", async (req, res) => {
+  const { identifier, password } = req.body
+
+  if (!identifier || !password) {
+    return res.status(400).json({ message: "Email/Phone and password are required" })
+  }
+
+  try {
+    const [users] = await pool.query(
+      `SELECT u.*, r.id AS rider_id, r.status AS rider_status, r.is_online AS rider_online
+       FROM users u
+       JOIN riders r ON u.id = r.user_id
+       WHERE (u.email = ? OR u.phone = ?) AND u.role = 'rider'`,
+      [identifier.toLowerCase().trim(), identifier.trim()]
+    )
+
+    if (users.length === 0) {
+      return res.status(401).json({ message: "Invalid credentials" })
+    }
+
+    const user = users[0]
+
+    const valid = await bcrypt.compare(password, user.password_hash)
+    if (!valid) {
+      return res.status(401).json({ message: "Invalid credentials" })
+    }
+
+    if (!user.account_verified) {
+      // Send register verification OTP again
+      const otpCode = await createAndSendOtp(`register:${user.id}`, user.phone || user.email)
+      const demoOtp = getDemoOtp(otpCode)
+      return res.json({
+        requiresOtp: true,
+        userId: user.id,
+        demoOtp,
+        message: "Account not verified. Verification OTP sent.",
+      })
+    }
+
+    const token = signToken({ id: user.id, role: "rider", riderId: user.rider_id })
+
+    res.json({
+      message: "Login successful",
+      token,
+      user: { id: user.id, name: user.name, email: user.email, phone: user.phone, role: "rider" },
+      rider: { id: user.rider_id, status: user.rider_status, is_online: user.rider_online },
+    })
+  } catch (error) {
+    console.error("Rider login error:", error)
     res.status(500).json({ message: "Login failed" })
   }
 })

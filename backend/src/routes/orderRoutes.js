@@ -59,6 +59,10 @@ function mapOrder(row) {
     deliveryAddress: row.delivery_address,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    pickupCode: row.pickup_code || null,
+    deliveryOtp: row.delivery_otp || null,
+    deliveryStatus: row.delivery_status || null,
+    riderId: row.rider_id || null,
   }
 }
 
@@ -171,7 +175,7 @@ router.get("/kitchen/stats", authRequired, requireRole("kitchen"), requireApprov
     )
     const [pendingRows] = await pool.query(
       `SELECT COUNT(*) AS count FROM orders
-       WHERE kitchen_id = ? AND status IN ('pending', 'confirmed', 'preparing', 'out_for_delivery')`,
+       WHERE kitchen_id = ? AND (status IN ('pending', 'confirmed', 'preparing', 'out_for_delivery') OR (status = 'delivered' AND delivery_status = 'handover_pending'))`,
       [req.kitchenId]
     )
 
@@ -238,7 +242,22 @@ router.patch("/kitchen/:id/status", authRequired, requireRole("kitchen"), requir
       })
     }
 
-    await pool.query("UPDATE orders SET status = ? WHERE id = ?", [newStatus, req.params.id])
+    if (newStatus === "out_for_delivery") {
+      const pickupCode = String(Math.floor(1000 + Math.random() * 9000))
+      const deliveryOtp = String(Math.floor(1000 + Math.random() * 9000))
+      await pool.query(
+        `UPDATE orders 
+         SET status = 'out_for_delivery',
+             delivery_status = 'pending_assignment', 
+             pickup_code = ?, 
+             delivery_otp = ?, 
+             delivery_fee = 30.00 
+         WHERE id = ?`,
+        [pickupCode, deliveryOtp, req.params.id]
+      )
+    } else {
+      await pool.query("UPDATE orders SET status = ? WHERE id = ?", [newStatus, req.params.id])
+    }
 
     const [updated] = await pool.query(
       `SELECT o.*, u.name AS customer_name, u.phone AS customer_phone
@@ -258,6 +277,72 @@ router.patch("/kitchen/:id/status", authRequired, requireRole("kitchen"), requir
     res.status(500).json({ message: "Failed to update order status" })
   }
 })
+
+router.patch("/kitchen/:id/confirm-handover", authRequired, requireRole("kitchen"), requireApprovedKitchen, async (req, res) => {
+  const orderId = req.params.id
+
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+
+    // 1. Fetch order and make sure it belongs to this kitchen
+    const [orders] = await connection.query(
+      "SELECT * FROM orders WHERE id = ? AND kitchen_id = ?",
+      [orderId, req.kitchenId]
+    )
+
+    if (orders.length === 0) {
+      await connection.rollback()
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    const order = orders[0]
+
+    // 2. Verify order is in 'delivered' and 'handover_pending' state
+    if (order.status !== "delivered" || order.delivery_status !== "handover_pending") {
+      await connection.rollback()
+      return res.status(400).json({ message: "Order status is not valid for cash handover confirmation" })
+    }
+
+    // 3. Update order delivery status to delivered
+    await connection.query(
+      "UPDATE orders SET delivery_status = 'delivered' WHERE id = ?",
+      [orderId]
+    )
+
+    // 4. If there's a rider assigned, deduct the grand_total from their cash_collected balance
+    if (order.rider_id) {
+      await connection.query(
+        "UPDATE riders SET cash_collected = GREATEST(0.00, cash_collected - ?) WHERE id = ?",
+        [order.grand_total, order.rider_id]
+      )
+    }
+
+    await connection.commit()
+
+    // Fetch the updated order object to return
+    const [updated] = await pool.query(
+      `SELECT o.*, u.name AS customer_name, u.phone AS customer_phone
+       FROM orders o JOIN users u ON u.id = o.user_id WHERE o.id = ?`,
+      [orderId]
+    )
+
+    const mappedOrder = {
+      ...mapOrder(updated[0]),
+      items: await fetchOrderItems(updated[0].id),
+      review: await fetchOrderReview(updated[0].id),
+    }
+
+    res.json({ message: "Cash handover confirmed successfully. Order delivery complete.", order: mappedOrder })
+  } catch (error) {
+    await connection.rollback()
+    console.error("Kitchen confirm handover error:", error)
+    res.status(500).json({ message: "Failed to confirm cash handover" })
+  } finally {
+    connection.release()
+  }
+})
+
 
 // ─── Customer routes ────────────────────────────────────────────────────────
 
