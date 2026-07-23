@@ -8,7 +8,7 @@ import { SafeAreaView } from "react-native-safe-area-context"
 import { LinearGradient } from "expo-linear-gradient"
 import {
   Search, ChevronRight, Info, UtensilsCrossed, Coffee,
-  ShoppingCart, Package, MapPin, Bell, ShieldCheck, Handshake, ArrowRight, Scan,
+  ShoppingCart, Package, MapPin, Bell, ShieldCheck, Handshake, ArrowRight, Scan, Truck,
   Home, User, CheckCircle2, ChefHat,
   Utensils, Salad, ShoppingBag, Soup, Milk, Cookie, Flame, Candy, Egg,
   ChevronDown, X
@@ -1227,6 +1227,97 @@ export default function HomeScreen() {
               </View>
             </LinearGradient>
           </View>
+
+          {/* Delivery Partner CTA Section */}
+          <View className="mb-8 mt-2">
+            <LinearGradient
+              colors={["#064d29", "#0B6B3A"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={{
+                borderRadius: 24,
+                padding: 24,
+                position: "relative",
+                overflow: "hidden",
+                ...Platform.select({
+                  web: {
+                    boxShadow: "0px 4px 10px rgba(11, 107, 58, 0.15)",
+                  },
+                  default: {
+                    shadowColor: "#0B6B3A",
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.15,
+                    shadowRadius: 10,
+                    elevation: 4,
+                  },
+                }),
+              }}
+            >
+              {/* Decorative background circles */}
+              <View
+                style={{
+                  position: "absolute",
+                  top: -40,
+                  right: -40,
+                  width: 120,
+                  height: 120,
+                  borderRadius: 60,
+                  backgroundColor: "rgba(255, 255, 255, 0.08)",
+                }}
+              />
+              <View
+                style={{
+                  position: "absolute",
+                  bottom: -30,
+                  left: -30,
+                  width: 100,
+                  height: 100,
+                  borderRadius: 50,
+                  backgroundColor: "rgba(0, 0, 0, 0.04)",
+                }}
+              />
+
+              <View className="flex-row items-center gap-2 mb-3">
+                <Truck size={18} color="#FFFFFF" />
+                <Text className="font-poppins font-bold text-white text-[11px] uppercase tracking-wider mt-0.5">
+                  Delivery Partner
+                </Text>
+              </View>
+
+              <Text className="font-poppins font-extrabold text-white text-xl leading-tight mb-2">
+                Deliver & Earn{"\n"}On Your Schedule.
+              </Text>
+
+              <Text className="font-nunito text-white/80 text-xs leading-relaxed mb-5">
+                Join our delivery fleet today. Help deliver fresh, warm home-cooked meals to customer doorsteps in Lucknow and earn per trip.
+              </Text>
+
+              <View className="items-center sm:items-start">
+                <TouchableOpacity
+                  onPress={() => router.push("/(rider)/signup")}
+                  style={{
+                    backgroundColor: "#F4C400",
+                    paddingHorizontal: 24,
+                    paddingVertical: 12,
+                    borderRadius: 999,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                  }}
+                >
+                  <Text className="text-[#0a1f13] font-poppins font-bold text-xs uppercase tracking-wider">
+                    Register as Rider
+                  </Text>
+                  <ArrowRight size={14} color="#0a1f13" strokeWidth={2.5} />
+                </TouchableOpacity>
+                <Text className="font-nunito text-white/50 text-[10px] mt-2 text-center w-full sm:text-left">
+                  Start delivering with bike, scooty, or cycle.
+                </Text>
+              </View>
+            </LinearGradient>
+          </View>
+
         </Animated.View>
       </ScrollView>
       {/* Location Selector Modal */}

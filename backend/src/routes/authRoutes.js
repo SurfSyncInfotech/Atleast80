@@ -65,6 +65,43 @@ router.get("/me", authRequired, async (req, res) => {
   }
 })
 
+router.post("/check-phone", async (req, res) => {
+  const phone = req.body.phone?.toString().trim() || null
+  const email = req.body.email?.toString().trim().toLowerCase() || null
+
+  if (!phone && !email) {
+    return res.status(400).json({ message: "Phone number or email is required" })
+  }
+
+  try {
+    if (phone) {
+      const cleanPhone = phone.length === 10 ? phone : phone.slice(-10)
+      const [existingPhone] = await pool.query(
+        "SELECT id FROM users WHERE phone = ? OR phone = ?",
+        [phone, cleanPhone]
+      )
+      if (existingPhone.length > 0) {
+        return res.status(409).json({ message: "This phone number is already registered. Please log in instead." })
+      }
+    }
+
+    if (email) {
+      const [existingEmail] = await pool.query(
+        "SELECT id FROM users WHERE email = ?",
+        [email]
+      )
+      if (existingEmail.length > 0) {
+        return res.status(409).json({ message: "This email address is already registered. Please log in instead." })
+      }
+    }
+
+    res.json({ available: true })
+  } catch (error) {
+    console.error("Check phone error:", error)
+    res.status(500).json({ message: "Failed to check phone availability" })
+  }
+})
+
 router.post("/customer/register", async (req, res) => {
   const name = req.body.name?.toString().trim()
   const email = req.body.email?.toString().trim().toLowerCase()
@@ -830,48 +867,20 @@ router.post("/rider/register", (req, res) => {
       fs.appendFileSync(logFilePath, logMsg)
 
       if (email) {
-        const [existingEmail] = await connection.query("SELECT id, account_verified FROM users WHERE email = ?", [email])
+        const [existingEmail] = await connection.query("SELECT id FROM users WHERE email = ?", [email])
         fs.appendFileSync(logFilePath, `Email check for ${email}: ${JSON.stringify(existingEmail)}\n`)
         if (existingEmail.length > 0) {
-          if (existingEmail[0].account_verified === 0) {
-            await connection.rollback()
-            // Resend OTP for the existing unverified user
-            const { createAndSendOtp, getDemoOtp } = await import("../utils/otpStore.js")
-            const otpCode = await createAndSendOtp(`register:${existingEmail[0].id}`, phone || email)
-            const demoOtp = getDemoOtp(otpCode)
-            connection.release()
-            return res.status(201).json({
-              message: "Registration successful. Verification OTP sent.",
-              requiresOtp: true,
-              userId: existingEmail[0].id,
-              demoOtp,
-            })
-          }
           await connection.rollback()
-          return res.status(409).json({ message: "Email already registered" })
+          return res.status(409).json({ message: "This email address is already registered. Please log in instead." })
         }
       }
 
       if (phone) {
-        const [existingPhone] = await connection.query("SELECT id, account_verified FROM users WHERE phone = ?", [phone])
+        const [existingPhone] = await connection.query("SELECT id FROM users WHERE phone = ?", [phone])
         fs.appendFileSync(logFilePath, `Phone check for ${phone}: ${JSON.stringify(existingPhone)}\n`)
         if (existingPhone.length > 0) {
-          if (existingPhone[0].account_verified === 0) {
-            await connection.rollback()
-            // Resend OTP for the existing unverified user
-            const { createAndSendOtp, getDemoOtp } = await import("../utils/otpStore.js")
-            const otpCode = await createAndSendOtp(`register:${existingPhone[0].id}`, phone || email)
-            const demoOtp = getDemoOtp(otpCode)
-            connection.release()
-            return res.status(201).json({
-              message: "Registration successful. Verification OTP sent.",
-              requiresOtp: true,
-              userId: existingPhone[0].id,
-              demoOtp,
-            })
-          }
           await connection.rollback()
-          return res.status(409).json({ message: "Phone number already registered" })
+          return res.status(409).json({ message: "This phone number is already registered. Please log in instead." })
         }
       }
 

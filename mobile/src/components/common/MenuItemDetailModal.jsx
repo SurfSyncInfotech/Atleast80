@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { View, Text, Modal, Image, TouchableOpacity, ScrollView, Platform } from "react-native"
 import { X, ChevronLeft, ChevronRight, Plus, Minus, Play } from "lucide-react-native"
+import { router } from "expo-router"
 import { useCart } from "../../context/CartContext"
 import { resolveMediaUrl } from "../../lib/media"
 import { useVideoPlayer, VideoView } from "expo-video"
@@ -230,25 +231,53 @@ export default function MenuItemDetailModal({ item, onClose }) {
                 </TouchableOpacity>
               </View>
             ) : (
-              <TouchableOpacity
-                onPress={() => addItem(item)}
-                activeOpacity={0.9}
-                className="bg-primary px-8 py-3.5 rounded-2xl shadow-md border border-primary/20"
-                style={Platform.select({
-                  web: {
-                    boxShadow: "0px 4px 8px rgba(11, 107, 58, 0.15)",
-                  },
-                  default: {
-                    shadowColor: "#0B6B3A",
-                    shadowOffset: { width: 0, height: 4 },
-                    shadowOpacity: 0.15,
-                    shadowRadius: 8,
-                    elevation: 4,
-                  },
-                })}
-              >
-                <Text className="text-white font-poppins font-bold text-sm tracking-wide">ADD TO CART</Text>
-              </TouchableOpacity>
+              <View className="flex-row gap-2">
+                <TouchableOpacity
+                  onPress={() => addItem(item)}
+                  activeOpacity={0.9}
+                  className="bg-primary px-6 py-3.5 rounded-2xl shadow-md border border-primary/20 items-center justify-center"
+                  style={Platform.select({
+                    web: {
+                      boxShadow: "0px 4px 8px rgba(11, 107, 58, 0.15)",
+                    },
+                    default: {
+                      shadowColor: "#0B6B3A",
+                      shadowOffset: { width: 0, height: 4 },
+                      shadowOpacity: 0.15,
+                      shadowRadius: 8,
+                      elevation: 4,
+                    },
+                  })}
+                >
+                  <Text className="text-white font-poppins font-bold text-xs tracking-wide">ADD TO CART</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => {
+                    const added = addItem(item)
+                    if (added) {
+                      onClose() // Close details modal
+                      router.push("/(customer)/cart")
+                    }
+                  }}
+                  activeOpacity={0.9}
+                  className="bg-[#FF6B00] px-6 py-3.5 rounded-2xl shadow-md border border-[#FF6B00]/20 items-center justify-center"
+                  style={Platform.select({
+                    web: {
+                      boxShadow: "0px 4px 8px rgba(255, 107, 0, 0.15)",
+                    },
+                    default: {
+                      shadowColor: "#FF6B00",
+                      shadowOffset: { width: 0, height: 4 },
+                      shadowOpacity: 0.15,
+                      shadowRadius: 8,
+                      elevation: 4,
+                    },
+                  })}
+                >
+                  <Text className="text-white font-poppins font-bold text-xs tracking-wide">BUY NOW</Text>
+                </TouchableOpacity>
+              </View>
             )}
           </View>
         </View>

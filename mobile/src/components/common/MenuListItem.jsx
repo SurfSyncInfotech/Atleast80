@@ -1,5 +1,6 @@
 import { View, Text, TouchableOpacity, Image, Platform } from "react-native"
 import { Plus, Minus } from "lucide-react-native"
+import { router } from "expo-router"
 import { cn } from "../../lib/utils"
 import { useCart } from "../../context/CartContext"
 import { resolveMediaUrl } from "../../lib/media"
@@ -113,17 +114,34 @@ export default function MenuListItem({ item, className, onOpen, variant = "list"
               </TouchableOpacity>
             </View>
           ) : (
-            <TouchableOpacity
-              onPress={() => addItem(item)}
-              activeOpacity={0.85}
-              className="bg-white py-1.5 rounded-xl shadow-md border border-primary/20 items-center justify-center w-full"
-              style={Platform.select({
-                web: { boxShadow: "0px 2px 4px rgba(11, 107, 58, 0.1)" },
-                default: { shadowColor: "#0B6B3A", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 2 }
-              })}
-            >
-              <Text className="text-primary font-poppins font-bold text-xs">ADD</Text>
-            </TouchableOpacity>
+            <View className="flex-row gap-1.5 w-full">
+              <TouchableOpacity
+                onPress={() => addItem(item)}
+                activeOpacity={0.85}
+                className="flex-1 bg-white py-1.5 rounded-xl shadow-md border border-primary/20 items-center justify-center"
+                style={Platform.select({
+                  web: { boxShadow: "0px 2px 4px rgba(11, 107, 58, 0.1)" },
+                  default: { shadowColor: "#0B6B3A", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 2 }
+                })}
+              >
+                <Text className="text-primary font-poppins font-bold text-[10px]">ADD</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => {
+                  addItem(item)
+                  router.push("/(customer)/cart")
+                }}
+                activeOpacity={0.85}
+                className="flex-1 bg-[#FF6B00] py-1.5 rounded-xl shadow-md border border-[#FF6B00] items-center justify-center"
+                style={Platform.select({
+                  web: { boxShadow: "0px 2px 4px rgba(255, 107, 0, 0.1)" },
+                  default: { shadowColor: "#FF6B00", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 2 }
+                })}
+              >
+                <Text className="text-white font-poppins font-bold text-[10px]">BUY</Text>
+              </TouchableOpacity>
+            </View>
           )}
         </View>
       </TouchableOpacity>
@@ -186,9 +204,23 @@ export default function MenuListItem({ item, className, onOpen, variant = "list"
           </Text>
         ) : null}
 
-        <Text className="font-poppins font-bold text-dark text-base mt-3">
-          ₹{Number(item.price)}
-        </Text>
+        <View className="flex-row items-center gap-3 mt-3">
+          <Text className="font-poppins font-bold text-dark text-base">
+            ₹{Number(item.price)}
+          </Text>
+          {qty === 0 && (
+            <TouchableOpacity
+              onPress={() => {
+                const added = addItem(item)
+                if (added) router.push("/(customer)/cart")
+              }}
+              activeOpacity={0.85}
+              className="bg-[#FF6B00] px-2.5 py-1 rounded-lg border border-[#FF6B00]"
+            >
+              <Text className="text-white font-poppins font-bold text-[9px]">BUY NOW</Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
         {item.offer ? (
           <View className="mt-2 bg-accent/10 px-2.5 py-0.5 rounded-full self-start border border-accent/20">

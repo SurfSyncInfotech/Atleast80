@@ -10,6 +10,9 @@ export default function AdminLayout() {
 
   useEffect(() => {
     if (!loading) {
+      const isAdminRoute = segments.includes("(admin)")
+      if (!isAdminRoute) return
+
       const isLoginScreen = segments.includes("login")
       if (!user || !isAdmin) {
         if (!isLoginScreen) {

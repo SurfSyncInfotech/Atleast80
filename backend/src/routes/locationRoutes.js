@@ -1,4 +1,53 @@
 import { Router } from "express"
+import fs from "fs"
+import path from "path"
+import { fileURLToPath } from "url"
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const citiesFilePath = path.join(__dirname, "../data/cities.json")
+
+const STATE_ISO_MAP = {
+  "Andaman and Nicobar Islands": "AN",
+  "Andhra Pradesh": "AP",
+  "Arunachal Pradesh": "AR",
+  "Assam": "AS",
+  "Bihar": "BR",
+  "Chandigarh": "CH",
+  "Chhattisgarh": "CG",
+  "Dadra and Nagar Haveli": "DN",
+  "Delhi": "DL",
+  "Goa": "GA",
+  "Gujarat": "GJ",
+  "Haryana": "HR",
+  "Himachal Pradesh": "HP",
+  "Himachal Praddesh": "HP",
+  "Jammu and Kashmir": "JK",
+  "Jharkhand": "JH",
+  "Karnataka": "KA",
+  "Kerala": "KL",
+  "Madhya Pradesh": "MP",
+  "Maharashtra": "MH",
+  "Manipur": "MN",
+  "Meghalaya": "ML",
+  "Mizoram": "MZ",
+  "Nagaland": "NL",
+  "Odisha": "OR",
+  "Puducherry": "PY",
+  "Punjab": "PB",
+  "Rajasthan": "RJ",
+  "Sikkim": "SK",
+  "Tamil Nadu": "TN",
+  "Telangana": "TG",
+  "Tripura": "TR",
+  "Uttar Pradesh": "UP",
+  "Uttarakhand": "UK",
+  "West Bengal": "WB"
+}
+
+const ISO_STATE_MAP = Object.entries(STATE_ISO_MAP).reduce((acc, [name, code]) => {
+  acc[code] = name
+  return acc
+}, {})
 
 const router = Router()
 
@@ -8,6 +57,49 @@ const STATES_CACHE_TTL_MS = 24 * 60 * 60 * 1000
 
 let statesCache = null
 let statesCacheAt = 0
+
+function getFallback(pathStr) {
+  try {
+    const raw = fs.readFileSync(citiesFilePath, "utf8")
+    const localData = JSON.parse(raw)
+
+    const cityMatch = pathStr.match(/\/countries\/[A-Z]{2}\/states\/([A-Za-z0-9-]+)\/cities/)
+    if (cityMatch) {
+      const stateCode = cityMatch[1].toUpperCase()
+      const stateName = ISO_STATE_MAP[stateCode]
+      if (!stateName) return []
+
+      return localData
+        .filter((c) => c.state?.toLowerCase() === stateName.toLowerCase() || (stateCode === "HP" && c.state?.toLowerCase() === "himachal praddesh"))
+        .map((c, idx) => ({
+          id: c.id || `${stateCode}-${idx}`,
+          name: c.name,
+          stateCode: stateCode,
+          stateName: stateName
+        }))
+    }
+
+    if (pathStr.includes("/states")) {
+      const states = Object.entries(STATE_ISO_MAP).map(([name, code], idx) => ({
+        id: 4000 + idx,
+        name: name === "Himachal Praddesh" ? "Himachal Pradesh" : name,
+        iso2: code
+      }))
+      const unique = []
+      const seen = new Set()
+      for (const s of states) {
+        if (!seen.has(s.iso2)) {
+          seen.add(s.iso2)
+          unique.push(s)
+        }
+      }
+      return unique
+    }
+  } catch (err) {
+    console.warn("Failed to load local fallback data:", err.message)
+  }
+  return []
+}
 
 function normalizeStateName(name) {
   if (!name) return ""
@@ -19,121 +111,14 @@ function normalizeStateName(name) {
     .trim()
 }
 
-const FALLBACK_STATES = [
-  { id: 1, name: "Uttar Pradesh", iso2: "UP" },
-  { id: 2, name: "Delhi", iso2: "DL" },
-  { id: 3, name: "Maharashtra", iso2: "MH" },
-  { id: 4, name: "Karnataka", iso2: "KA" },
-  { id: 5, name: "Telangana", iso2: "TG" },
-  { id: 6, name: "Gujarat", iso2: "GJ" },
-  { id: 7, name: "Tamil Nadu", iso2: "TN" },
-  { id: 8, name: "West Bengal", iso2: "WB" },
-  { id: 9, name: "Rajasthan", iso2: "RJ" },
-  { id: 10, name: "Haryana", iso2: "HR" },
-  { id: 11, name: "Madhya Pradesh", iso2: "MP" },
-  { id: 12, name: "Punjab", iso2: "PB" },
-  { id: 13, name: "Bihar", iso2: "BR" },
-]
-
-const FALLBACK_CITIES = {
-  UP: [
-    { id: 101, name: "Lucknow", stateCode: "UP", stateName: "Uttar Pradesh" },
-    { id: 102, name: "Kanpur", stateCode: "UP", stateName: "Uttar Pradesh" },
-    { id: 103, name: "Noida", stateCode: "UP", stateName: "Uttar Pradesh" },
-    { id: 104, name: "Ghaziabad", stateCode: "UP", stateName: "Uttar Pradesh" },
-    { id: 105, name: "Varanasi", stateCode: "UP", stateName: "Uttar Pradesh" },
-    { id: 106, name: "Prayagraj", stateCode: "UP", stateName: "Uttar Pradesh" },
-    { id: 107, name: "Agra", stateCode: "UP", stateName: "Uttar Pradesh" },
-    { id: 108, name: "Meerut", stateCode: "UP", stateName: "Uttar Pradesh" },
-  ],
-  DL: [
-    { id: 201, name: "New Delhi", stateCode: "DL", stateName: "Delhi" },
-    { id: 202, name: "Delhi", stateCode: "DL", stateName: "Delhi" },
-    { id: 203, name: "Dwarka", stateCode: "DL", stateName: "Delhi" },
-  ],
-  MH: [
-    { id: 301, name: "Mumbai", stateCode: "MH", stateName: "Maharashtra" },
-    { id: 302, name: "Pune", stateCode: "MH", stateName: "Maharashtra" },
-    { id: 303, name: "Nagpur", stateCode: "MH", stateName: "Maharashtra" },
-    { id: 304, name: "Thane", stateCode: "MH", stateName: "Maharashtra" },
-    { id: 305, name: "Nashik", stateCode: "MH", stateName: "Maharashtra" },
-  ],
-  KA: [
-    { id: 401, name: "Bengaluru", stateCode: "KA", stateName: "Karnataka" },
-    { id: 402, name: "Mysuru", stateCode: "KA", stateName: "Karnataka" },
-    { id: 403, name: "Hubli", stateCode: "KA", stateName: "Karnataka" },
-    { id: 404, name: "Mangaluru", stateCode: "KA", stateName: "Karnataka" },
-  ],
-  TG: [
-    { id: 501, name: "Hyderabad", stateCode: "TG", stateName: "Telangana" },
-    { id: 502, name: "Warangal", stateCode: "TG", stateName: "Telangana" },
-    { id: 503, name: "Nizamabad", stateCode: "TG", stateName: "Telangana" },
-  ],
-  GJ: [
-    { id: 601, name: "Ahmedabad", stateCode: "GJ", stateName: "Gujarat" },
-    { id: 602, name: "Surat", stateCode: "GJ", stateName: "Gujarat" },
-    { id: 603, name: "Vadodara", stateCode: "GJ", stateName: "Gujarat" },
-    { id: 604, name: "Rajkot", stateCode: "GJ", stateName: "Gujarat" },
-  ],
-  TN: [
-    { id: 701, name: "Chennai", stateCode: "TN", stateName: "Tamil Nadu" },
-    { id: 702, name: "Coimbatore", stateCode: "TN", stateName: "Tamil Nadu" },
-    { id: 703, name: "Madurai", stateCode: "TN", stateName: "Tamil Nadu" },
-  ],
-  WB: [
-    { id: 801, name: "Kolkata", stateCode: "WB", stateName: "West Bengal" },
-    { id: 802, name: "Howrah", stateCode: "WB", stateName: "West Bengal" },
-    { id: 803, name: "Darjeeling", stateCode: "WB", stateName: "West Bengal" },
-  ],
-  RJ: [
-    { id: 901, name: "Jaipur", stateCode: "RJ", stateName: "Rajasthan" },
-    { id: 902, name: "Jodhpur", stateCode: "RJ", stateName: "Rajasthan" },
-    { id: 903, name: "Udaipur", stateCode: "RJ", stateName: "Rajasthan" },
-    { id: 904, name: "Kota", stateCode: "RJ", stateName: "Rajasthan" },
-  ],
-  HR: [
-    { id: 1001, name: "Gurugram", stateCode: "HR", stateName: "Haryana" },
-    { id: 1002, name: "Faridabad", stateCode: "HR", stateName: "Haryana" },
-    { id: 1003, name: "Panipat", stateCode: "HR", stateName: "Haryana" },
-  ],
-  MP: [
-    { id: 1101, name: "Bhopal", stateCode: "MP", stateName: "Madhya Pradesh" },
-    { id: 1102, name: "Indore", stateCode: "MP", stateName: "Madhya Pradesh" },
-    { id: 1103, name: "Gwalior", stateCode: "MP", stateName: "Madhya Pradesh" },
-    { id: 1104, name: "Jabalpur", stateCode: "MP", stateName: "Madhya Pradesh" },
-  ],
-  PB: [
-    { id: 1201, name: "Ludhiana", stateCode: "PB", stateName: "Punjab" },
-    { id: 1202, name: "Amritsar", stateCode: "PB", stateName: "Punjab" },
-    { id: 1203, name: "Jalandhar", stateCode: "PB", stateName: "Punjab" },
-    { id: 1204, name: "Patiala", stateCode: "PB", stateName: "Punjab" },
-  ],
-  BR: [
-    { id: 1301, name: "Patna", stateCode: "BR", stateName: "Bihar" },
-    { id: 1302, name: "Gaya", stateCode: "BR", stateName: "Bihar" },
-    { id: 1303, name: "Muzaffarpur", stateCode: "BR", stateName: "Bihar" },
-    { id: 1304, name: "Bhagalpur", stateCode: "BR", stateName: "Bihar" },
-  ],
-}
+const FALLBACK_STATES = getFallback("/states")
 
 async function cscRequest(path) {
   const apiKey = process.env.CSC_API_KEY
-  
-  const getFallback = () => {
-    const cityMatch = path.match(/\/countries\/[A-Z]{2}\/states\/([A-Za-z0-9-]+)\/cities/)
-    if (cityMatch) {
-      const stateCode = cityMatch[1].toUpperCase()
-      return FALLBACK_CITIES[stateCode] || []
-    }
-    if (path.includes("/states")) {
-      return FALLBACK_STATES
-    }
-    return []
-  }
 
   // Fallback if API key is not set or invalid placeholder
   if (!apiKey || apiKey === "undefined" || apiKey === "null" || apiKey.trim() === "") {
-    return getFallback()
+    return getFallback(path)
   }
 
   try {
@@ -144,36 +129,33 @@ async function cscRequest(path) {
 
     if (!res.ok) {
       console.warn(`Location API error: ${res.status}. Falling back to local data.`)
-      return getFallback()
+      return getFallback(path)
     }
 
     if (Array.isArray(json)) return json
     return json?.data || json?.states || json?.cities || []
   } catch (error) {
     console.warn("Location API request failed. Falling back to local data:", error.message)
-    return getFallback()
+    return getFallback(path)
   }
 }
 
 async function getStates() {
   const apiKey = process.env.CSC_API_KEY
   if (!apiKey || apiKey === "undefined" || apiKey === "null" || apiKey.trim() === "") {
-    return FALLBACK_STATES
+    return getFallback("/states")
   }
   if (statesCache && Date.now() - statesCacheAt < STATES_CACHE_TTL_MS) {
     return statesCache
   }
   try {
     const states = await cscRequest(`/countries/${COUNTRY}/states`)
-    if (states === FALLBACK_STATES) {
-      return states
-    }
     statesCache = states
     statesCacheAt = Date.now()
     return states
   } catch (error) {
     console.warn("Failed to load states, using fallback:", error.message)
-    return FALLBACK_STATES
+    return getFallback("/states")
   }
 }
 

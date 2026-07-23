@@ -45,7 +45,7 @@ import Button from "../../components/ui/Button"
 import Input from "../../components/ui/Input"
 import PasswordInput from "../../components/ui/PasswordInput"
 import { useAuth } from "../../context/AuthContext"
-import { api, getPartnerAgreement } from "../../lib/api"
+import { api, getPartnerAgreement, checkPhoneAvailability } from "../../lib/api"
 
 const steps = [
   { id: 1, title: "Kitchen Info", subtitle: "Tell Us About Your Kitchen", icon: Store },
@@ -283,8 +283,20 @@ export default function KitchenSignupPage() {
     return true
   }
 
-  const nextStep = () => {
-    if (validateStep()) setStep((s) => Math.min(s + 1, 5))
+  const nextStep = async () => {
+    if (!validateStep()) return
+    if (step === 2) {
+      setLoading(true)
+      try {
+        await checkPhoneAvailability(form.phone, form.email)
+      } catch (err) {
+        setError(err.message || "Mobile number or email already registered")
+        setLoading(false)
+        return
+      }
+      setLoading(false)
+    }
+    setStep((s) => Math.min(s + 1, 5))
   }
 
   const prevStep = () => {
@@ -294,7 +306,7 @@ export default function KitchenSignupPage() {
 
   const handleSubmit = async () => {
     if (step < 5) {
-      nextStep()
+      await nextStep()
       return
     }
 

@@ -34,6 +34,7 @@ export default function RootLayout() {
           <Stack.Screen name="(auth)/forgot-password" />
           <Stack.Screen name="(customer)" />
           <Stack.Screen name="(kitchen)" />
+          <Stack.Screen name="(rider)" />
           <Stack.Screen name="(admin)" />
         </Stack>
       </CartProvider>

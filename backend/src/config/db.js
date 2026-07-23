@@ -30,6 +30,32 @@ export async function connectDB() {
       // Ignored if table doesn't exist yet or already altered
     }
 
+    // Auto-migrate to add people_count column to bulk_order_enquiries
+    try {
+      await connection.query("ALTER TABLE bulk_order_enquiries ADD COLUMN people_count INT DEFAULT 1")
+      console.log("✅ Auto-migrated bulk_order_enquiries (added people_count)")
+    } catch (e) {
+      // Ignored if column already exists
+    }
+
+    // Auto-migrate to create bulk_order_chat_messages table
+    try {
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS bulk_order_chat_messages (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          enquiry_id INT NOT NULL,
+          sender_id INT NOT NULL,
+          message TEXT NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (enquiry_id) REFERENCES bulk_order_enquiries(id) ON DELETE CASCADE,
+          FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `)
+      console.log("✅ Auto-migrated bulk_order_chat_messages table")
+    } catch (e) {
+      console.error("❌ Auto-migration of bulk_order_chat_messages failed:", e.message)
+    }
+
     // Auto-migrate to create kitchen_agreement_signatures table
     try {
       await connection.query(`

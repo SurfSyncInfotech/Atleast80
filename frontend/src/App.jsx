@@ -36,6 +36,7 @@ import AdminLoginPage from "./pages/admin/AdminLoginPage"
 import AdminDashboardPage from "./pages/admin/AdminDashboardPage"
 import AdminFeaturedKitchensPage from "./pages/admin/AdminFeaturedKitchensPage"
 import AdminCustomersPage from "./pages/admin/AdminCustomersPage"
+import AdminRidersPage from "./pages/admin/AdminRidersPage"
 import AdminAlertsPage from "./pages/admin/AdminAlertsPage"
 import AdminSettingsPage from "./pages/admin/AdminSettingsPage"
 import AdminMenuPage from "./pages/admin/AdminMenuPage"
@@ -216,6 +217,14 @@ function AppContent() {
             element={
               <ProtectedRoute role="admin">
                 <AdminCustomersPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/riders"
+            element={
+              <ProtectedRoute role="admin">
+                <AdminRidersPage />
               </ProtectedRoute>
             }
           />

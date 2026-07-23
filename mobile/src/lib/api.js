@@ -7,15 +7,15 @@ const getApiUrl = () => {
     return process.env.EXPO_PUBLIC_API_URL
   }
   if (Platform.OS === "web") {
-    return "http://localhost:5000"
+    return "http://localhost:8080"
   }
   // Dynamically detect local dev machine IP from Expo host URI
   const hostUri = Constants.expoConfig?.hostUri
   if (hostUri) {
     const ip = hostUri.split(":")[0]
-    return `http://${ip}:5000`
+    return `http://${ip}:8080`
   }
-  return "http://10.0.2.2:5000" // Fallback for android emulators
+  return "http://10.0.2.2:8080" // Fallback for android emulators
 }
 
 export const API_URL = getApiUrl()
@@ -233,13 +233,86 @@ export async function deleteHygieneVideo() {
 
 export async function uploadQuotation(enquiryId, amount, notes, file) {
   const formData = new FormData()
-  const uploadFile = await getUploadFile(file)
-  formData.append("quotation", uploadFile)
+  if (file) {
+    const uploadFile = await getUploadFile(file)
+    if (uploadFile) {
+      formData.append("quotation", uploadFile)
+    }
+  }
   formData.append("quotationAmount", String(amount))
   if (notes?.trim()) {
     formData.append("quotationNotes", notes.trim())
   }
   return uploadFormData(`/api/bulk-enquiries/${enquiryId}/quotation`, formData)
+}
+
+export async function registerRider(form, aadhaarCardFile, aadhaarCardBackFile, panCardFile, drivingLicenseFile) {
+  const formData = new FormData()
+  Object.entries(form).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) {
+      formData.append(key, String(value))
+    }
+  })
+  formData.append("appVersion", "1.0.0")
+
+  const aadhaarUploadFile = await getUploadFile(aadhaarCardFile)
+  formData.append("aadhaarCard", aadhaarUploadFile)
+
+  const aadhaarBackUploadFile = await getUploadFile(aadhaarCardBackFile)
+  formData.append("aadhaarCardBack", aadhaarBackUploadFile)
+
+  const panUploadFile = await getUploadFile(panCardFile)
+  formData.append("panCard", panUploadFile)
+
+  if (drivingLicenseFile) {
+    const dlUploadFile = await getUploadFile(drivingLicenseFile)
+    formData.append("drivingLicense", dlUploadFile)
+  }
+
+  return uploadFormData("/api/auth/rider/register", formData)
+}
+
+export async function verifyRiderRegisterOtp(userId, otp) {
+  return api("/api/auth/rider/register/verify-otp", {
+    method: "POST",
+    body: JSON.stringify({ userId, otp }),
+  })
+}
+
+export async function toggleRiderStatus(isOnline) {
+  return api("/api/rider/status", {
+    method: "PUT",
+    body: JSON.stringify({ isOnline }),
+  })
+}
+
+export async function updateRiderLocation(latitude, longitude) {
+  return api("/api/rider/location", {
+    method: "PUT",
+    body: JSON.stringify({ latitude, longitude }),
+  })
+}
+
+export async function getRiderDashboard() {
+  return api("/api/rider/dashboard")
+}
+
+export async function getAvailableRiderDeliveries() {
+  return api("/api/rider/deliveries/available")
+}
+
+export async function performRiderDeliveryAction(orderId, action, extra = {}) {
+  return api(`/api/rider/deliveries/${orderId}/action`, {
+    method: "POST",
+    body: JSON.stringify({ action, ...extra }),
+  })
+}
+
+export async function checkPhoneAvailability(phone, email) {
+  return api("/api/auth/check-phone", {
+    method: "POST",
+    body: JSON.stringify({ phone, email }),
+  })
 }
 
 

@@ -4,6 +4,7 @@ import { useRouter } from "expo-router"
 import { ArrowLeft, Mail, Lock, User, Phone, ArrowRight, Eye, EyeOff } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import { useAuth } from "../../context/AuthContext"
+import { checkPhoneAvailability } from "../../lib/api"
 import Svg, { Path } from "react-native-svg"
 
 function WheatBackground() {
@@ -228,6 +229,7 @@ export default function SignupPage() {
     setError("")
     setLoading(true)
     try {
+      await checkPhoneAvailability(phone, email)
       await signupCustomer({
         name,
         email,

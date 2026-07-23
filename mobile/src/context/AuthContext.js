@@ -1,18 +1,28 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react"
-import { api, ApiError, registerKitchen as registerKitchenApi, verifyRegisterOtp } from "../lib/api"
+import {
+  api,
+  ApiError,
+  registerKitchen as registerKitchenApi,
+  verifyRegisterOtp,
+  registerRider as registerRiderApi,
+  verifyRiderRegisterOtp as verifyRiderRegisterOtpApi
+} from "../lib/api"
 import {
   initAuthStorage,
   writeStoredAuth,
   patchStoredAuth,
   clearStoredAuth,
+  readStoredAuthSync,
 } from "../lib/authStorage"
 
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null)
-  const [kitchen, setKitchen] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const stored = readStoredAuthSync()
+  const [user, setUser] = useState(stored?.user ?? null)
+  const [kitchen, setKitchen] = useState(stored?.kitchen ?? null)
+  const [rider, setRider] = useState(stored?.rider ?? null)
+  const [loading, setLoading] = useState(!stored?.token)
 
   const applySession = useCallback(async (authData) => {
     console.log("[AuthContext] applySession called with:", authData ? { user: authData.user, hasToken: !!authData.token } : "null")
@@ -21,6 +31,7 @@ export function AuthProvider({ children }) {
       await clearStoredAuth()
       setUser(null)
       setKitchen(null)
+      setRider(null)
       return
     }
 
@@ -29,6 +40,7 @@ export function AuthProvider({ children }) {
     console.log("[AuthContext] Stored auth written successfully. Setting state...")
     setUser(authData.user)
     setKitchen(authData.kitchen ?? null)
+    setRider(authData.rider ?? null)
   }, [])
 
   const persist = useCallback(
@@ -43,6 +55,7 @@ export function AuthProvider({ children }) {
         token: authData.token,
         user: authData.user,
         kitchen: authData.kitchen ?? null,
+        rider: authData.rider ?? null,
       })
     },
     [applySession]
@@ -76,6 +89,28 @@ export function AuthProvider({ children }) {
 
   const verifyKitchenRegisterOtp = async (userId, otp) => {
     const data = await verifyRegisterOtp(userId, otp)
+    return data
+  }
+
+  const loginRider = async (identifier, password) => {
+    const data = await api("/api/auth/rider/login", {
+      method: "POST",
+      body: JSON.stringify({ identifier, password }),
+    })
+    if (data.requiresOtp) {
+      return data
+    }
+    await persist({ token: data.token, user: data.user, rider: data.rider })
+    return data
+  }
+
+  const registerRider = async (form, aadhaarCardFile, aadhaarCardBackFile, panCardFile, drivingLicenseFile) => {
+    const data = await registerRiderApi(form, aadhaarCardFile, aadhaarCardBackFile, panCardFile, drivingLicenseFile)
+    return data
+  }
+
+  const verifyRiderRegisterOtp = async (userId, otp) => {
+    const data = await verifyRiderRegisterOtpApi(userId, otp)
     return data
   }
 
@@ -159,6 +194,29 @@ export function AuthProvider({ children }) {
     await applySession(null)
   }, [applySession])
 
+  const refreshRider = useCallback(async () => {
+    try {
+      const data = await api("/api/rider/dashboard")
+      // Merge onto the existing rider record (which holds vehicle/document fields
+      // loaded once from /api/auth/me) instead of replacing it, so those fields survive.
+      const existing = readStoredAuthSync()?.rider || null
+      const riderUpdate = {
+        ...existing,
+        status: data.status,
+        is_online: data.isOnline,
+        cash_collected: data.cashCollected,
+        total_earnings: data.totalEarnings,
+        total_deliveries: data.totalDeliveries,
+      }
+      setRider(riderUpdate)
+      const updated = await patchStoredAuth({ rider: riderUpdate })
+      if (updated) {
+        setRider(updated.rider)
+      }
+      return riderUpdate
+    } catch (_) {}
+  }, [])
+
   const refreshKitchen = useCallback(async () => {
     const data = await api("/api/kitchens/me")
     setKitchen(data.kitchen)
@@ -187,6 +245,7 @@ export function AuthProvider({ children }) {
         console.log("[AuthContext] Stored token found. Stored User:", stored.user)
         setUser(stored.user)
         setKitchen(stored.kitchen ?? null)
+        setRider(stored.rider ?? null)
 
         // Validate token with backend
         console.log("[AuthContext] Validating token with backend `/api/auth/me`...")
@@ -203,6 +262,7 @@ export function AuthProvider({ children }) {
           token: stored.token,
           user: data.user,
           kitchen: data.user.role === "kitchen" ? (data.kitchen ?? stored.kitchen ?? null) : null,
+          rider: data.user.role === "rider" ? (data.rider ?? stored.rider ?? null) : null,
         })
       } catch (err) {
         if (cancelled) return
@@ -227,14 +287,19 @@ export function AuthProvider({ children }) {
       value={{
         user,
         kitchen,
+        rider,
         loading,
         isAdmin: user?.role === "admin",
         isKitchen: user?.role === "kitchen",
         isCustomer: user?.role === "customer",
+        isRider: user?.role === "rider",
         loginKitchen,
         verifyKitchenLoginOtp,
         registerKitchen,
         verifyKitchenRegisterOtp,
+        loginRider,
+        registerRider,
+        verifyRiderRegisterOtp,
         loginAdmin,
         registerCustomer,
         signupCustomer,
@@ -245,6 +310,7 @@ export function AuthProvider({ children }) {
         updateProfile,
         logout,
         refreshKitchen,
+        refreshRider,
       }}
     >
       {children}

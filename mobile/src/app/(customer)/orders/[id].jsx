@@ -1,5 +1,25 @@
 import { useCallback, useEffect, useState } from "react"
 import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Linking, Image, Platform, ImageBackground } from "react-native"
+
+// Custom Alert wrapper to support React Native Web / Browser environment
+const Alert = {
+  alert: (title, message, buttons) => {
+    if (Platform.OS === "web") {
+      const formattedMessage = title ? `${title}\n\n${message || ""}` : message;
+      window.alert(formattedMessage);
+      if (buttons) {
+        const actionBtn = buttons.find(b => b.onPress && b.text !== "Cancel" && b.text !== "Continue" && b.style !== "cancel");
+        if (actionBtn) {
+          const proceed = window.confirm(`Go to: ${actionBtn.text}?`);
+          if (proceed) actionBtn.onPress();
+        }
+      }
+    } else {
+      const { Alert: RNAlert } = require("react-native");
+      RNAlert.alert(title, message, buttons);
+    }
+  }
+};
 import { useLocalSearchParams, useRouter } from "expo-router"
 import { SafeAreaView } from "react-native-safe-area-context"
 import { ArrowLeft, CheckCircle2, ChefHat, Bike, Home, Phone, Truck, Check } from "lucide-react-native"
@@ -23,7 +43,12 @@ function stepState(orderStatus, stepId) {
   const step = STATUS_ORDER.indexOf(stepId)
   if (current < 0 || step < 0) return { done: false, active: false }
   if (current > step) return { done: true, active: false }
-  if (current === step) return { done: true, active: true }
+  if (current === step) {
+    if (stepId === "delivered") {
+      return { done: true, active: false }
+    }
+    return { done: true, active: true }
+  }
   return { done: false, active: false }
 }
 
@@ -33,6 +58,7 @@ export default function OrderTrackingScreen() {
   const [order, setOrder] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+  const [cancelling, setCancelling] = useState(false)
 
   const loadOrder = useCallback(async (showLoader = false) => {
     if (!id) {
@@ -47,7 +73,12 @@ export default function OrderTrackingScreen() {
 
     try {
       const data = await api(`/api/orders/${id}`)
-      setOrder(data.order)
+      setOrder((prevOrder) => {
+        if (prevOrder && prevOrder.status !== "delivered" && data.order.status === "delivered") {
+          Alert.alert("Order Delivered! 🍕", "Your delicious meal has been delivered. Enjoy your food!\n\nThank you for ordering with Atleast80.")
+        }
+        return data.order
+      })
     } catch (err) {
       setError(err.message || "Order not found")
     } finally {
@@ -61,16 +92,48 @@ export default function OrderTrackingScreen() {
     const timer = setTimeout(() => {
       loadOrder(true)
     }, 0)
+    return () => clearTimeout(timer)
+  }, [loadOrder])
+
+  useEffect(() => {
+    if (!order) return
+    const isFinalStatus = ["delivered", "cancelled"].includes(order.status)
+    if (isFinalStatus) return
 
     const interval = setInterval(() => {
       loadOrder(false)
     }, 10000)
 
-    return () => {
-      clearTimeout(timer)
-      clearInterval(interval)
-    }
-  }, [loadOrder])
+    return () => clearInterval(interval)
+  }, [order, loadOrder])
+
+  const handleCancelOrder = async () => {
+    Alert.alert(
+      "Cancel Order",
+      "Are you sure you want to cancel this order?",
+      [
+        { text: "No", style: "cancel" },
+        {
+          text: "Yes, Cancel",
+          style: "destructive",
+          onPress: async () => {
+            setCancelling(true)
+            try {
+              const data = await api(`/api/orders/${order.id}/cancel`, {
+                method: "PATCH",
+              })
+              setOrder(data.order)
+              Alert.alert("Success", "Order cancelled successfully")
+            } catch (err) {
+              Alert.alert("Error", err.message || "Failed to cancel order")
+            } finally {
+              setCancelling(false)
+            }
+          }
+        }
+      ]
+    )
+  }
 
   if (loading) {
     return (
@@ -119,8 +182,25 @@ export default function OrderTrackingScreen() {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 60 }}>
-        {/* Estimated Arrival Banner */}
-        <View style={{
+        {order.status === "cancelled" && (
+          <View style={{
+            backgroundColor: "#FEE2E2",
+            borderColor: "#FCA5A5",
+            borderWidth: 1,
+            borderRadius: 24,
+            padding: 20,
+            alignItems: "center",
+            marginBottom: 16
+          }}>
+            <Text style={{ fontSize: 15, fontFamily: "Poppins", fontWeight: "bold", color: "#B91C1C" }}>Order Cancelled</Text>
+            <Text style={{ fontSize: 13, fontFamily: "Nunito", color: "#991B1B", marginTop: 4, textAlign: "center" }}>This order was cancelled.</Text>
+          </View>
+        )}
+
+        {order.status !== "cancelled" && (
+          <>
+            {/* Estimated Arrival Banner */}
+            <View style={{
           backgroundColor: "#FFFFFF",
           borderRadius: 24,
           padding: 20,
@@ -146,6 +226,32 @@ export default function OrderTrackingScreen() {
             />
           </View>
         </View>
+
+        {/* Delivery OTP Card */}
+        {order.deliveryOtp && order.status !== "delivered" && order.status !== "cancelled" && (
+          <View style={{
+            backgroundColor: "#EAF7EE",
+            borderRadius: 24,
+            padding: 16,
+            borderWidth: 1,
+            borderColor: "#D6EAE7",
+            alignItems: "center",
+            marginBottom: 16,
+            flexDirection: "row",
+            justifyContent: "space-between",
+            paddingHorizontal: 20
+          }}>
+            <View style={{ flex: 1, marginRight: 12 }}>
+              <Text style={{ fontSize: 13, fontFamily: "Poppins", fontWeight: "bold", color: "#0B6B3A" }}>Delivery Verification OTP</Text>
+              <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#4B5563", marginTop: 2 }}>Share this code with the rider at your door</Text>
+            </View>
+            <View style={{ backgroundColor: "#FFFFFF", borderWidth: 1.5, borderColor: "#0B6B3A", borderRadius: 12, paddingHorizontal: 16, paddingVertical: 6 }}>
+              <Text style={{ fontSize: 16, fontFamily: "Poppins", fontWeight: "extrabold", color: "#0B6B3A", letterSpacing: 2 }}>
+                {order.deliveryOtp}
+              </Text>
+            </View>
+          </View>
+        )}
 
         {/* Order Status Timeline */}
         <View style={{
@@ -220,9 +326,9 @@ export default function OrderTrackingScreen() {
                   {/* Step Card */}
                   <View style={{
                     flex: 1,
-                    backgroundColor: active ? "#EAF7EE" : "#FAF6F0",
+                    backgroundColor: active ? "#EAF7EE" : isCompleted ? "#F0FDF4" : "#FAF6F0",
                     borderWidth: 1,
-                    borderColor: active ? "#D6EAE7" : "#EADEC9",
+                    borderColor: active ? "#D6EAE7" : isCompleted ? "#DCFCE7" : "#EADEC9",
                     borderRadius: 20,
                     padding: 12,
                     flexDirection: "row",
@@ -266,7 +372,8 @@ export default function OrderTrackingScreen() {
             })}
           </View>
         </View>
-
+          </>
+        )}
         {/* Items List */}
         <View style={{
           backgroundColor: "#FFFFFF",
@@ -375,6 +482,29 @@ export default function OrderTrackingScreen() {
             </TouchableOpacity>
           ) : null}
         </View>
+
+        {["pending", "confirmed", "preparing"].includes(order.status) && (
+          <TouchableOpacity
+            onPress={handleCancelOrder}
+            disabled={cancelling}
+            style={{
+              width: "100%",
+              height: 48,
+              borderRadius: 24,
+              borderWidth: 1.5,
+              borderColor: "#EF4444",
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: "#FFFFFF",
+              marginBottom: 12
+            }}
+            activeOpacity={0.7}
+          >
+            <Text style={{ color: "#EF4444", fontFamily: "Poppins", fontWeight: "bold", fontSize: 15 }}>
+              {cancelling ? "Cancelling..." : "Cancel Order"}
+            </Text>
+          </TouchableOpacity>
+        )}
 
         <TouchableOpacity
           onPress={() => router.replace("/(customer)/home")}

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
 import {
   View,
   Text,
@@ -10,6 +10,8 @@ import {
   Modal,
   TextInput,
   Platform,
+  KeyboardAvoidingView,
+  Pressable
 } from "react-native"
 import { SafeAreaView } from "react-native-safe-area-context"
 import * as DocumentPicker from "expo-document-picker"
@@ -23,11 +25,14 @@ import {
   X,
   FileUp,
   ExternalLink,
-  CheckCircle
+  CheckCircle,
+  Send,
+  User
 } from "lucide-react-native"
 import { api, uploadQuotation } from "../../../lib/api"
 import { resolveMediaUrl } from "../../../lib/media"
 import { cn } from "../../../lib/utils"
+import { useAuth } from "../../../context/AuthContext"
 
 const MIN_BULK_VALUE = 2000
 
@@ -50,6 +55,9 @@ function showAlert(title, message) {
 }
 
 export default function KitchenEnquiriesScreen() {
+  const { user } = useAuth()
+  const chatScrollViewRef = useRef(null)
+  
   const [enquiries, setEnquiries] = useState([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -64,6 +72,57 @@ export default function KitchenEnquiriesScreen() {
   const [quoteFile, setQuoteFile] = useState(null)
   const [successModalVisible, setSuccessModalVisible] = useState(false)
   const [deleteConfirmId, setDeleteConfirmId] = useState(null)
+
+  // Chat state
+  const [chatModalVisible, setChatModalVisible] = useState(false)
+  const [chatMessages, setChatMessages] = useState([])
+  const [chatInput, setChatInput] = useState("")
+  const [selectedEnquiryForChat, setSelectedEnquiryForChat] = useState(null)
+
+  useEffect(() => {
+    if (!chatModalVisible || !selectedEnquiryForChat?.id) return
+
+    let active = true
+
+    const fetchChatMessages = async () => {
+      try {
+        const data = await api(`/api/bulk-enquiries/${selectedEnquiryForChat.id}/chat`, {}, "kitchen")
+        if (active) {
+          setChatMessages(data.messages || [])
+        }
+      } catch (err) {
+        console.error("Failed to load chat messages:", err)
+      }
+    }
+
+    fetchChatMessages()
+    const interval = setInterval(fetchChatMessages, 3000)
+
+    return () => {
+      active = false
+      clearInterval(interval)
+    }
+  }, [chatModalVisible, selectedEnquiryForChat?.id])
+
+  const handleSendChatMessage = async () => {
+    if (!chatInput.trim() || !selectedEnquiryForChat?.id) return
+    const msg = chatInput.trim()
+    setChatInput("")
+    try {
+      const data = await api(`/api/bulk-enquiries/${selectedEnquiryForChat.id}/chat`, {
+        method: "POST",
+        body: JSON.stringify({ message: msg }),
+      }, "kitchen")
+      setChatMessages((prev) => [...prev, data.chatMessage])
+    } catch (err) {
+      showAlert("Error", err.message || "Failed to send message")
+    }
+  }
+
+  const handleOpenChat = (enquiry) => {
+    setSelectedEnquiryForChat(enquiry)
+    setChatModalVisible(true)
+  }
 
   const loadEnquiries = useCallback(async () => {
     setError("")
@@ -108,10 +167,6 @@ export default function KitchenEnquiriesScreen() {
 
   const handleUploadQuotation = async () => {
     if (!activeEnquiry) return
-    if (!quoteFile) {
-      showAlert("Required", "Please select a quotation file (PDF or Image)")
-      return
-    }
     if (!quoteAmount || Number(quoteAmount) <= 0) {
       showAlert("Required", "Please enter a valid quotation amount")
       return
@@ -278,10 +333,16 @@ export default function KitchenEnquiriesScreen() {
               </View>
 
               {/* Info stats */}
-              <View className="flex-row justify-between items-center mb-3">
-                <Text className="font-poppins text-[10px] text-gray uppercase">Estimated budget</Text>
+              <View className="flex-row justify-between items-center mb-1">
+                <Text className="font-poppins text-[10px] text-gray uppercase">Offered budget</Text>
                 <Text className="font-poppins font-bold text-xs text-primary">
                   ₹{enquiry.estimatedValue}
+                </Text>
+              </View>
+              <View className="flex-row justify-between items-center mb-3">
+                <Text className="font-poppins text-[10px] text-gray uppercase">Number of Guests</Text>
+                <Text className="font-poppins font-bold text-xs text-dark-light">
+                  {enquiry.peopleCount || 1} {enquiry.peopleCount === 1 ? "Person" : "People"}
                 </Text>
               </View>
 
@@ -311,9 +372,10 @@ export default function KitchenEnquiriesScreen() {
                     <Text className="font-poppins font-bold text-sm text-primary">₹{enquiry.quotationAmount}</Text>
                   </View>
                   {enquiry.quotationNotes ? (
-                    <Text className="font-nunito text-xs text-gray bg-cream/30 p-2 rounded-xl border border-gray-light/10">
-                      Notes: {enquiry.quotationNotes}
-                    </Text>
+                    <View className="bg-gray-50 border-l-2 border-primary rounded-r-lg p-2.5 my-1.5">
+                      <Text className="font-poppins font-bold text-[9px] text-primary uppercase tracking-wider mb-0.5">Notes</Text>
+                      <Text className="font-nunito text-xs text-gray-700 italic">"{enquiry.quotationNotes}"</Text>
+                    </View>
                   ) : null}
                   {enquiry.quotationFile && (
                     <TouchableOpacity
@@ -348,21 +410,44 @@ export default function KitchenEnquiriesScreen() {
                   <Text className="font-poppins font-bold text-xs text-emerald-800">Order Confirmed (Paid)</Text>
                 </View>
               ) : (
-                <TouchableOpacity
-                  onPress={() => handleDeleteQuotation(enquiry.id)}
-                  disabled={deletingId === enquiry.id}
-                  className="w-full py-2.5 bg-red-50 border border-red-100 rounded-xl items-center justify-center flex-row gap-1.5"
-                >
-                  {deletingId === enquiry.id ? (
-                    <ActivityIndicator size="small" color="#EF4444" />
-                  ) : (
-                    <>
-                      <Trash2 size={14} color="#EF4444" />
-                      <Text className="font-poppins font-bold text-xs text-red-600">Delete Quotation</Text>
-                    </>
-                  )}
-                </TouchableOpacity>
+                <View className="flex-row gap-2 w-full">
+                  <TouchableOpacity
+                    onPress={() => {
+                      setQuoteAmount(String(enquiry.quotationAmount || ""))
+                      setQuoteNotes(enquiry.quotationNotes || "")
+                      setActiveEnquiry(enquiry)
+                    }}
+                    className="flex-1 py-2.5 bg-primary rounded-xl items-center justify-center flex-row gap-1"
+                  >
+                    <Upload size={13} color="#FFFFFF" />
+                    <Text className="font-poppins font-bold text-xs text-white">Update Quote</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={() => handleDeleteQuotation(enquiry.id)}
+                    disabled={deletingId === enquiry.id}
+                    className="flex-1 py-2.5 bg-red-50 border border-red-100 rounded-xl items-center justify-center flex-row gap-1"
+                  >
+                    {deletingId === enquiry.id ? (
+                      <ActivityIndicator size="small" color="#EF4444" />
+                    ) : (
+                      <>
+                        <Trash2 size={13} color="#EF4444" />
+                        <Text className="font-poppins font-bold text-xs text-red-600">Delete Quote</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
               )}
+
+              {/* In-App Chat Option */}
+              <TouchableOpacity
+                onPress={() => handleOpenChat(enquiry)}
+                className="w-full py-2 bg-cream-dark/15 border border-primary/20 rounded-xl items-center justify-center flex-row gap-1.5 mt-2"
+              >
+                <MessageSquare size={13} color="#0B6B3A" />
+                <Text className="font-poppins font-semibold text-xs text-primary">Chat with Customer</Text>
+              </TouchableOpacity>
             </View>
           ))}
         </ScrollView>
@@ -426,7 +511,7 @@ export default function KitchenEnquiriesScreen() {
                 {/* Quotation file picker */}
                 <View>
                   <Text className="font-poppins font-semibold text-xs text-dark mb-1.5">
-                    Quotation File (PDF or Image)
+                    Quotation File (PDF or Image, Optional)
                   </Text>
                   <TouchableOpacity
                     onPress={handleFilePick}
@@ -544,6 +629,163 @@ export default function KitchenEnquiriesScreen() {
             </View>
           </View>
         </View>
+      </Modal>
+      {/* In-App Chat Modal */}
+      <Modal
+        visible={chatModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setChatModalVisible(false)}
+      >
+        <Pressable 
+          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}
+          onPress={() => setChatModalVisible(false)}
+        >
+          <Pressable 
+            style={{ 
+              backgroundColor: "#FFFFFF", 
+              borderTopLeftRadius: 28, 
+              borderTopRightRadius: 28, 
+              height: "80%", 
+              width: "100%" 
+            }}
+            onPress={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <View style={{ 
+              flexDirection: "row", 
+              alignItems: "center", 
+              justifyContent: "space-between", 
+              paddingHorizontal: 20, 
+              paddingVertical: 16, 
+              borderBottomWidth: 1, 
+              borderBottomColor: "#F1F1EF" 
+            }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
+                <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "#EAF7EE", alignItems: "center", justifyContent: "center" }}>
+                  <User size={20} color="#0B6B3A" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 15, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F" }} numberOfLines={1}>
+                    Customer: {selectedEnquiryForChat?.customerName || "User"}
+                  </Text>
+                  <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#8A8A8A" }}>
+                    Enquiry Chat #{selectedEnquiryForChat?.id}
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity onPress={() => setChatModalVisible(false)} style={{ padding: 4 }}>
+                <X size={20} color="#7A7A7A" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Message History */}
+            <ScrollView 
+              ref={chatScrollViewRef}
+              onContentSizeChange={() => chatScrollViewRef.current?.scrollToEnd({ animated: true })}
+              contentContainerStyle={{ padding: 20, gap: 12, backgroundColor: "#ECE5DD", flexGrow: 1 }}
+            >
+              {chatMessages.length === 0 ? (
+                <View style={{ paddingVertical: 40, alignItems: "center", justifyContent: "center" }}>
+                  <Text style={{ fontSize: 13, fontFamily: "Nunito", color: "#8A8A8A", textAlign: "center" }}>
+                    No messages yet. Reply to the customer's enquiry to start the discussion!
+                  </Text>
+                </View>
+              ) : (
+                chatMessages.map((msg) => {
+                  const isMe = msg.sender_id === user?.id
+                  const msgDate = new Date(msg.created_at)
+                  const timeStr = isNaN(msgDate.getTime()) ? "" : msgDate.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
+                  
+                  return (
+                    <View 
+                      key={msg.id} 
+                      style={{ 
+                        alignSelf: isMe ? "flex-end" : "flex-start",
+                        maxWidth: "75%",
+                        backgroundColor: isMe ? "#DCF8C6" : "#FFFFFF",
+                        paddingHorizontal: 14,
+                        paddingVertical: 8,
+                        borderRadius: 12,
+                        borderBottomRightRadius: isMe ? 2 : 12,
+                        borderBottomLeftRadius: isMe ? 12 : 2,
+                        shadowColor: "#000000",
+                        shadowOffset: { width: 0, height: 1 },
+                        shadowOpacity: 0.12,
+                        shadowRadius: 1,
+                        elevation: 1,
+                      }}
+                    >
+                      {!isMe && (
+                        <Text style={{ fontSize: 10, fontWeight: "bold", color: "#0B6B3A", fontFamily: "Poppins", marginBottom: 2 }}>
+                          {msg.sender_name} ({msg.sender_role})
+                        </Text>
+                      )}
+                      <Text style={{ fontSize: 13, color: "#303030", fontFamily: "Nunito" }}>
+                        {msg.message}
+                      </Text>
+                      {timeStr ? (
+                        <Text style={{ fontSize: 9, color: "#8A8A8A", fontFamily: "Nunito", alignSelf: "flex-end", marginTop: 4 }}>
+                          {timeStr}
+                        </Text>
+                      ) : null}
+                    </View>
+                  )
+                })
+              )}
+            </ScrollView>
+
+            {/* Input Footer */}
+            <KeyboardAvoidingView 
+              behavior={Platform.OS === "ios" ? "padding" : "height"}
+              keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
+            >
+              <View style={{ 
+                flexDirection: "row", 
+                alignItems: "center", 
+                paddingHorizontal: 16, 
+                paddingVertical: 12, 
+                borderTopWidth: 1, 
+                borderTopColor: "#F1F1EF", 
+                backgroundColor: "#FFFFFF",
+                gap: 10
+              }}>
+                <TextInput
+                  style={{
+                    flex: 1,
+                    backgroundColor: "#F7F7F5",
+                    borderRadius: 20,
+                    paddingHorizontal: 16,
+                    paddingVertical: 10,
+                    fontSize: 14,
+                    fontFamily: "Nunito",
+                    color: "#1F1F1F",
+                    maxHeight: 100,
+                  }}
+                  multiline
+                  placeholder="Type a message..."
+                  placeholderTextColor="#7A7A7A"
+                  value={chatInput}
+                  onChangeText={setChatInput}
+                />
+                <TouchableOpacity 
+                  onPress={handleSendChatMessage}
+                  disabled={!chatInput.trim()}
+                  style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: 20,
+                    backgroundColor: chatInput.trim() ? "#0B6B3A" : "#E8E8E8",
+                    alignItems: "center",
+                    justifyContent: "center"
+                  }}
+                >
+                  <Send size={16} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+            </KeyboardAvoidingView>
+          </Pressable>
+        </Pressable>
       </Modal>
     </SafeAreaView>
   )

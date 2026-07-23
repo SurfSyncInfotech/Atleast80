@@ -62,18 +62,19 @@ function formatShortDate(value) {
   return new Date(value).toLocaleDateString("en-IN", { day: "numeric", month: "short" })
 }
 
-function StatusBadge({ status }) {
+function StatusBadge({ status, showCancelledAlert }) {
+  const displayStatus = showCancelledAlert ? "cancelled" : status
   return (
     <span className={cn(
       "inline-flex text-[10px] font-poppins font-bold uppercase px-2 py-0.5 rounded-full whitespace-nowrap",
-      STATUS_COLORS[status] || "bg-gray-100 text-gray"
+      STATUS_COLORS[displayStatus] || "bg-gray-100 text-gray"
     )}>
-      {STATUS_LABELS[status] || status}
+      {STATUS_LABELS[displayStatus] || displayStatus}
     </span>
   )
 }
 
-function OrderDetailModal({ order, onClose, onStatusUpdate, updating }) {
+function OrderDetailModal({ order, onClose, onStatusUpdate, onAcknowledge, updating }) {
   if (!order) return null
   const next = NEXT_STATUS[order.status]
 
@@ -98,7 +99,7 @@ function OrderDetailModal({ order, onClose, onStatusUpdate, updating }) {
             <p className="font-nunito text-xs text-gray mt-0.5">{formatDate(order.createdAt)}</p>
           </div>
           <div className="flex items-center gap-2">
-            <StatusBadge status={order.status} />
+            <StatusBadge status={order.status} showCancelledAlert={order.showCancelledAlert} />
             <button
               type="button"
               onClick={onClose}
@@ -123,6 +124,12 @@ function OrderDetailModal({ order, onClose, onStatusUpdate, updating }) {
               <MapPin size={14} className="text-primary flex-shrink-0 mt-0.5" />
               {order.deliveryAddress}
             </p>
+            {order.pickupCode && (
+              <div className="bg-primary/5 border border-primary/10 rounded-xl p-3 mt-3 flex items-center justify-between">
+                <span className="text-xs font-poppins font-bold text-gray uppercase tracking-wider">Rider Pickup Code:</span>
+                <span className="text-sm font-poppins font-bold text-primary tracking-widest bg-white border border-primary/20 rounded px-2.5 py-0.5">{order.pickupCode}</span>
+              </div>
+            )}
           </div>
 
           <div>
@@ -172,26 +179,42 @@ function OrderDetailModal({ order, onClose, onStatusUpdate, updating }) {
             </div>
           )}
 
-          {next && (
-            <div className="flex gap-2 pt-1">
+          {order.showCancelledAlert ? (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex flex-col items-center gap-3 w-full">
+              <p className="text-sm font-poppins font-bold text-red-700 text-center">⚠️ This order was cancelled by the customer.</p>
               <Button
-                className="flex-1"
-                onClick={() => onStatusUpdate(order.id, next.status)}
-                disabled={updating}
+                className="w-full bg-red-600 hover:bg-red-700 text-white"
+                onClick={() => {
+                  onAcknowledge(order.id)
+                  onClose()
+                }}
               >
-                {updating ? "Updating..." : next.label}
+                OK
               </Button>
-              {order.status === "pending" && (
+            </div>
+          ) : (
+            next && (
+              <div className="flex gap-2 pt-1">
                 <Button
-                  variant="outline"
-                  className="text-red-600 border-red-200 hover:bg-red-50 px-4"
-                  onClick={() => onStatusUpdate(order.id, "cancelled")}
+                  className="flex-1"
+                  onClick={() => onStatusUpdate(order.id, next.status)}
                   disabled={updating}
                 >
-                  <XCircle size={16} />
+                  {updating ? "Updating..." : next.label}
                 </Button>
-              )}
-            </div>
+                {["pending", "confirmed", "preparing"].includes(order.status) && (
+                  <Button
+                    variant="outline"
+                    className="text-red-600 border-red-200 hover:bg-red-50 px-4"
+                    onClick={() => onStatusUpdate(order.id, "cancelled")}
+                    disabled={updating}
+                    title="Cancel order"
+                  >
+                    <XCircle size={16} />
+                  </Button>
+                )}
+              </div>
+            )
           )}
         </div>
       </motion.div>
@@ -213,7 +236,27 @@ export default function KitchenOrdersPage() {
   const loadOrders = useCallback(async () => {
     try {
       const data = await api("/api/orders/kitchen", {}, "kitchen")
-      setAllOrders(data.orders || [])
+      const newOrders = data.orders || []
+
+      setAllOrders((prevOrders) => {
+        const prevList = prevOrders || []
+        return newOrders.map((newO) => {
+          if (newO.status === "cancelled") {
+            const oldO = prevList.find((o) => o.id === newO.id)
+            const wasActive = oldO && ["pending", "confirmed", "preparing"].includes(oldO.status)
+            const wasShowingAlert = oldO && oldO.showCancelledAlert
+            if (wasActive || wasShowingAlert) {
+              return {
+                ...newO,
+                status: oldO.status, // keep in old tab visually
+                actualStatus: "cancelled",
+                showCancelledAlert: true,
+              }
+            }
+          }
+          return newO
+        })
+      })
     } catch {
       setAllOrders([])
     } finally {
@@ -228,9 +271,11 @@ export default function KitchenOrdersPage() {
   }, [loadOrders])
 
   useEffect(() => {
-    const interval = setInterval(loadOrders, 15000)
+    const hasActive = allOrders.some((o) => ["pending", "confirmed", "preparing"].includes(o.status))
+    const intervalTime = hasActive ? 1000 : 25000
+    const interval = setInterval(loadOrders, intervalTime)
     return () => clearInterval(interval)
-  }, [loadOrders])
+  }, [allOrders, loadOrders])
 
   const tabCounts = useMemo(() => {
     const counts = { active: 0, all: allOrders.length }
@@ -275,11 +320,36 @@ export default function KitchenOrdersPage() {
       )
       setAllOrders((prev) => prev.map((o) => (o.id === orderId ? data.order : o)))
       setDetailOrder((prev) => (prev?.id === orderId ? data.order : prev))
+      if (newStatus === "out_for_delivery") {
+        alert(`Order Dispatched Successfully!\n\nAwaiting rider assignment.\n\nRider Pickup Code: ${data.order.pickupCode}`)
+      } else {
+        alert(`Order status updated to "${STATUS_LABELS[newStatus] || newStatus}" successfully!`)
+      }
     } catch (err) {
-      alert(err.message || "Failed to update status")
+      if (err.status === 400 || err.message?.toLowerCase().includes("cancel")) {
+        alert("This order has already been cancelled by the customer.")
+        loadOrders()
+      } else {
+        alert(err.message || "Failed to update status")
+      }
     } finally {
       setUpdating(false)
     }
+  }
+
+  const handleAcknowledgeCancellation = (orderId) => {
+    setAllOrders((prev) =>
+      prev.map((o) => {
+        if (o.id === orderId) {
+          return {
+            ...o,
+            status: "cancelled",
+            showCancelledAlert: false,
+          }
+        }
+        return o
+      })
+    )
   }
 
   return (
@@ -400,7 +470,7 @@ export default function KitchenOrdersPage() {
                           ₹{order.grandTotal}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
-                          <StatusBadge status={order.status} />
+                          <StatusBadge status={order.status} showCancelledAlert={order.showCancelledAlert} />
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <span className="flex items-center gap-1 font-nunito text-xs text-gray">
@@ -409,38 +479,51 @@ export default function KitchenOrdersPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => setDetailOrder(order)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-poppins font-semibold text-primary bg-primary/10 hover:bg-primary/15 cursor-pointer transition-colors"
-                            >
-                              <Eye size={13} />
-                              Details
-                            </button>
-                            {next && (
+                          {order.showCancelledAlert ? (
+                            <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1 text-xs text-red-700 font-poppins font-medium">
+                              <span>Cancelled by Customer</span>
                               <button
                                 type="button"
-                                disabled={updating}
-                                onClick={() => handleStatusUpdate(order.id, next.status)}
-                                className="inline-flex items-center gap-0.5 px-2.5 py-1.5 rounded-lg text-xs font-poppins font-semibold text-white bg-primary hover:bg-primary-dark cursor-pointer transition-colors disabled:opacity-50"
+                                onClick={() => handleAcknowledgeCancellation(order.id)}
+                                className="px-2 py-0.5 bg-red-600 hover:bg-red-700 text-white rounded text-[10px] font-bold cursor-pointer transition-colors"
                               >
-                                {next.label}
-                                <ChevronRight size={12} />
+                                OK
                               </button>
-                            )}
-                            {order.status === "pending" && (
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1.5">
                               <button
                                 type="button"
-                                disabled={updating}
-                                onClick={() => handleStatusUpdate(order.id, "cancelled")}
-                                title="Reject order"
-                                className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 cursor-pointer disabled:opacity-50"
+                                onClick={() => setDetailOrder(order)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-poppins font-semibold text-primary bg-primary/10 hover:bg-primary/15 cursor-pointer transition-colors"
                               >
-                                <XCircle size={15} />
+                                <Eye size={13} />
+                                Details
                               </button>
-                            )}
-                          </div>
+                              {next && (
+                                <button
+                                  type="button"
+                                  disabled={updating}
+                                  onClick={() => handleStatusUpdate(order.id, next.status)}
+                                  className="inline-flex items-center gap-0.5 px-2.5 py-1.5 rounded-lg text-xs font-poppins font-semibold text-white bg-primary hover:bg-primary-dark cursor-pointer transition-colors disabled:opacity-50"
+                                >
+                                  {next.label}
+                                  <ChevronRight size={12} />
+                                </button>
+                              )}
+                              {["pending", "confirmed", "preparing"].includes(order.status) && (
+                                <button
+                                  type="button"
+                                  disabled={updating}
+                                  onClick={() => handleStatusUpdate(order.id, "cancelled")}
+                                  title="Cancel order"
+                                  className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 cursor-pointer disabled:opacity-50"
+                                >
+                                  <XCircle size={15} />
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </td>
                       </tr>
                     )
@@ -465,6 +548,7 @@ export default function KitchenOrdersPage() {
             order={detailOrder}
             onClose={() => setDetailOrder(null)}
             onStatusUpdate={handleStatusUpdate}
+            onAcknowledge={handleAcknowledgeCancellation}
             updating={updating}
           />
         )}

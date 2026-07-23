@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react"
-import { View, Text, ScrollView, Image, TouchableOpacity, ActivityIndicator, Platform, Linking, Modal, TextInput, Pressable, Alert } from "react-native"
+import { useState, useEffect, useRef } from "react"
+import { View, Text, ScrollView, Image, TouchableOpacity, ActivityIndicator, Platform, Linking, Modal, TextInput, Pressable, Alert, KeyboardAvoidingView } from "react-native"
 import { useLocalSearchParams, useRouter } from "expo-router"
 import { SafeAreaView } from "react-native-safe-area-context"
-import { ArrowLeft, Star, ShieldCheck, Clock, Share2, MapPin, Phone, ShoppingCart, ChevronRight, UtensilsCrossed, ShoppingBag, Tag, Sparkles, X, ChefHat, ArrowRight, ClipboardList, CheckCircle } from "lucide-react-native"
+import { ArrowLeft, Star, ShieldCheck, Clock, Share2, MapPin, Phone, UtensilsCrossed, ShoppingBag, Sparkles, X, ChefHat, ArrowRight, ClipboardList, CheckCircle, MessageSquare, Send } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import MenuListItem from "../../../../components/common/MenuListItem"
 import MenuItemDetailModal from "../../../../components/common/MenuItemDetailModal"
@@ -18,7 +18,6 @@ const tabs = [
   { id: "food", label: "Food", icon: UtensilsCrossed },
   { id: "grocery", label: "Ration", icon: ShoppingBag },
   { id: "combo", label: "Combo", icon: Sparkles },
-  { id: "offers", label: "Offers", icon: Tag },
 ]
 
 function showAlert(title, message) {
@@ -32,23 +31,28 @@ function showAlert(title, message) {
 export default function KitchenDetailScreen() {
   const { id } = useLocalSearchParams()
   const router = useRouter()
+  const chatScrollViewRef = useRef(null)
   const [activeTab, setActiveTab] = useState("food")
   const [kitchen, setKitchen] = useState(null)
   const [menu, setMenu] = useState([])
   const [loading, setLoading] = useState(true)
   const [selectedItem, setSelectedItem] = useState(null)
-
-  const { itemCount, total, requireCustomer } = useCart()
+  const { requireCustomer, addItem, clearCart } = useCart()
 
   const [enquiryModalVisible, setEnquiryModalVisible] = useState(false)
   const [enquiryMessage, setEnquiryMessage] = useState("")
-  const [enquiryValue, setEnquiryValue] = useState("2000")
+  const [enquiryValue, setEnquiryValue] = useState("")
+  const [enquiryPeopleCount, setEnquiryPeopleCount] = useState("")
   const [enquirySubmitting, setEnquirySubmitting] = useState(false)
   const [enquiryError, setEnquiryError] = useState("")
   const [activeEnquiry, setActiveEnquiry] = useState(null)
   const [successModalVisible, setSuccessModalVisible] = useState(false)
+  const [chatModalVisible, setChatModalVisible] = useState(false)
+  const [chatMessages, setChatMessages] = useState([])
+  const [chatInput, setChatInput] = useState("")
 
   const { user, loading: authLoading } = useAuth()
+  const hasActiveEnquiry = activeEnquiry && activeEnquiry.status !== "completed"
 
   useEffect(() => {
     if (!id) return
@@ -149,12 +153,18 @@ export default function KitchenDetailScreen() {
 
   const submitEnquiry = async () => {
     const val = Number(enquiryValue)
+    const pCount = Number(enquiryPeopleCount)
+
     if (!enquiryMessage || enquiryMessage.trim().length < 10) {
-      setEnquiryError("Describe your requirements (at least 10 characters)")
+      setEnquiryError("Describe what you need (at least 10 characters)")
       return
     }
-    if (!val || Number.isNaN(val) || val < 2000) {
-      setEnquiryError("Minimum order value is ₹2000")
+    if (!val || Number.isNaN(val) || val < 1) {
+      setEnquiryError("Please enter your budget / offered price")
+      return
+    }
+    if (!pCount || Number.isNaN(pCount) || pCount < 1) {
+      setEnquiryError("Please specify number of people")
       return
     }
 
@@ -167,6 +177,7 @@ export default function KitchenDetailScreen() {
           kitchenId: kitchen.id,
           message: enquiryMessage.trim(),
           estimatedValue: val,
+          peopleCount: pCount,
         }),
       })
 
@@ -175,7 +186,8 @@ export default function KitchenDetailScreen() {
       }
       setEnquiryModalVisible(false)
       setEnquiryMessage("")
-      setEnquiryValue("2000")
+      setEnquiryValue("")
+      setEnquiryPeopleCount("")
       setSuccessModalVisible(true)
     } catch (err) {
       console.error("Submit bulk enquiry error:", err)
@@ -212,47 +224,63 @@ export default function KitchenDetailScreen() {
   }
 
   const handlePayQuotation = () => {
-    const processPayment = async () => {
+    const bulkItem = {
+      id: `bulk_${activeEnquiry.id}`,
+      name: `Bulk Order Service (#${activeEnquiry.id})`,
+      price: activeEnquiry.quotationAmount,
+      kitchenId: activeEnquiry.kitchenId,
+      qty: 1,
+      isBulk: true,
+    }
+
+    clearCart()
+    addItem(bulkItem)
+    setEnquiryModalVisible(false)
+    router.push("/(customer)/checkout")
+  }
+
+  useEffect(() => {
+    if (!chatModalVisible || !activeEnquiry?.id) return
+
+    let active = true
+
+    const fetchChatMessages = async () => {
       try {
-        await api(`/api/bulk-enquiries/${activeEnquiry.id}/pay`, {
-          method: "POST",
-        })
-        const updated = await api(`/api/bulk-enquiries/kitchen/${kitchen.id}`)
-        setActiveEnquiry(updated.enquiry)
-        showAlert("Payment Success", "Thank you! Your payment for the bulk order is successful.")
+        const data = await api(`/api/bulk-enquiries/${activeEnquiry.id}/chat`)
+        if (active) {
+          setChatMessages(data.messages || [])
+        }
       } catch (err) {
-        showAlert("Error", err.message || "Failed to process payment")
+        console.error("Failed to load chat messages:", err)
       }
     }
 
-    if (Platform.OS === "web") {
-      const ok = window.confirm(`Proceed to pay ₹${activeEnquiry.quotationAmount} for bulk order enquiry #${activeEnquiry.id}?`)
-      if (ok) {
-        processPayment()
-      }
-    } else {
-      Alert.alert(
-        "Payment",
-        `Proceed to pay ₹${activeEnquiry.quotationAmount} for bulk order enquiry #${activeEnquiry.id}?`,
-        [
-          { text: "Cancel", style: "cancel" },
-          { 
-            text: "Pay Now", 
-            onPress: processPayment
-          }
-        ]
-      )
+    fetchChatMessages()
+    const interval = setInterval(fetchChatMessages, 3000)
+
+    return () => {
+      active = false
+      clearInterval(interval)
+    }
+  }, [chatModalVisible, activeEnquiry?.id])
+
+  const handleSendChatMessage = async () => {
+    if (!chatInput.trim() || !activeEnquiry?.id) return
+    const msg = chatInput.trim()
+    setChatInput("")
+    try {
+      const data = await api(`/api/bulk-enquiries/${activeEnquiry.id}/chat`, {
+        method: "POST",
+        body: JSON.stringify({ message: msg }),
+      })
+      setChatMessages((prev) => [...prev, data.chatMessage])
+    } catch (err) {
+      showAlert("Error", err.message || "Failed to send message")
     }
   }
 
   const handleChatWithSeller = () => {
-    if (kitchen.phone) {
-      const formattedPhone = kitchen.phone.replace(/[^0-9]/g, "")
-      const phoneWithCode = formattedPhone.length === 10 ? `91${formattedPhone}` : formattedPhone
-      Linking.openURL(`https://wa.me/${phoneWithCode}?text=Hello, I am contacting you regarding bulk order enquiry #${activeEnquiry.id}`)
-    } else {
-      showAlert("Not Available", "This kitchen does not have a contact number listed.")
-    }
+    setChatModalVisible(true)
   }
 
   const handleDeleteEnquiry = async () => {
@@ -489,7 +517,7 @@ export default function KitchenDetailScreen() {
         </View>
 
         {/* Bulk Order Enquiry CTA Card */}
-        {!activeEnquiry ? (
+        {!hasActiveEnquiry ? (
           <View className="px-4 mt-4">
             <LinearGradient
               colors={["#0C4240", "#135E39"]}
@@ -560,7 +588,7 @@ export default function KitchenDetailScreen() {
               </TouchableOpacity>
             </LinearGradient>
           </View>
-        ) : activeEnquiry.status === "pending" ? (
+        ) : (hasActiveEnquiry && activeEnquiry.status === "pending") ? (
           <View className="px-4 mt-4">
             <LinearGradient
               colors={["#0C4240", "#135E39"]}
@@ -835,70 +863,7 @@ export default function KitchenDetailScreen() {
                 </View>
               )}
             </View>
-          ) : null}
-
-          {activeTab === "offers" ? (
-            <View>
-              <Text className="font-poppins font-extrabold text-dark text-lg mb-0.5">Offers & Deals</Text>
-              <Text className="font-nunito font-semibold text-gray/80 text-[11px] mb-5">
-                Active deals from this kitchen · {offerCount} active
-              </Text>
-              {offerCount === 0 ? (
-                <View className="py-12 items-center">
-                  <Tag size={36} color="#E8E8E8" />
-                  <Text className="font-nunito text-gray text-xs mt-2">No offers right now</Text>
-                </View>
-              ) : (
-                <View>
-                  {kitchen.offer ? (
-                    <LinearGradient
-                      colors={["#0B6B3A", "#064d29", "#04331b"]}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={{
-                        padding: 20,
-                        borderRadius: 16,
-                        position: "relative",
-                        overflow: "hidden",
-                        marginBottom: 16,
-                        ...Platform.select({
-                          web: {
-                            boxShadow: "0px 4px 6px rgba(0, 0, 0, 0.05)",
-                          },
-                          default: {
-                            shadowColor: "#000",
-                            shadowOffset: { width: 0, height: 2 },
-                            shadowOpacity: 0.05,
-                            shadowRadius: 6,
-                            elevation: 2,
-                          },
-                        }),
-                      }}
-                    >
-                      <View className="flex-row items-center gap-1.5">
-                        <Sparkles size={14} color="#FFD740" />
-                        <Text className="text-secondary text-[9px] font-poppins font-bold uppercase tracking-wider">
-                          Kitchen-wide offer
-                        </Text>
-                      </View>
-                      <Text className="font-poppins font-bold text-white text-xl mt-3">{kitchen.offer}</Text>
-                      <Text className="font-nunito text-white/60 text-xs mt-1 leading-relaxed">
-                        Applies to your order from {kitchen.name}. Add items to your cart and check out.
-                      </Text>
-                    </LinearGradient>
-                  ) : null}
-
-                  <View className="flex-row flex-wrap -mx-1.5">
-                    {offerItems.map((item) => (
-                      <View key={item.id} className="w-1/2 p-1.5">
-                        <MenuListItem item={item} onOpen={setSelectedItem} variant="grid" />
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              )}
-            </View>
-          ) : null}
+             ) : null}
         </View>
       </ScrollView>
 
@@ -929,7 +894,7 @@ export default function KitchenDetailScreen() {
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 18, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>
-                  {activeEnquiry ? "Enquiry Details" : "Bulk Order Enquiry"}
+                  {hasActiveEnquiry ? "Enquiry Details" : "Bulk Order Enquiry"}
                 </Text>
                 <Text style={{ fontSize: 11, color: "#7A7A7A", fontFamily: "Nunito", marginTop: 2 }}>
                   {kitchen.name}
@@ -941,12 +906,12 @@ export default function KitchenDetailScreen() {
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled={true}>
-              {!activeEnquiry ? (
+              {!hasActiveEnquiry ? (
                 // Submit Form Screen
                 <View>
                   <View style={{ backgroundColor: "#EAF7EE", borderRadius: 16, padding: 14, marginBottom: 20 }}>
                     <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#0B6B3A", lineHeight: 16 }}>
-                      Need a quotation for a bulk order? Minimum order value is ₹2000. Share your requirements and the kitchen will upload a quotation for you.
+                      Need a custom quotation for a bulk order? Share your offered budget and guest requirements below, and the kitchen will respond.
                     </Text>
                   </View>
 
@@ -956,10 +921,10 @@ export default function KitchenDetailScreen() {
                     </Text>
                   ) : null}
 
-                  {/* Estimated Value */}
+                  {/* Offered Budget */}
                   <View style={{ marginBottom: 16 }}>
                     <Text style={{ fontSize: 12, fontWeight: "600", color: "#1F1F1F", fontFamily: "Poppins", marginBottom: 6 }}>
-                      Estimated Order Value (₹, Min 2000)
+                      Your Offered Budget (₹)
                     </Text>
                     <TextInput
                       style={{
@@ -974,15 +939,42 @@ export default function KitchenDetailScreen() {
                         backgroundColor: "#FFFFFF",
                       }}
                       keyboardType="numeric"
+                      placeholder="e.g. 5000"
+                      placeholderTextColor="#7A7A7A"
                       value={enquiryValue}
                       onChangeText={setEnquiryValue}
+                    />
+                  </View>
+
+                  {/* Number of People */}
+                  <View style={{ marginBottom: 16 }}>
+                    <Text style={{ fontSize: 12, fontWeight: "600", color: "#1F1F1F", fontFamily: "Poppins", marginBottom: 6 }}>
+                      Number of Guests / People
+                    </Text>
+                    <TextInput
+                      style={{
+                        borderWidth: 2,
+                        borderColor: "#E8E8E8",
+                        borderRadius: 16,
+                        paddingHorizontal: 16,
+                        paddingVertical: 12,
+                        fontSize: 14,
+                        fontFamily: "Nunito",
+                        color: "#1F1F1F",
+                        backgroundColor: "#FFFFFF",
+                      }}
+                      keyboardType="numeric"
+                      placeholder="e.g. 50"
+                      placeholderTextColor="#7A7A7A"
+                      value={enquiryPeopleCount}
+                      onChangeText={setEnquiryPeopleCount}
                     />
                   </View>
 
                   {/* What do you need? */}
                   <View style={{ marginBottom: 24 }}>
                     <Text style={{ fontSize: 12, fontWeight: "600", color: "#1F1F1F", fontFamily: "Poppins", marginBottom: 6 }}>
-                      What do you need?
+                      What do you need? (Description)
                     </Text>
                     <TextInput
                       style={{
@@ -1094,9 +1086,23 @@ export default function KitchenDetailScreen() {
                       </Text>
 
                       {activeEnquiry.quotationNotes ? (
-                        <Text style={{ fontSize: 12, fontFamily: "Nunito", color: "#4A4A4A", marginTop: 8, lineHeight: 18 }}>
-                          Notes from Kitchen: {`"${activeEnquiry.quotationNotes}"`}
-                        </Text>
+                        <View style={{
+                          backgroundColor: "#F9F9FB",
+                          borderLeftWidth: 3,
+                          borderLeftColor: "#0B6B3A",
+                          borderRadius: 8,
+                          paddingHorizontal: 12,
+                          paddingVertical: 10,
+                          marginTop: 10,
+                          marginBottom: 4,
+                        }}>
+                          <Text style={{ fontSize: 10, fontWeight: "bold", color: "#0B6B3A", fontFamily: "Poppins", textTransform: "uppercase", marginBottom: 2 }}>
+                            Notes from Kitchen
+                          </Text>
+                          <Text style={{ fontSize: 12.5, fontFamily: "Nunito", color: "#4A4A4A", lineHeight: 18, fontStyle: "italic" }}>
+                            {`"${activeEnquiry.quotationNotes}"`}
+                          </Text>
+                        </View>
                       ) : null}
 
                       {activeEnquiry.quotationFile ? (
@@ -1121,38 +1127,60 @@ export default function KitchenDetailScreen() {
 
                       {/* Accept / Reject buttons */}
                       {activeEnquiry.status === "quoted" && (
-                        <View style={{ flexDirection: "row", gap: 12, marginTop: 18 }}>
-                          <TouchableOpacity
-                            onPress={handleRejectQuotation}
-                            style={{
-                              flex: 1,
-                              backgroundColor: "#FDEDEC",
-                              borderWidth: 1,
-                              borderColor: "#FCD2D1",
-                              borderRadius: 12,
-                              paddingVertical: 12,
-                              alignItems: "center",
-                              justifyContent: "center",
-                            }}
-                          >
-                            <Text style={{ color: "#C0392B", fontWeight: "bold", fontFamily: "Poppins", fontSize: 13 }}>
-                              Reject
-                            </Text>
-                          </TouchableOpacity>
+                        <View style={{ marginTop: 18, gap: 12 }}>
+                          <View style={{ flexDirection: "row", gap: 12 }}>
+                            <TouchableOpacity
+                              onPress={handleRejectQuotation}
+                              style={{
+                                  flex: 1,
+                                  backgroundColor: "#FDEDEC",
+                                  borderWidth: 1,
+                                  borderColor: "#FCD2D1",
+                                  borderRadius: 12,
+                                  paddingVertical: 12,
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                              }}
+                            >
+                              <Text style={{ color: "#C0392B", fontWeight: "bold", fontFamily: "Poppins", fontSize: 13 }}>
+                                Reject
+                              </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              onPress={handleAcceptQuotation}
+                              style={{
+                                flex: 1,
+                                backgroundColor: "#0B6B3A",
+                                borderRadius: 12,
+                                paddingVertical: 12,
+                                alignItems: "center",
+                                justifyContent: "center",
+                              }}
+                            >
+                              <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins", fontSize: 13 }}>
+                                Accept
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
 
                           <TouchableOpacity
-                            onPress={handleAcceptQuotation}
+                            onPress={handleChatWithSeller}
                             style={{
-                              flex: 1,
-                              backgroundColor: "#0B6B3A",
+                              backgroundColor: "#FFFFFF",
+                              borderWidth: 1,
+                              borderColor: "#0B6B3A",
                               borderRadius: 12,
                               paddingVertical: 12,
                               alignItems: "center",
                               justifyContent: "center",
+                              flexDirection: "row",
+                              gap: 6
                             }}
                           >
-                            <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins", fontSize: 13 }}>
-                              Accept
+                            <MessageSquare size={16} color="#0B6B3A" />
+                            <Text style={{ color: "#0B6B3A", fontWeight: "bold", fontFamily: "Poppins", fontSize: 13 }}>
+                              Discuss / Negotiate with Kitchen
                             </Text>
                           </TouchableOpacity>
                         </View>
@@ -1172,7 +1200,7 @@ export default function KitchenDetailScreen() {
                           }}
                         >
                           <Text style={{ color: "#0a1f13", fontWeight: "bold", fontFamily: "Poppins", fontSize: 14 }}>
-                            PROCEED TO PAY ₹{activeEnquiry.quotationAmount}
+                            ADD TO CART & CHECKOUT (₹{activeEnquiry.quotationAmount})
                           </Text>
                         </TouchableOpacity>
                       )}
@@ -1195,7 +1223,7 @@ export default function KitchenDetailScreen() {
                           <TouchableOpacity
                             onPress={handleChatWithSeller}
                             style={{
-                              backgroundColor: "#25D366",
+                              backgroundColor: "#0B6B3A",
                               borderRadius: 12,
                               paddingVertical: 12,
                               alignItems: "center",
@@ -1204,8 +1232,9 @@ export default function KitchenDetailScreen() {
                               gap: 6,
                             }}
                           >
+                            <MessageSquare size={16} color="#FFFFFF" />
                             <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins", fontSize: 13 }}>
-                              Chat further with Seller (WhatsApp)
+                              Chat further with Kitchen
                             </Text>
                           </TouchableOpacity>
 
@@ -1229,10 +1258,30 @@ export default function KitchenDetailScreen() {
                       )}
                     </View>
                   ) : (
-                    <View style={{ alignItems: "center", paddingVertical: 12 }}>
+                    <View style={{ alignItems: "center", paddingVertical: 12, gap: 12 }}>
                       <Text style={{ fontSize: 12, fontFamily: "Nunito", color: "#7A7A7A", textAlign: "center", lineHeight: 18 }}>
                         The kitchen has been notified. You will receive quotation pricing and notes right here once they review and respond.
                       </Text>
+                      <TouchableOpacity
+                        onPress={handleChatWithSeller}
+                        style={{
+                          width: "100%",
+                          backgroundColor: "#FFFFFF",
+                          borderWidth: 1,
+                          borderColor: "#0B6B3A",
+                          borderRadius: 12,
+                          paddingVertical: 12,
+                          alignItems: "center",
+                          justifyContent: "center",
+                          flexDirection: "row",
+                          gap: 6
+                        }}
+                      >
+                        <MessageSquare size={16} color="#0B6B3A" />
+                        <Text style={{ color: "#0B6B3A", fontWeight: "bold", fontFamily: "Poppins", fontSize: 13 }}>
+                          Chat with Kitchen
+                        </Text>
+                      </TouchableOpacity>
                     </View>
                   )}
 
@@ -1291,6 +1340,164 @@ export default function KitchenDetailScreen() {
             </TouchableOpacity>
           </View>
         </View>
+      </Modal>
+
+      {/* In-App Chat Modal */}
+      <Modal
+        visible={chatModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setChatModalVisible(false)}
+      >
+        <Pressable 
+          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}
+          onPress={() => setChatModalVisible(false)}
+        >
+          <Pressable 
+            style={{ 
+              backgroundColor: "#FFFFFF", 
+              borderTopLeftRadius: 28, 
+              borderTopRightRadius: 28, 
+              height: "80%", 
+              width: "100%" 
+            }}
+            onPress={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <View style={{ 
+              flexDirection: "row", 
+              alignItems: "center", 
+              justifyContent: "space-between", 
+              paddingHorizontal: 20, 
+              paddingVertical: 16, 
+              borderBottomWidth: 1, 
+              borderBottomColor: "#F1F1EF" 
+            }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
+                <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "#EAF7EE", alignItems: "center", justifyContent: "center" }}>
+                  <ChefHat size={20} color="#0B6B3A" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 15, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F" }} numberOfLines={1}>
+                    {kitchen?.name}
+                  </Text>
+                  <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#8A8A8A" }}>
+                    Enquiry Chat #{activeEnquiry?.id}
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity onPress={() => setChatModalVisible(false)} style={{ padding: 4 }}>
+                <X size={20} color="#7A7A7A" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Message History */}
+            <ScrollView 
+              ref={chatScrollViewRef}
+              onContentSizeChange={() => chatScrollViewRef.current?.scrollToEnd({ animated: true })}
+              contentContainerStyle={{ padding: 20, gap: 12, backgroundColor: "#ECE5DD", flexGrow: 1 }}
+            >
+              {chatMessages.length === 0 ? (
+                <View style={{ paddingVertical: 40, alignItems: "center", justifyContent: "center" }}>
+                  <Text style={{ fontSize: 13, fontFamily: "Nunito", color: "#8A8A8A", textAlign: "center" }}>
+                    No messages yet. Send a message to start discussion about your quotation!
+                  </Text>
+                </View>
+              ) : (
+                chatMessages.map((msg) => {
+                  const isMe = msg.sender_id === user?.id
+                  const msgDate = new Date(msg.created_at)
+                  const timeStr = isNaN(msgDate.getTime()) ? "" : msgDate.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
+                  
+                  return (
+                    <View 
+                      key={msg.id} 
+                      style={{ 
+                        alignSelf: isMe ? "flex-end" : "flex-start",
+                        maxWidth: "75%",
+                        backgroundColor: isMe ? "#DCF8C6" : "#FFFFFF",
+                        paddingHorizontal: 14,
+                        paddingVertical: 8,
+                        borderRadius: 12,
+                        borderBottomRightRadius: isMe ? 2 : 12,
+                        borderBottomLeftRadius: isMe ? 12 : 2,
+                        shadowColor: "#000000",
+                        shadowOffset: { width: 0, height: 1 },
+                        shadowOpacity: 0.12,
+                        shadowRadius: 1,
+                        elevation: 1,
+                      }}
+                    >
+                      {!isMe && (
+                        <Text style={{ fontSize: 10, fontWeight: "bold", color: "#0B6B3A", fontFamily: "Poppins", marginBottom: 2 }}>
+                          {msg.sender_name} ({msg.sender_role})
+                        </Text>
+                      )}
+                      <Text style={{ fontSize: 13, color: "#303030", fontFamily: "Nunito" }}>
+                        {msg.message}
+                      </Text>
+                      {timeStr ? (
+                        <Text style={{ fontSize: 9, color: "#8A8A8A", fontFamily: "Nunito", alignSelf: "flex-end", marginTop: 4 }}>
+                          {timeStr}
+                        </Text>
+                      ) : null}
+                    </View>
+                  )
+                })
+              )}
+            </ScrollView>
+
+            {/* Input Footer */}
+            <KeyboardAvoidingView 
+              behavior={Platform.OS === "ios" ? "padding" : "height"}
+              keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
+            >
+              <View style={{ 
+                flexDirection: "row", 
+                alignItems: "center", 
+                paddingHorizontal: 16, 
+                paddingVertical: 12, 
+                borderTopWidth: 1, 
+                borderTopColor: "#F1F1EF", 
+                backgroundColor: "#FFFFFF",
+                gap: 10
+              }}>
+                <TextInput
+                  style={{
+                    flex: 1,
+                    backgroundColor: "#F7F7F5",
+                    borderRadius: 20,
+                    paddingHorizontal: 16,
+                    paddingVertical: 10,
+                    fontSize: 14,
+                    fontFamily: "Nunito",
+                    color: "#1F1F1F",
+                    maxHeight: 100,
+                  }}
+                  multiline
+                  placeholder="Type a message..."
+                  placeholderTextColor="#7A7A7A"
+                  value={chatInput}
+                  onChangeText={setChatInput}
+                />
+                <TouchableOpacity 
+                  onPress={handleSendChatMessage}
+                  disabled={!chatInput.trim()}
+                  style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: 20,
+                    backgroundColor: chatInput.trim() ? "#0B6B3A" : "#E8E8E8",
+                    alignItems: "center",
+                    justifyContent: "center"
+                  }}
+                >
+                  <Send size={16} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+            </KeyboardAvoidingView>
+          </Pressable>
+        </Pressable>
       </Modal>
     </SafeAreaView>
   )

@@ -6,9 +6,25 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Linking,
-  Alert,
+  Platform,
   Modal
 } from "react-native"
+
+const Alert = {
+  alert: (title, message, buttons) => {
+    if (Platform.OS === "web") {
+      const formattedMessage = title ? `${title}\n\n${message || ""}` : message;
+      window.alert(formattedMessage);
+      if (buttons) {
+        const actionBtn = buttons.find(b => b.onPress);
+        if (actionBtn) actionBtn.onPress();
+      }
+    } else {
+      const { Alert: RNAlert } = require("react-native");
+      RNAlert.alert(title, message, buttons);
+    }
+  }
+};
 import { SafeAreaView } from "react-native-safe-area-context"
 import {
   Package,
@@ -68,11 +84,19 @@ function formatDate(value) {
   })
 }
 
-function StatusBadge({ status }) {
+function StatusBadge({ order, status }) {
+  const targetOrder = order || { status: status }
+  const isHandoverPending = targetOrder.paymentMethod === "cod" && targetOrder.deliveryStatus === "handover_pending"
+  const displayStatus = targetOrder.showCancelledAlert ? "cancelled" : targetOrder.status
+  const label = isHandoverPending ? "Pending Handover" : (STATUS_LABELS[displayStatus] || displayStatus)
+  const colorClass = isHandoverPending
+    ? "bg-amber-100 text-amber-800 border-amber-200"
+    : (STATUS_COLORS[displayStatus] || "bg-gray-100 text-gray border-gray-200")
+
   return (
-    <View className={cn("px-2.5 py-0.5 rounded-full border", STATUS_COLORS[status] || "bg-gray-100 text-gray border-gray-200")}>
+    <View className={cn("px-2.5 py-0.5 rounded-full border", colorClass)}>
       <Text className="font-poppins font-bold text-[9px] uppercase tracking-wide">
-        {STATUS_LABELS[status] || status}
+        {label}
       </Text>
     </View>
   )
@@ -89,7 +113,27 @@ export default function KitchenOrdersScreen() {
   const loadOrders = useCallback(async () => {
     try {
       const data = await api("/api/orders/kitchen")
-      setAllOrders(data.orders || [])
+      const newOrders = data.orders || []
+
+      setAllOrders((prevOrders) => {
+        const prevList = prevOrders || []
+        return newOrders.map((newO) => {
+          if (newO.status === "cancelled") {
+            const oldO = prevList.find((o) => o.id === newO.id)
+            const wasActive = oldO && ["pending", "confirmed", "preparing"].includes(oldO.status)
+            const wasShowingAlert = oldO && oldO.showCancelledAlert
+            if (wasActive || wasShowingAlert) {
+              return {
+                ...newO,
+                status: oldO.status, // Keep in old tab visually
+                actualStatus: "cancelled",
+                showCancelledAlert: true,
+              }
+            }
+          }
+          return newO
+        })
+      })
     } catch (err) {
       console.log("Failed to load kitchen orders:", err)
       setAllOrders([])
@@ -106,19 +150,21 @@ export default function KitchenOrdersScreen() {
     return () => clearTimeout(timer)
   }, [loadOrders])
 
-  // Poll orders every 15 seconds
+  // Poll orders dynamically: 1s if active orders exist, 25s otherwise
   useEffect(() => {
+    const hasActive = allOrders.some((o) => ["pending", "confirmed", "preparing"].includes(o.status))
+    const intervalTime = hasActive ? 1000 : 25000
     const interval = setInterval(() => {
       loadOrders()
-    }, 15000)
+    }, intervalTime)
 
     return () => clearInterval(interval)
-  }, [loadOrders])
+  }, [allOrders, loadOrders])
 
   const tabCounts = useMemo(() => {
     const counts = { active: 0, all: allOrders.length }
     for (const o of allOrders) {
-      if (!["delivered", "cancelled"].includes(o.status)) counts.active++
+      if (!["delivered", "cancelled"].includes(o.status) || o.deliveryStatus === "handover_pending") counts.active++
       counts[o.status] = (counts[o.status] || 0) + 1
     }
     return counts
@@ -126,7 +172,7 @@ export default function KitchenOrdersScreen() {
 
   const filteredOrders = useMemo(() => {
     if (tab === "all") return allOrders
-    if (tab === "active") return allOrders.filter((o) => !["delivered", "cancelled"].includes(o.status))
+    if (tab === "active") return allOrders.filter((o) => !["delivered", "cancelled"].includes(o.status) || o.deliveryStatus === "handover_pending")
     return allOrders.filter((o) => o.status === tab)
   }, [allOrders, tab])
 
@@ -144,9 +190,62 @@ export default function KitchenOrdersScreen() {
       })
       setAllOrders((prev) => prev.map((o) => (o.id === orderId ? data.order : o)))
       setDetailOrder((prev) => (prev?.id === orderId ? data.order : prev))
-      Alert.alert("Success", `Order status updated to ${STATUS_LABELS[newStatus]}`)
+      if (newStatus === "out_for_delivery") {
+        Alert.alert(
+          "Order Dispatched Successfully",
+          `Awaiting rider assignment.\n\nRider Pickup Code: ${data.order.pickupCode}`
+        )
+      } else {
+        Alert.alert("Success", `Order status updated to ${STATUS_LABELS[newStatus]}`)
+      }
     } catch (err) {
-      Alert.alert("Failed to update status", err.message || "Something went wrong")
+      if (err.status === 400 || err.message?.toLowerCase().includes("cancel")) {
+        Alert.alert(
+          "Order Cancelled ⚠️",
+          "This order has already been cancelled by the customer.",
+          [
+            {
+              text: "OK",
+              onPress: () => {
+                loadOrders()
+              }
+            }
+          ]
+        )
+      } else {
+        Alert.alert("Failed to update status", err.message || "Something went wrong")
+      }
+    } finally {
+      setUpdating(false)
+    }
+  }
+
+  const handleAcknowledgeCancellation = (orderId) => {
+    setAllOrders((prev) =>
+      prev.map((o) => {
+        if (o.id === orderId) {
+          return {
+            ...o,
+            status: "cancelled",
+            showCancelledAlert: false,
+          }
+        }
+        return o
+      })
+    )
+  }
+
+  const handleConfirmHandover = async (orderId) => {
+    setUpdating(true)
+    try {
+      const data = await api(`/api/orders/kitchen/${orderId}/confirm-handover`, {
+        method: "PATCH",
+      })
+      setAllOrders((prev) => prev.map((o) => (o.id === orderId ? data.order : o)))
+      setDetailOrder((prev) => (prev?.id === orderId ? data.order : prev))
+      Alert.alert("Success 🎉", "Cash handover confirmed! Order has been marked as fully delivered.")
+    } catch (err) {
+      Alert.alert("Failed to confirm handover", err.message || "Something went wrong")
     } finally {
       setUpdating(false)
     }
@@ -266,7 +365,7 @@ export default function KitchenOrdersScreen() {
                       {formatDate(order.createdAt)}
                     </Text>
                   </View>
-                  <StatusBadge status={order.status} />
+                  <StatusBadge order={order} />
                 </View>
 
                 {/* Customer Info */}
@@ -300,41 +399,89 @@ export default function KitchenOrdersScreen() {
                   </View>
                 </View>
 
-                {/* Actions */}
-                <View className="flex-row gap-2">
-                  <TouchableOpacity
-                    onPress={() => setDetailOrder(order)}
-                    className="flex-1 py-2.5 border border-gray-light rounded-xl items-center justify-center bg-white"
-                  >
-                    <Text className="font-poppins font-bold text-xs text-dark">Details</Text>
-                  </TouchableOpacity>
+                 {/* Actions */}
+                 {order.showCancelledAlert ? (
+                   <View style={{
+                     flexDirection: "row",
+                     backgroundColor: "#FEE2E2",
+                     borderColor: "#FCA5A5",
+                     borderWidth: 1,
+                     borderRadius: 12,
+                     padding: 10,
+                     alignItems: "center",
+                     justifyContent: "space-between",
+                     width: "100%",
+                     gap: 10
+                   }}>
+                     <Text style={{ fontSize: 12, fontFamily: "Poppins", fontWeight: "bold", color: "#B91C1C", flex: 1 }}>
+                       ⚠️ Order Cancelled by Customer
+                     </Text>
+                     <TouchableOpacity
+                       onPress={() => handleAcknowledgeCancellation(order.id)}
+                       style={{
+                         backgroundColor: "#EF4444",
+                         paddingHorizontal: 16,
+                         paddingVertical: 6,
+                         borderRadius: 8
+                       }}
+                     >
+                       <Text style={{ fontSize: 12, fontFamily: "Poppins", fontWeight: "bold", color: "#FFFFFF" }}>
+                         OK
+                       </Text>
+                     </TouchableOpacity>
+                   </View>
+                 ) : (
+                   <View className="flex-row gap-2">
+                     <TouchableOpacity
+                       onPress={() => setDetailOrder(order)}
+                       className="flex-1 py-2.5 border border-gray-light rounded-xl items-center justify-center bg-white"
+                     >
+                       <Text className="font-poppins font-bold text-xs text-dark">Details</Text>
+                     </TouchableOpacity>
 
-                  {next && (
-                    <TouchableOpacity
-                      onPress={() => handleStatusUpdate(order.id, next.status)}
-                      disabled={updating}
-                      className="flex-[2] py-2.5 bg-primary rounded-xl items-center justify-center"
-                    >
-                      {updating ? (
-                        <ActivityIndicator size="small" color="#FFFFFF" />
-                      ) : (
-                        <Text className="font-poppins font-bold text-xs text-white">
-                          {next.label}
-                        </Text>
-                      )}
-                    </TouchableOpacity>
-                  )}
+                     {order.paymentMethod === "cod" && order.deliveryStatus === "handover_pending" ? (
+                       <TouchableOpacity
+                         onPress={() => handleConfirmHandover(order.id)}
+                         disabled={updating}
+                         className="flex-[2] py-2.5 bg-amber-500 rounded-xl items-center justify-center"
+                       >
+                         {updating ? (
+                           <ActivityIndicator size="small" color="#FFFFFF" />
+                         ) : (
+                           <Text className="font-poppins font-bold text-xs text-white">
+                             Received Cash (₹{order.grandTotal})
+                           </Text>
+                         )}
+                       </TouchableOpacity>
+                     ) : (
+                       next && (
+                         <TouchableOpacity
+                           onPress={() => handleStatusUpdate(order.id, next.status)}
+                           disabled={updating}
+                           className="flex-[2] py-2.5 bg-primary rounded-xl items-center justify-center"
+                         >
+                           {updating ? (
+                             <ActivityIndicator size="small" color="#FFFFFF" />
+                           ) : (
+                             <Text className="font-poppins font-bold text-xs text-white">
+                               {next.label}
+                             </Text>
+                           )}
+                         </TouchableOpacity>
+                       )
+                     )}
 
-                  {order.status === "pending" && (
-                    <TouchableOpacity
-                      onPress={() => handleStatusUpdate(order.id, "cancelled")}
-                      disabled={updating}
-                      className="p-2.5 bg-red-50 border border-red-100 rounded-xl items-center justify-center"
-                    >
-                      <XCircle size={18} color="#EF4444" />
-                    </TouchableOpacity>
-                  )}
-                </View>
+                     {["pending", "confirmed", "preparing"].includes(order.status) && (
+                       <TouchableOpacity
+                         onPress={() => handleStatusUpdate(order.id, "cancelled")}
+                         disabled={updating}
+                         className="p-2.5 bg-red-50 border border-red-100 rounded-xl items-center justify-center"
+                       >
+                         <XCircle size={18} color="#EF4444" />
+                       </TouchableOpacity>
+                     )}
+                   </View>
+                 )}
               </View>
             )
           })}
@@ -362,7 +509,7 @@ export default function KitchenOrdersScreen() {
                   </Text>
                 </View>
                 <View className="flex-row items-center gap-2">
-                  <StatusBadge status={detailOrder.status} />
+                  <StatusBadge order={detailOrder} />
                   <TouchableOpacity
                     onPress={() => setDetailOrder(null)}
                     className="p-1.5 rounded-full bg-cream-dark/50"
@@ -402,6 +549,16 @@ export default function KitchenOrdersScreen() {
                       {detailOrder.deliveryAddress}
                     </Text>
                   </TouchableOpacity>
+                  {detailOrder.pickupCode ? (
+                    <View className="flex-row justify-between items-center bg-emerald-50 border border-emerald-100/50 rounded-xl p-3 mt-1.5">
+                      <Text className="font-poppins font-bold text-[9px] uppercase tracking-wider text-emerald-800">
+                        Rider Pickup Code:
+                      </Text>
+                      <Text className="font-poppins font-bold text-sm text-primary tracking-widest bg-white border border-primary/20 rounded px-2.5 py-0.5">
+                        {detailOrder.pickupCode}
+                      </Text>
+                    </View>
+                  ) : null}
                 </View>
 
                 {/* Items detail list */}
@@ -476,23 +633,75 @@ export default function KitchenOrdersScreen() {
                 )}
 
                 {/* Update status action inside detail view */}
-                {NEXT_STATUS[detailOrder.status] && (
-                  <TouchableOpacity
-                    onPress={() => {
-                      handleStatusUpdate(detailOrder.id, NEXT_STATUS[detailOrder.status].status)
-                    }}
-                    disabled={updating}
-                    className="w-full py-3 bg-primary rounded-xl items-center justify-center mt-2"
-                  >
-                    {updating ? (
-                      <ActivityIndicator size="small" color="#FFFFFF" />
-                    ) : (
-                      <Text className="font-poppins font-bold text-sm text-white">
-                        {NEXT_STATUS[detailOrder.status].label}
+                  {detailOrder.showCancelledAlert ? (
+                    <View style={{
+                      backgroundColor: "#FEE2E2",
+                      borderColor: "#FCA5A5",
+                      borderWidth: 1,
+                      borderRadius: 16,
+                      padding: 16,
+                      alignItems: "center",
+                      gap: 12,
+                      marginTop: 12
+                    }}>
+                      <Text style={{ fontSize: 13, fontFamily: "Poppins", fontWeight: "bold", color: "#B91C1C", textAlign: "center" }}>
+                        ⚠️ This order was cancelled by the customer.
                       </Text>
-                    )}
-                  </TouchableOpacity>
-                )}
+                      <TouchableOpacity
+                        onPress={() => {
+                          handleAcknowledgeCancellation(detailOrder.id)
+                          setDetailOrder(null)
+                        }}
+                        style={{
+                          backgroundColor: "#EF4444",
+                          paddingHorizontal: 24,
+                          paddingVertical: 10,
+                          borderRadius: 12,
+                          width: "100%",
+                          alignItems: "center"
+                        }}
+                      >
+                        <Text style={{ fontSize: 13, fontFamily: "Poppins", fontWeight: "bold", color: "#FFFFFF" }}>
+                          OK
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <>
+                      {NEXT_STATUS[detailOrder.status] && (
+                        <TouchableOpacity
+                          onPress={() => {
+                            handleStatusUpdate(detailOrder.id, NEXT_STATUS[detailOrder.status].status)
+                          }}
+                          disabled={updating}
+                          className="w-full py-3 bg-primary rounded-xl items-center justify-center mt-2"
+                        >
+                          {updating ? (
+                            <ActivityIndicator size="small" color="#FFFFFF" />
+                          ) : (
+                            <Text className="font-poppins font-bold text-sm text-white">
+                              {NEXT_STATUS[detailOrder.status].label}
+                            </Text>
+                          )}
+                        </TouchableOpacity>
+                      )}
+
+                      {["pending", "confirmed", "preparing"].includes(detailOrder.status) && (
+                        <TouchableOpacity
+                          onPress={() => {
+                            handleStatusUpdate(detailOrder.id, "cancelled")
+                            setDetailOrder(null)
+                          }}
+                          disabled={updating}
+                          className="w-full py-3 bg-red-50 border border-red-200 rounded-xl items-center justify-center mt-2"
+                        >
+                          <Text className="font-poppins font-bold text-sm text-red-600">
+                            Cancel Order
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                    </>
+                  )}
               </ScrollView>
             </View>
           </View>

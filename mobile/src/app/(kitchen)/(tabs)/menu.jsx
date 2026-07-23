@@ -65,12 +65,7 @@ export default function KitchenMenuScreen() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
 
-  const [showOfferModal, setShowOfferModal] = useState(false)
-  const [globalOffer, setGlobalOffer] = useState("")
-  const [itemOffers, setItemOffers] = useState({})
-  const [offerItemId, setOfferItemId] = useState("")
-  const [offerItemText, setOfferItemText] = useState("")
-  const [savingOffers, setSavingOffers] = useState(false)
+
 
   const [activeTab, setActiveTab] = useState("all")
   const [deleteConfirmId, setDeleteConfirmId] = useState(null)
@@ -130,73 +125,7 @@ export default function KitchenMenuScreen() {
     setError("")
   }
 
-  const openOfferModal = () => {
-    setGlobalOffer(kitchen?.offer || "")
-    const map = {}
-    items.forEach((item) => {
-      map[item.id] = item.offer || ""
-    })
-    setItemOffers(map)
-    setOfferItemId("")
-    setOfferItemText("")
-    setShowOfferModal(true)
-    setError("")
-  }
 
-  const saveOffers = async () => {
-    setSavingOffers(true)
-    setError("")
-    try {
-      await api("/api/kitchens/me/offer", {
-        method: "PATCH",
-        body: JSON.stringify({ offer: globalOffer.trim() || null }),
-      }, "kitchen")
-
-      for (const item of items) {
-        const nextOffer = (itemOffers[item.id] || "").trim() || null
-        const prevOffer = item.offer || null
-        if (nextOffer !== prevOffer) {
-          await api(`/api/menu/${item.id}`, {
-            method: "PUT",
-            body: JSON.stringify({ offer: nextOffer }),
-          }, "kitchen")
-        }
-      }
-
-      await refreshKitchen()
-      await loadMenu()
-      setShowOfferModal(false)
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setSavingOffers(false)
-    }
-  }
-
-  const addItemOffer = () => {
-    if (!offerItemId) {
-      Alert.alert("Error", "Select a menu item")
-      return
-    }
-    if (!offerItemText.trim()) {
-      Alert.alert("Error", "Enter offer details")
-      return
-    }
-    
-    // Add rupee sign prefix if missing
-    let formattedText = offerItemText.trim()
-    if (!formattedText.startsWith("₹") && !formattedText.toLowerCase().includes("off")) {
-      formattedText = `₹${formattedText}`
-    }
-    
-    setItemOffers((prev) => ({ ...prev, [offerItemId]: formattedText }))
-    setOfferItemId("")
-    setOfferItemText("")
-  }
-
-  const removeItemOffer = (itemId) => {
-    setItemOffers((prev) => ({ ...prev, [itemId]: "" }))
-  }
 
   const openEdit = (item) => {
     setForm({
@@ -401,13 +330,7 @@ export default function KitchenMenuScreen() {
           </Text>
         </View>
         <View className="flex-row gap-2">
-          <TouchableOpacity
-            onPress={openOfferModal}
-            className="flex-row items-center gap-1 bg-cream-dark/60 border border-gray-light px-2.5 py-1.5 rounded-lg"
-          >
-            <Tag size={13} color="#FF6B00" />
-            <Text className="font-poppins font-bold text-[10px] text-dark">Offer</Text>
-          </TouchableOpacity>
+
           <TouchableOpacity
             onPress={openAdd}
             className="flex-row items-center gap-1 bg-primary px-3 py-1.5 rounded-lg"
@@ -933,156 +856,7 @@ export default function KitchenMenuScreen() {
         </Modal>
       )}
 
-      {/* Offer Modal */}
-      {showOfferModal && (
-        <Modal animationType="slide" transparent={true} visible={showOfferModal} onRequestClose={() => setShowOfferModal(false)}>
-          <View className="flex-1 bg-black/50 justify-end">
-            <View className="bg-white rounded-t-3xl max-h-[85%] pb-6">
-              {/* Header */}
-              <View className="flex-row items-center justify-between px-5 py-4 border-b border-gray-light/35">
-                <View>
-                  <Text className="font-poppins font-bold text-base text-dark">
-                    Manage Offers
-                  </Text>
-                  <Text className="font-nunito text-[10px] text-gray">
-                    Kitchen-wide and per-item deals
-                  </Text>
-                </View>
-                <TouchableOpacity onPress={() => setShowOfferModal(false)} className="p-1.5 rounded-full bg-cream-dark/50">
-                  <X size={18} color="#1F1F1F" />
-                </TouchableOpacity>
-              </View>
 
-              <ScrollView className="px-5 py-4 space-y-5" showsVerticalScrollIndicator={false}>
-                {/* Kitchen-wide Offer */}
-                <View>
-                  <Text className="font-poppins text-xs font-bold text-dark-light mb-1.5">
-                    Kitchen-wide offer
-                  </Text>
-                  <TextInput
-                    value={globalOffer}
-                    onChangeText={setGlobalOffer}
-                    placeholder="e.g. 20% off first order, Free delivery"
-                    className="w-full px-4 py-3 bg-cream/40 rounded-xl border border-gray-light font-nunito text-sm text-dark"
-                  />
-                  <Text className="font-nunito text-[9px] text-gray mt-1">
-                    Shown on your kitchen card and offers tab
-                  </Text>
-                </View>
-
-                {/* Per-item Offers */}
-                <View>
-                  <Text className="font-poppins text-xs font-bold text-dark-light mb-1.5">
-                    Per-item offers
-                  </Text>
-                  {items.length === 0 ? (
-                    <Text className="font-nunito text-xs text-gray">Add menu items first to set item offers.</Text>
-                  ) : (
-                    <View className="space-y-3">
-                      {/* Select Item */}
-                      <View className="border border-gray-light bg-cream/40 rounded-xl overflow-hidden h-[48px] justify-center mb-2">
-                        <TextInput
-                          value={offerItemId}
-                          onChangeText={setOfferItemId}
-                          placeholder="Enter Menu Item ID"
-                          className="px-4 font-nunito text-sm text-dark h-full"
-                        />
-                      </View>
-                      <Text className="text-[10px] text-gray mb-2">
-                        Tip: Copy an item ID or use item offer value field below.
-                      </Text>
-
-                      {/* Select Menu Item Dropdown (Simple simulated dropdown/selector for simplicity) */}
-                      <ScrollView horizontal={true} showsHorizontalScrollIndicator={false} className="flex-row gap-2 mb-2">
-                        {items.map((it) => (
-                          <TouchableOpacity
-                            key={it.id}
-                            onPress={() => {
-                              setOfferItemId(it.id)
-                              // strip rupee and format
-                              setOfferItemText((itemOffers[it.id] || "").replace(/^₹\s*/, ""))
-                            }}
-                            className={cn(
-                              "px-3 py-1.5 rounded-full border bg-white",
-                              offerItemId === it.id ? "border-primary bg-primary/5" : "border-gray-light"
-                            )}
-                          >
-                            <Text className={cn("text-[10px] font-poppins font-bold", offerItemId === it.id ? "text-primary" : "text-dark")}>
-                              {it.name} (₹{it.price})
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-
-                      {/* Offer Amount */}
-                      <View className="flex-row items-center w-full px-4 rounded-xl border border-gray-light bg-cream/50 mb-2 h-[48px]">
-                        <Text className="font-nunito text-sm text-dark font-semibold mr-2">₹</Text>
-                        <TextInput
-                          value={offerItemText}
-                          onChangeText={setOfferItemText}
-                          placeholder="50 off"
-                          keyboardType="default"
-                          disabled={!offerItemId}
-                          className="flex-1 h-full text-sm font-nunito text-dark"
-                        />
-                      </View>
-
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={!offerItemId}
-                        onPress={addItemOffer}
-                      >
-                        Add Item Offer
-                      </Button>
-
-                      {/* Configured Item Offers */}
-                      <View className="mt-3 gap-2">
-                        {items
-                          .filter((item) => (itemOffers[item.id] || "").trim())
-                          .map((item) => (
-                            <View
-                              key={item.id}
-                              className="flex-row items-center justify-between rounded-xl border border-gray-light bg-cream/30 px-3 py-2"
-                            >
-                              <Text className="font-nunito text-xs text-dark flex-1 truncate mr-2" numberOfLines={1}>
-                                {item.name}
-                              </Text>
-                              <Text className="font-poppins text-xs font-bold text-accent mr-3">
-                                {itemOffers[item.id]}
-                              </Text>
-                              <TouchableOpacity
-                                onPress={() => removeItemOffer(item.id)}
-                                className="p-1 rounded bg-cream-dark/50"
-                              >
-                                <X size={12} color="#7A7A7A" />
-                              </TouchableOpacity>
-                            </View>
-                          ))}
-                      </View>
-                    </View>
-                  )}
-                </View>
-
-                {error ? (
-                  <View className="bg-red-50 border border-red-100 p-3 rounded-xl">
-                    <Text className="text-red-700 text-xs font-nunito">{error}</Text>
-                  </View>
-                ) : null}
-
-                <View className="flex-row gap-3 pt-2 pb-6">
-                  <Button variant="outline" className="flex-1" onPress={() => setShowOfferModal(false)}>
-                    Cancel
-                  </Button>
-                  <Button className="flex-1" loading={savingOffers} onPress={saveOffers}>
-                    Save Offers
-                  </Button>
-                </View>
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
-      )}
       {/* Delete Confirm Modal */}
       <Modal
         visible={deleteConfirmId !== null}

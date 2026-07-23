@@ -28,6 +28,8 @@ import {
 
   X,
 
+  Truck,
+
 } from "lucide-react"
 
 import { useAuth } from "../../context/AuthContext"
@@ -53,6 +55,8 @@ const links = [
   { to: "/admin/alerts", label: "Alerts", icon: Bell },
 
   { to: "/admin/customers", label: "Customers", icon: Users },
+
+  { to: "/admin/riders", label: "Riders", icon: Truck },
 
   { to: "/admin/settings", label: "Settings", icon: Settings },
 

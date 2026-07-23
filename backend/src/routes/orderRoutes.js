@@ -416,18 +416,32 @@ router.post("/", authRequired, requireRole("customer"), async (req, res) => {
       const orderId = orderResult.insertId
 
       for (const item of items) {
+        const menuItemId = (item.menuItemId || item.id)
+        const safeMenuItemId = (menuItemId && !isNaN(menuItemId) && Number.isInteger(Number(menuItemId))) ? Number(menuItemId) : null
+
         await connection.query(
           `INSERT INTO order_items (order_id, menu_item_id, name, price, qty, image)
            VALUES (?, ?, ?, ?, ?, ?)`,
           [
             orderId,
-            item.menuItemId || item.id || null,
+            safeMenuItemId,
             item.name,
             item.price,
             item.qty,
             item.image || null,
           ]
         )
+
+        // If this order item is from a bulk order quotation checkout, auto-complete the enquiry status
+        if (item.id && typeof item.id === "string" && item.id.startsWith("bulk_")) {
+          const bulkEnquiryId = Number(item.id.replace("bulk_", ""))
+          if (bulkEnquiryId && !isNaN(bulkEnquiryId)) {
+            await connection.query(
+              "UPDATE bulk_order_enquiries SET status = 'completed' WHERE id = ?",
+              [bulkEnquiryId]
+            )
+          }
+        }
       }
 
       await connection.commit()
@@ -566,6 +580,50 @@ router.post("/:id/review", authRequired, requireRole("customer"), async (req, re
   } catch (error) {
     console.error("Submit review error:", error)
     res.status(500).json({ message: "Failed to submit review" })
+  }
+})
+
+router.patch("/:id/cancel", authRequired, requireRole("customer"), async (req, res) => {
+  const orderId = req.params.id
+
+  try {
+    const [rows] = await pool.query(
+      "SELECT id, status, user_id FROM orders WHERE id = ? AND user_id = ?",
+      [orderId, req.user.id]
+    )
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    const currentStatus = rows[0].status
+    const allowedToCancel = ["pending", "confirmed", "preparing"]
+    if (!allowedToCancel.includes(currentStatus)) {
+      return res.status(400).json({
+        message: `Cannot cancel order at "${currentStatus}" stage.`,
+      })
+    }
+
+    await pool.query("UPDATE orders SET status = 'cancelled' WHERE id = ?", [orderId])
+
+    const [updated] = await pool.query(
+      `SELECT o.*, ${KITCHEN_ORDER_FIELDS}, k.phone AS kitchen_phone
+       FROM orders o
+       JOIN kitchens k ON k.id = o.kitchen_id
+       WHERE o.id = ?`,
+      [orderId]
+    )
+
+    const order = await attachReview({
+      ...mapOrder(updated[0]),
+      kitchenPhone: updated[0].kitchen_phone,
+      items: await fetchOrderItems(orderId),
+    })
+
+    res.json({ message: "Order cancelled successfully", order })
+  } catch (error) {
+    console.error("Customer cancel order error:", error)
+    res.status(500).json({ message: "Failed to cancel order" })
   }
 })
 

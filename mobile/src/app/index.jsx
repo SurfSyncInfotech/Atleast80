@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { View, Text, Image, Animated } from "react-native"
 import { LinearGradient } from "expo-linear-gradient"
-import { useRouter } from "expo-router"
+import { useRouter, useSegments } from "expo-router"
 import { useAuth } from "../context/AuthContext"
 
 export default function SplashScreen() {
@@ -45,8 +45,15 @@ export default function SplashScreen() {
     ]).start()
   }, [])
 
+  const segments = useSegments()
+
   useEffect(() => {
     if (loading) return
+
+    // If the active route is already a deep-link path (e.g. rider, kitchen, customer),
+    // prevent the splash screen from running its timer redirect to avoid taking the user out.
+    const hasDeepLink = segments.some((seg) => ["(rider)", "(kitchen)", "(customer)", "(admin)", "(auth)"].includes(seg))
+    if (hasDeepLink) return
 
     // Minimum display time for splash is 2.5 seconds
     const timer = setTimeout(() => {
@@ -55,6 +62,8 @@ export default function SplashScreen() {
           router.replace("/(admin)/dashboard")
         } else if (user.role === "kitchen") {
           router.replace("/(kitchen)/dashboard")
+        } else if (user.role === "rider") {
+          router.replace("/(rider)/dashboard")
         } else {
           router.replace("/(customer)/home")
         }
@@ -64,7 +73,7 @@ export default function SplashScreen() {
     }, 2500)
 
     return () => clearTimeout(timer)
-  }, [loading, user, router])
+  }, [loading, user, router, segments])
 
   return (
     <LinearGradient

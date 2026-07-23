@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { motion } from "framer-motion"
 import { ArrowLeft, CheckCircle, ChefHat, Bike, Home, Star, Clock, Check, Phone } from "lucide-react"
@@ -131,7 +131,9 @@ export default function OrderTrackingPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
 
-  const loadOrder = async () => {
+  const [cancelling, setCancelling] = useState(false)
+
+  const loadOrder = useCallback(async () => {
     try {
       const data = await api(`/api/orders/${id}`)
       setOrder(data.order)
@@ -141,7 +143,7 @@ export default function OrderTrackingPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [id])
 
   useEffect(() => {
     if (!id) {
@@ -149,9 +151,32 @@ export default function OrderTrackingPage() {
       return
     }
     loadOrder()
+  }, [id, navigate, loadOrder])
+
+  useEffect(() => {
+    if (!order) return
+    const isFinalStatus = ["delivered", "cancelled"].includes(order.status)
+    if (isFinalStatus) return
+
     const interval = setInterval(loadOrder, 10000)
     return () => clearInterval(interval)
-  }, [id, navigate]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [order, loadOrder])
+
+  const handleCancelOrder = async () => {
+    if (!window.confirm("Are you sure you want to cancel this order?")) return
+    setCancelling(true)
+    try {
+      const data = await api(`/api/orders/${order.id}/cancel`, {
+        method: "PATCH",
+      })
+      setOrder(data.order)
+      alert("Order cancelled successfully")
+    } catch (err) {
+      alert(err.message || "Failed to cancel order")
+    } finally {
+      setCancelling(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -201,7 +226,7 @@ export default function OrderTrackingPage() {
         {isCancelled ? (
           <div className="bg-red-50 border border-red-200 rounded-2xl p-5 text-center">
             <p className="font-poppins font-semibold text-red-700">Order Cancelled</p>
-            <p className="font-nunito text-sm text-red-600 mt-1">This order was cancelled by the kitchen.</p>
+            <p className="font-nunito text-sm text-red-600 mt-1">This order was cancelled.</p>
           </div>
         ) : (
           <motion.div
@@ -394,6 +419,17 @@ export default function OrderTrackingPage() {
           order={order}
           onReviewSubmitted={(review) => setOrder((o) => ({ ...o, review }))}
         />
+
+        {["pending", "confirmed", "preparing"].includes(order.status) && (
+          <Button
+            variant="outline"
+            className="w-full text-red-600 border-red-200 hover:bg-red-50 hover:border-red-300"
+            onClick={handleCancelOrder}
+            disabled={cancelling}
+          >
+            {cancelling ? "Cancelling..." : "Cancel Order"}
+          </Button>
+        )}
 
         <Button variant="outline" className="w-full" onClick={() => navigate("/home")}>
           Back to Home
