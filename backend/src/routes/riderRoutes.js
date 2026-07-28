@@ -1,6 +1,7 @@
 import { Router } from "express"
 import pool from "../config/db.js"
 import { authRequired, requireRole } from "../middleware/auth.js"
+import { sendPushToUser, broadcastRescueNotification } from "../utils/pushNotifications.js"
 
 const router = Router()
 
@@ -92,9 +93,13 @@ router.get("/dashboard", authRequired, requireRole("rider"), async (req, res) =>
       `[DASHBOARD] Fetching dashboard for rider ID: ${req.user.riderId}. Status in DB: ${rider.status}\n`
     )
 
-    // Calculate total earnings from completed deliveries
+    // Calculate total and today's earnings from completed deliveries
     const [earningRows] = await pool.query(
-      `SELECT COALESCE(SUM(delivery_fee), 0) AS total_earnings, COUNT(id) AS total_deliveries
+      `SELECT 
+         COALESCE(SUM(delivery_fee), 0) AS total_earnings, 
+         COUNT(id) AS total_deliveries,
+         COALESCE(SUM(CASE WHEN DATE(created_at) = CURDATE() THEN delivery_fee ELSE 0 END), 0) AS today_earnings,
+         COUNT(CASE WHEN DATE(created_at) = CURDATE() THEN id ELSE NULL END) AS today_deliveries
        FROM orders WHERE rider_id = ? AND status = 'delivered'`,
       [req.user.riderId]
     )
@@ -107,7 +112,11 @@ router.get("/dashboard", authRequired, requireRole("rider"), async (req, res) =>
        FROM orders o
        JOIN kitchens k ON o.kitchen_id = k.id
        JOIN users u ON o.user_id = u.id
-       WHERE o.rider_id = ? AND (o.status IN ('preparing', 'out_for_delivery') OR (o.status = 'delivered' AND o.delivery_status = 'handover_pending'))`,
+       WHERE o.rider_id = ? AND (
+         o.status IN ('preparing', 'out_for_delivery') OR 
+         (o.status = 'delivered' AND o.delivery_status = 'handover_pending') OR
+         (o.status = 'cancelled' AND o.delivery_status = 'rescue_active')
+       )`,
       [req.user.riderId]
     )
 
@@ -117,6 +126,8 @@ router.get("/dashboard", authRequired, requireRole("rider"), async (req, res) =>
       cashCollected: Number(rider.cash_collected),
       totalEarnings: Number(stats.total_earnings),
       totalDeliveries: Number(stats.total_deliveries),
+      todayEarnings: Number(stats.today_earnings),
+      todayDeliveries: Number(stats.today_deliveries),
       activeOrder: activeOrders[0] || null,
     })
   } catch (error) {
@@ -259,16 +270,25 @@ router.post("/deliveries/:orderId/action", authRequired, requireRole("rider"), r
       }
 
       if (order.payment_method === "cod") {
-        // For COD: food is delivered to customer but cash is pending handover to kitchen
-        await connection.query(
-          "UPDATE orders SET status = 'delivered', delivery_status = 'handover_pending' WHERE id = ?",
-          [orderId]
-        )
-        // Add to rider's cash collected balance
-        await connection.query(
-          "UPDATE riders SET cash_collected = cash_collected + ? WHERE id = ?",
-          [order.grand_total, req.user.riderId]
-        )
+        if (req.body.paymentType === "qr") {
+          // For COD paid online via rider's Admin QR:
+          // Immediately mark complete since cash went straight to admin
+          await connection.query(
+            "UPDATE orders SET status = 'delivered', delivery_status = 'delivered', payment_method = 'online' WHERE id = ?",
+            [orderId]
+          )
+        } else {
+          // For COD cash: immediately mark complete, rider holds cash for EOD admin deposit
+          await connection.query(
+            "UPDATE orders SET status = 'delivered', delivery_status = 'delivered' WHERE id = ?",
+            [orderId]
+          )
+          // Add to rider's cash collected balance
+          await connection.query(
+            "UPDATE riders SET cash_collected = cash_collected + ? WHERE id = ?",
+            [order.grand_total, req.user.riderId]
+          )
+        }
       } else {
         // For Prepaid: immediately mark complete
         await connection.query(
@@ -278,7 +298,73 @@ router.post("/deliveries/:orderId/action", authRequired, requireRole("rider"), r
       }
     }
 
+    else if (action === "cancel_doorstep") {
+      if (order.rider_id !== req.user.riderId || !["picked_up", "arrived_customer"].includes(order.delivery_status)) {
+        await connection.rollback()
+        return res.status(400).json({ message: "Invalid order status for this action" })
+      }
+
+      // Mark order as cancelled, set delivery status to rescue_active, and mark cancel fee as paid
+      await connection.query(
+        `UPDATE orders 
+         SET status = 'cancelled', 
+             delivery_status = 'rescue_active', 
+             cancel_fee_paid = 1 
+         WHERE id = ?`,
+        [orderId]
+      )
+
+      // Add delivery fee to rider's cash collected balance if COD
+      if (order.payment_method === "cod") {
+        await connection.query(
+          "UPDATE riders SET cash_collected = cash_collected + ? WHERE id = ?",
+          [order.delivery_fee, req.user.riderId]
+        )
+      }
+
+      // Start the 5 minutes rescue timeout
+      setTimeout(async () => {
+        try {
+          const [rows] = await pool.query(
+            "SELECT id, status, delivery_status FROM orders WHERE id = ?",
+            [orderId]
+          )
+          if (rows.length > 0 && rows[0].status === "cancelled" && rows[0].delivery_status === "rescue_active") {
+            await pool.query(
+              "UPDATE orders SET delivery_status = 'rescue_timeout' WHERE id = ?",
+              [orderId]
+            )
+            console.log(`⏰ Food rescue timeout reached for order #${orderId}. Rider instructed to return to kitchen.`)
+          }
+        } catch (err) {
+          console.error("Error in rescue timeout handler:", err)
+        }
+      }, 3 * 60 * 1000)
+    }
+
     await connection.commit()
+
+    // Trigger push notifications after successful transaction commit
+    try {
+      if (action === "accept") {
+        sendPushToUser(order.user_id, "Rider Assigned! 🛵", `A delivery partner has been assigned to your order #${order.order_number} and is heading to the kitchen.`)
+      } else if (action === "arrive_kitchen") {
+        sendPushToUser(order.user_id, "Rider at Kitchen 📍", `Your delivery partner has arrived at the kitchen to pick up your order.`)
+      } else if (action === "pickup") {
+        sendPushToUser(order.user_id, "On the Way! 🚀", `Your order #${order.order_number} has been picked up and is on the way to your doorstep!`)
+      } else if (action === "arrive_customer") {
+        const deliveryOtpVal = order.delivery_otp || "code"
+        sendPushToUser(order.user_id, "Rider Arrived! 🔔", `Your delivery partner has arrived at your location. Please share the OTP ${deliveryOtpVal} with them to receive your food.`)
+      } else if (action === "deliver") {
+        sendPushToUser(order.user_id, "Delivered! 🎉", `Your delicious meal for order #${order.order_number} has been successfully delivered. Enjoy your food!`)
+      } else if (action === "cancel_doorstep") {
+        sendPushToUser(order.user_id, "Order Cancelled 🛑", `Your order #${order.order_number} has been cancelled at the doorstep.`)
+        // Broadcast food rescue notification to nearby customers in the same city
+        broadcastRescueNotification(order.kitchen_id, order.order_number, order.grand_total)
+      }
+    } catch (pushErr) {
+      console.error("Non-blocking error triggering delivery push notification:", pushErr.message)
+    }
 
     const [updatedOrder] = await pool.query(
       `SELECT o.*, k.name AS kitchen_name, k.address AS kitchen_address, k.phone AS kitchen_phone,
@@ -297,6 +383,61 @@ router.post("/deliveries/:orderId/action", authRequired, requireRole("rider"), r
     res.status(500).json({ message: "Failed to perform action" })
   } finally {
     connection.release()
+  }
+})
+
+// 6. Deposit collected cash to Admin via QR
+router.post("/deposit-cash", authRequired, requireRole("rider"), async (req, res) => {
+  try {
+    const [riders] = await pool.query(
+      "SELECT cash_collected, status, is_online FROM riders WHERE id = ?",
+      [req.user.riderId]
+    )
+
+    if (riders.length === 0) {
+      return res.status(404).json({ message: "Rider profile not found" })
+    }
+
+    const cash = Number(riders[0].cash_collected)
+    if (cash <= 0) {
+      return res.status(400).json({ message: "No outstanding cash balance to deposit" })
+    }
+
+    // Record the cash handover details in the database
+    await pool.query(
+      "INSERT INTO rider_cash_handovers (rider_id, amount, date) VALUES (?, ?, CURDATE())",
+      [req.user.riderId, cash]
+    )
+
+    // Reset cash collected to 0 (simulated transfer to admin)
+    await pool.query(
+      "UPDATE riders SET cash_collected = 0.00 WHERE id = ?",
+      [req.user.riderId]
+    )
+
+    // Calculate total and today's earnings to return updated dashboard stats
+    const [earningRows] = await pool.query(
+      `SELECT 
+         COALESCE(SUM(delivery_fee), 0) AS total_earnings, 
+         COUNT(id) AS total_deliveries,
+         COALESCE(SUM(CASE WHEN DATE(created_at) = CURDATE() THEN delivery_fee ELSE 0 END), 0) AS today_earnings,
+         COUNT(CASE WHEN DATE(created_at) = CURDATE() THEN id ELSE NULL END) AS today_deliveries
+       FROM orders WHERE rider_id = ? AND status = 'delivered'`,
+      [req.user.riderId]
+    )
+    const stats = earningRows[0]
+
+    res.json({
+      message: `Successfully deposited ₹${cash} to Admin QR`,
+      cashCollected: 0.00,
+      totalEarnings: Number(stats.total_earnings),
+      totalDeliveries: Number(stats.total_deliveries),
+      todayEarnings: Number(stats.today_earnings),
+      todayDeliveries: Number(stats.today_deliveries),
+    })
+  } catch (error) {
+    console.error("Rider deposit cash error:", error)
+    res.status(500).json({ message: "Failed to process cash deposit" })
   }
 })
 

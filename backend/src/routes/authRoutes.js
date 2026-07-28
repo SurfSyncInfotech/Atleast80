@@ -173,6 +173,9 @@ router.post("/customer/login", async (req, res) => {
     }
 
     const user = users[0]
+    if (user.status !== 'active') {
+      return res.status(403).json({ message: `Your account is ${user.status}. Please contact support.` })
+    }
     if (!user.password_hash) {
       return res.status(401).json({ message: "Please reset your password to continue" })
     }
@@ -238,6 +241,9 @@ router.post("/customer/login/verify-otp", async (req, res) => {
     }
 
     const user = users[0]
+    if (user.status !== 'active') {
+      return res.status(403).json({ message: `Your account is ${user.status}. Please contact support.` })
+    }
     if (!user.password_hash) {
       return res.status(401).json({ message: "Please reset your password to continue" })
     }
@@ -652,6 +658,9 @@ router.post("/kitchen/login", async (req, res) => {
     }
 
     const user = users[0]
+    if (user.status !== 'active') {
+      return res.status(403).json({ message: `Your account is ${user.status}. Please contact support.` })
+    }
     const valid = await bcrypt.compare(password, user.password_hash)
     if (!valid) {
       return res.status(401).json({ message: "Invalid credentials" })
@@ -715,6 +724,9 @@ router.post("/kitchen/login/verify-otp", async (req, res) => {
     }
 
     const user = users[0]
+    if (user.status !== 'active') {
+      return res.status(403).json({ message: `Your account is ${user.status}. Please contact support.` })
+    }
     const valid = await bcrypt.compare(password, user.password_hash)
     if (!valid) {
       return res.status(401).json({ message: "Invalid credentials" })
@@ -983,6 +995,9 @@ router.post("/rider/login", async (req, res) => {
     }
 
     const user = users[0]
+    if (user.status !== 'active') {
+      return res.status(403).json({ message: `Your account is ${user.status}. Please contact support.` })
+    }
 
     const valid = await bcrypt.compare(password, user.password_hash)
     if (!valid) {
@@ -1012,6 +1027,25 @@ router.post("/rider/login", async (req, res) => {
   } catch (error) {
     console.error("Rider login error:", error)
     res.status(500).json({ message: "Login failed" })
+  }
+})
+
+// Update FCM push token
+router.post("/push-token", authRequired, async (req, res) => {
+  const { token } = req.body
+  if (!token) {
+    return res.status(400).json({ message: "Push token is required" })
+  }
+
+  try {
+    await pool.query(
+      "UPDATE users SET fcm_token = ? WHERE id = ?",
+      [token, req.user.id]
+    )
+    res.json({ message: "Push token updated successfully" })
+  } catch (error) {
+    console.error("Update push token error:", error)
+    res.status(500).json({ message: "Failed to update push token" })
   }
 })
 

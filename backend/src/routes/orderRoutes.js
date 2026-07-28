@@ -3,6 +3,7 @@ import pool from "../config/db.js"
 import { authRequired, requireRole } from "../middleware/auth.js"
 import { requireApprovedKitchen } from "../middleware/kitchen.js"
 import { MIN_RATINGS_TO_SHOW } from "../utils/kitchenRating.js"
+import { sendPushToUser, broadcastNewOrderToRiders } from "../utils/pushNotifications.js"
 
 const router = Router()
 
@@ -271,6 +272,29 @@ router.patch("/kitchen/:id/status", authRequired, requireRole("kitchen"), requir
       review: await fetchOrderReview(updated[0].id),
     }
 
+    // Trigger push notifications on kitchen status change
+    try {
+      if (newStatus === "confirmed") {
+        sendPushToUser(updated[0].user_id, "Order Confirmed! 👨‍🍳", `Your order #${order.orderNumber} has been confirmed by the kitchen and is being prepared.`)
+      } else if (newStatus === "preparing") {
+        sendPushToUser(updated[0].user_id, "Food is Preparing! 🍲", `The kitchen has started preparing your fresh food for order #${order.orderNumber}.`)
+      } else if (newStatus === "out_for_delivery") {
+        sendPushToUser(updated[0].user_id, "Out for Delivery! 🛵", `Your order #${order.orderNumber} is ready! A rider is being assigned to deliver it to you.`)
+        try {
+          const [kitchens] = await pool.query("SELECT name, city FROM kitchens WHERE id = ?", [updated[0].kitchen_id])
+          if (kitchens.length > 0 && kitchens[0].city) {
+            broadcastNewOrderToRiders(kitchens[0].city, order.orderNumber, order.id)
+          }
+        } catch (riderPushErr) {
+          console.error("Failed to broadcast new delivery alert to riders:", riderPushErr.message)
+        }
+      } else if (newStatus === "cancelled") {
+        sendPushToUser(updated[0].user_id, "Order Cancelled 🛑", `Your order #${order.orderNumber} has been cancelled by the kitchen.`)
+      }
+    } catch (pushErr) {
+      console.error("Non-blocking error triggering kitchen order push notification:", pushErr.message)
+    }
+
     res.json({ message: "Order status updated", order })
   } catch (error) {
     console.error("Kitchen update status error:", error)
@@ -298,20 +322,23 @@ router.patch("/kitchen/:id/confirm-handover", authRequired, requireRole("kitchen
 
     const order = orders[0]
 
-    // 2. Verify order is in 'delivered' and 'handover_pending' state
-    if (order.status !== "delivered" || order.delivery_status !== "handover_pending") {
+    // 2. Verify order is in valid state for handover/return confirmation
+    const isValidDelivered = order.status === "delivered" && order.delivery_status === "handover_pending"
+    const isValidReturned = order.status === "cancelled" && order.delivery_status === "rescue_timeout"
+    if (!isValidDelivered && !isValidReturned) {
       await connection.rollback()
-      return res.status(400).json({ message: "Order status is not valid for cash handover confirmation" })
+      return res.status(400).json({ message: "Order status is not valid for cash handover or food return confirmation" })
     }
 
-    // 3. Update order delivery status to delivered
+    // 3. Update order delivery status
+    const targetDeliveryStatus = isValidReturned ? "returned" : "delivered"
     await connection.query(
-      "UPDATE orders SET delivery_status = 'delivered' WHERE id = ?",
-      [orderId]
+      "UPDATE orders SET delivery_status = ? WHERE id = ?",
+      [targetDeliveryStatus, orderId]
     )
 
-    // 4. If there's a rider assigned, deduct the grand_total from their cash_collected balance
-    if (order.rider_id) {
+    // 4. If there's a rider assigned and it was a delivery, deduct the grand_total from their cash_collected balance
+    if (order.rider_id && isValidDelivered) {
       await connection.query(
         "UPDATE riders SET cash_collected = GREATEST(0.00, cash_collected - ?) WHERE id = ?",
         [order.grand_total, order.rider_id]
@@ -364,7 +391,7 @@ router.post("/", authRequired, requireRole("customer"), async (req, res) => {
 
   try {
     const [kitchens] = await pool.query(
-      "SELECT id, name, status FROM kitchens WHERE id = ?",
+      "SELECT id, name, status, user_id FROM kitchens WHERE id = ?",
       [kitchenId]
     )
     if (kitchens.length === 0) {
@@ -445,6 +472,17 @@ router.post("/", authRequired, requireRole("customer"), async (req, res) => {
       }
 
       await connection.commit()
+
+      // Send push notification to the kitchen owner about the new order
+      try {
+        sendPushToUser(
+          kitchens[0].user_id,
+          "New Order Received! 🔔",
+          `You have received a new order #${orderNumber} for ₹${grandTotal.toFixed(2)}. Tap to view details and confirm.`
+        )
+      } catch (pushErr) {
+        console.error("Non-blocking error triggering kitchen new order push:", pushErr.message)
+      }
 
       const order = mapOrder({
         id: orderId,
@@ -583,12 +621,33 @@ router.post("/:id/review", authRequired, requireRole("customer"), async (req, re
   }
 })
 
+function startRescueTimeout(orderId) {
+  setTimeout(async () => {
+    try {
+      const [rows] = await pool.query(
+        "SELECT id, status, delivery_status FROM orders WHERE id = ?",
+        [orderId]
+      )
+      if (rows.length > 0 && rows[0].status === "cancelled" && rows[0].delivery_status === "rescue_active") {
+        await pool.query(
+          "UPDATE orders SET delivery_status = 'rescue_timeout' WHERE id = ?",
+          [orderId]
+        )
+        console.log(`⏰ Food rescue timeout reached for order #${orderId}. Rider instructed to return to kitchen.`)
+      }
+    } catch (err) {
+      console.error("Error in rescue timeout handler:", err)
+    }
+  }, 3 * 60 * 1000) // 3 minutes
+}
+
 router.patch("/:id/cancel", authRequired, requireRole("customer"), async (req, res) => {
   const orderId = req.params.id
+  const { payOnline } = req.body || {}
 
   try {
     const [rows] = await pool.query(
-      "SELECT id, status, user_id FROM orders WHERE id = ? AND user_id = ?",
+      "SELECT id, status, user_id, delivery_fee FROM orders WHERE id = ? AND user_id = ?",
       [orderId, req.user.id]
     )
 
@@ -597,14 +656,36 @@ router.patch("/:id/cancel", authRequired, requireRole("customer"), async (req, r
     }
 
     const currentStatus = rows[0].status
-    const allowedToCancel = ["pending", "confirmed", "preparing"]
-    if (!allowedToCancel.includes(currentStatus)) {
-      return res.status(400).json({
-        message: `Cannot cancel order at "${currentStatus}" stage.`,
-      })
-    }
+    const deliveryFee = Number(rows[0].delivery_fee)
 
-    await pool.query("UPDATE orders SET status = 'cancelled' WHERE id = ?", [orderId])
+    if (currentStatus === "out_for_delivery") {
+      // Doorstep / Post-dispatch cancellation requires paying the delivery charge
+      if (payOnline === true) {
+        await pool.query(
+          `UPDATE orders 
+           SET status = 'cancelled', 
+               delivery_status = 'rescue_active', 
+               cancel_fee_paid = 1 
+           WHERE id = ?`,
+          [orderId]
+        )
+        startRescueTimeout(orderId)
+      } else {
+        return res.status(402).json({
+          requirePayment: true,
+          deliveryFee,
+          message: `To cancel after dispatch, you must pay the delivery fee of ₹${deliveryFee}.`,
+        })
+      }
+    } else {
+      const allowedToCancel = ["pending", "confirmed", "preparing"]
+      if (!allowedToCancel.includes(currentStatus)) {
+        return res.status(400).json({
+          message: `Cannot cancel order at "${currentStatus}" stage.`,
+        })
+      }
+      await pool.query("UPDATE orders SET status = 'cancelled' WHERE id = ?", [orderId])
+    }
 
     const [updated] = await pool.query(
       `SELECT o.*, ${KITCHEN_ORDER_FIELDS}, k.phone AS kitchen_phone
@@ -654,4 +735,140 @@ router.get("/:id", authRequired, requireRole("customer"), async (req, res) => {
   }
 })
 
+// ─── Rescue food routes ──────────────────────────────────────────────────────
+
+router.get("/rescue/available", authRequired, requireRole("customer"), async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT o.*, ${KITCHEN_ORDER_FIELDS}
+       FROM orders o
+       JOIN kitchens k ON k.id = o.kitchen_id
+       WHERE o.status = 'cancelled' AND o.delivery_status = 'rescue_active'
+       ORDER BY o.updated_at DESC`
+    )
+
+    const orders = await Promise.all(
+      rows.map(async (row) => ({
+        ...mapOrder(row),
+        items: await fetchOrderItems(row.id),
+      }))
+    )
+
+    res.json({ orders })
+  } catch (error) {
+    console.error("Fetch available rescue orders error:", error)
+    res.status(500).json({ message: "Failed to load rescue orders" })
+  }
+})
+
+router.post("/rescue/:id/claim", authRequired, requireRole("customer"), async (req, res) => {
+  const originalOrderId = req.params.id
+
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+
+    // 1. Fetch the original cancelled order
+    const [orders] = await connection.query(
+      "SELECT * FROM orders WHERE id = ? AND status = 'cancelled' AND delivery_status = 'rescue_active'",
+      [originalOrderId]
+    )
+
+    if (orders.length === 0) {
+      await connection.rollback()
+      return res.status(404).json({ message: "Rescue order not found or already claimed" })
+    }
+
+    const originalOrder = orders[0]
+
+    // 2. Fetch claiming user's address details
+    const [users] = await connection.query(
+      "SELECT name, address, city, pincode FROM users WHERE id = ?",
+      [req.user.id]
+    )
+    const user = users[0] || {}
+    const newAddress = [user.address, user.city, user.pincode].filter(Boolean).join(", ") || "Address not set"
+
+    // 3. Create a cloned order for the new user (free delivery!)
+    const orderNumber = generateOrderNumber()
+    const itemTotal = Number(originalOrder.item_total)
+    const packingFee = Number(originalOrder.packing_fee)
+    const grandTotal = itemTotal + packingFee // Delivery fee is 0.00
+
+    const [orderResult] = await connection.query(
+      `INSERT INTO orders (
+        order_number, user_id, kitchen_id, status, payment_method,
+        packing_type, delivery_method, item_total, packing_fee, delivery_fee,
+        grand_total, delivery_address, rider_id, delivery_status, pickup_code, delivery_otp
+      ) VALUES (?, ?, ?, 'out_for_delivery', 'cod', ?, ?, ?, ?, 0.00, ?, ?, ?, 'picked_up', ?, ?)`,
+      [
+        orderNumber,
+        req.user.id,
+        originalOrder.kitchen_id,
+        originalOrder.packing_type,
+        originalOrder.delivery_method,
+        itemTotal,
+        packingFee,
+        grandTotal,
+        newAddress,
+        originalOrder.rider_id,
+        originalOrder.pickup_code,
+        originalOrder.delivery_otp,
+      ]
+    )
+
+    const newOrderId = orderResult.insertId
+
+    // 4. Fetch and copy order items
+    const originalItems = await fetchOrderItems(originalOrderId)
+    for (const item of originalItems) {
+      await connection.query(
+        `INSERT INTO order_items (order_id, menu_item_id, name, price, qty, image)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          newOrderId,
+          item.menuItemId,
+          item.name,
+          item.price,
+          item.qty,
+          item.image || null,
+        ]
+      )
+    }
+
+    // 5. Update original order's delivery_status to 'rescued'
+    await connection.query(
+      "UPDATE orders SET delivery_status = 'rescued' WHERE id = ?",
+      [originalOrderId]
+    )
+
+    await connection.commit()
+
+    // Fetch and return the new claimed order object
+    const [newOrderRow] = await pool.query(
+      `SELECT o.*, ${KITCHEN_ORDER_FIELDS}
+       FROM orders o JOIN kitchens k ON k.id = o.kitchen_id WHERE o.id = ?`,
+      [newOrderId]
+    )
+
+    const claimedOrder = {
+      ...mapOrder(newOrderRow[0]),
+      items: await fetchOrderItems(newOrderId),
+      review: null,
+    }
+
+    res.status(201).json({
+      message: "Rescue order claimed successfully with Free Delivery!",
+      order: claimedOrder,
+    })
+  } catch (error) {
+    await connection.rollback()
+    console.error("Claim rescue order error:", error)
+    res.status(500).json({ message: "Failed to claim rescue order" })
+  } finally {
+    connection.release()
+  }
+})
+
 export default router
+

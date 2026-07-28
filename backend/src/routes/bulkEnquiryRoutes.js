@@ -37,6 +37,9 @@ function mapEnquiryRow(row) {
     customerName: row.customer_name || null,
     customerPhone: row.customer_phone || null,
     kitchenName: row.kitchen_name || null,
+    lastMessage: row.last_message || null,
+    lastMessageSenderId: row.last_message_sender_id || null,
+    messageCount: row.message_count || 0
   }
 }
 
@@ -143,7 +146,10 @@ router.get(
   async (req, res) => {
     try {
       const [rows] = await pool.query(
-        `SELECT e.*, u.name AS customer_name, u.phone AS customer_phone
+        `SELECT e.*, u.name AS customer_name, u.phone AS customer_phone,
+                (SELECT message FROM bulk_order_chat_messages WHERE enquiry_id = e.id ORDER BY created_at DESC LIMIT 1) AS last_message,
+                (SELECT sender_id FROM bulk_order_chat_messages WHERE enquiry_id = e.id ORDER BY created_at DESC LIMIT 1) AS last_message_sender_id,
+                (SELECT COUNT(*) FROM bulk_order_chat_messages WHERE enquiry_id = e.id) AS message_count
          FROM bulk_order_enquiries e
          JOIN users u ON u.id = e.customer_id
          WHERE e.kitchen_id = ?

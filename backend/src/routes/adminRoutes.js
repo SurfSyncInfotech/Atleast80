@@ -1090,7 +1090,13 @@ router.get("/riders", async (req, res) => {
     const total = countRows[0].total
 
     const [riders] = await pool.query(
-      `SELECT r.*, u.name, u.email, u.phone
+      `SELECT r.*, u.name, u.email, u.phone,
+              (SELECT COUNT(id) FROM orders WHERE rider_id = r.id AND status = 'delivered' AND DATE(created_at) = CURDATE()) AS today_orders_count,
+              (SELECT COALESCE(SUM(delivery_fee), 0) FROM orders WHERE rider_id = r.id AND status = 'delivered' AND DATE(created_at) = CURDATE()) AS today_earnings,
+              (SELECT COALESCE(SUM(grand_total), 0) FROM orders WHERE rider_id = r.id AND status = 'delivered' AND payment_method = 'cod' AND DATE(created_at) = CURDATE()) AS today_cash_collected,
+              (SELECT COALESCE(SUM(amount), 0) FROM rider_cash_handovers WHERE rider_id = r.id AND date = CURDATE()) AS today_cash_handover,
+              (SELECT COUNT(id) FROM orders WHERE rider_id = r.id AND status = 'delivered') AS total_orders_count,
+              (SELECT COALESCE(SUM(delivery_fee), 0) FROM orders WHERE rider_id = r.id AND status = 'delivered') AS total_earnings
        ${query}
        ORDER BY r.created_at DESC
        LIMIT ? OFFSET ?`,
@@ -1142,6 +1148,115 @@ router.patch("/riders/:id/reject", async (req, res) => {
   } catch (error) {
     console.error("Admin reject rider error:", error)
     res.status(500).json({ message: "Failed to reject rider" })
+  }
+})
+
+// Admin Get Users list (customers, kitchens, riders)
+router.get("/users", async (req, res) => {
+  const page = Math.max(1, parseInt(req.query.page) || 1)
+  const limit = Math.max(1, parseInt(req.query.limit) || 15)
+  const offset = (page - 1) * limit
+  const role = req.query.role || "customer"
+  const search = req.query.search?.trim()
+  const status = req.query.status
+
+  try {
+    let selectFields = ""
+    let joins = ""
+    let whereClause = "WHERE u.role = ?"
+    const params = [role]
+
+    if (role === "customer") {
+      selectFields = "u.id, u.role, u.name, u.email, u.phone, u.status, u.created_at, u.phone_verified"
+      joins = "FROM users u"
+    } else if (role === "kitchen") {
+      selectFields = "u.id, u.role, u.name, u.email, u.phone, u.status, u.created_at, k.id AS kitchen_id, k.name AS kitchen_name, k.owner_name, k.city, k.pincode, k.status AS kitchen_status, k.is_active"
+      joins = "FROM users u LEFT JOIN kitchens k ON k.user_id = u.id"
+    } else if (role === "rider") {
+      selectFields = "u.id, u.role, u.name, u.email, u.phone, u.status, u.created_at, r.id AS rider_id, r.status AS rider_status, r.is_online, r.cash_collected, r.vehicle_type"
+      joins = "FROM users u LEFT JOIN riders r ON r.user_id = u.id"
+    } else {
+      return res.status(400).json({ message: "Invalid role specified" })
+    }
+
+    if (search) {
+      if (role === "kitchen") {
+        whereClause += " AND (u.name LIKE ? OR u.email LIKE ? OR u.phone LIKE ? OR k.name LIKE ?)"
+        const searchLike = `%${search}%`
+        params.push(searchLike, searchLike, searchLike, searchLike)
+      } else {
+        whereClause += " AND (u.name LIKE ? OR u.email LIKE ? OR u.phone LIKE ?)"
+        const searchLike = `%${search}%`
+        params.push(searchLike, searchLike, searchLike)
+      }
+    }
+
+    if (status && status !== "all") {
+      whereClause += " AND u.status = ?"
+      params.push(status)
+    }
+
+    const countQuery = `SELECT COUNT(u.id) AS total ${joins} ${whereClause}`
+    const [countRows] = await pool.query(countQuery, params)
+    const total = countRows[0]?.total || 0
+
+    const listQuery = `
+      SELECT ${selectFields}
+      ${joins}
+      ${whereClause}
+      ORDER BY u.created_at DESC
+      LIMIT ? OFFSET ?
+    `
+    const [users] = await pool.query(listQuery, [...params, limit, offset])
+
+    res.json({
+      users,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    })
+  } catch (error) {
+    console.error("Admin get users list error:", error)
+    res.status(500).json({ message: "Failed to fetch users list" })
+  }
+})
+
+// Admin Update User Status (active, suspended, blocked)
+router.patch("/users/:id/status", async (req, res) => {
+  const { status } = req.body
+  const userId = req.params.id
+
+  if (!["active", "suspended", "blocked"].includes(status)) {
+    return res.status(400).json({ message: "Invalid status value" })
+  }
+
+  try {
+    const [result] = await pool.query("UPDATE users SET status = ? WHERE id = ?", [status, userId])
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "User not found" })
+    }
+    res.json({ message: `User status updated to ${status} successfully` })
+  } catch (error) {
+    console.error("Admin update user status error:", error)
+    res.status(500).json({ message: "Failed to update user status" })
+  }
+})
+
+// Admin Delete User
+router.delete("/users/:id", async (req, res) => {
+  const userId = req.params.id
+  try {
+    const [result] = await pool.query("DELETE FROM users WHERE id = ?", [userId])
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "User not found" })
+    }
+    res.json({ message: "User deleted successfully" })
+  } catch (error) {
+    console.error("Admin delete user error:", error)
+    res.status(500).json({ message: "Failed to delete user" })
   }
 })
 
