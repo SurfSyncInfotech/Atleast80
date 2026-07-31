@@ -123,6 +123,48 @@ router.get("/me", authRequired, requireRole("kitchen"), async (req, res) => {
   }
 })
 
+// Kitchen Payout Settlement History
+router.get("/me/payouts", authRequired, requireRole("kitchen"), async (req, res) => {
+  try {
+    const [kitchenRows] = await pool.query(
+      "SELECT id FROM kitchens WHERE user_id = ?",
+      [req.user.id]
+    )
+    if (kitchenRows.length === 0) {
+      return res.status(404).json({ message: "Kitchen not found" })
+    }
+    const kitchenId = kitchenRows[0].id
+
+    const [rows] = await pool.query(
+      `SELECT id, period_type, period_start, period_end, gross_amount, deductions_commissions, net_payout, status, utr_number, notes, paid_at, created_at
+       FROM settlements
+       WHERE entity_type = 'kitchen' AND (entity_id = ? OR entity_id = ?)
+       ORDER BY paid_at DESC, created_at DESC`,
+      [kitchenId, req.user.id]
+    )
+
+    res.json({
+      payouts: rows.map((r) => ({
+        id: r.id,
+        periodType: r.period_type,
+        periodStart: r.period_start,
+        periodEnd: r.period_end,
+        grossAmount: Number(r.gross_amount),
+        commissionDeduction: Number(r.deductions_commissions),
+        netPayout: Number(r.net_payout),
+        status: r.status,
+        utrNumber: r.utr_number,
+        notes: r.notes,
+        paidAt: r.paid_at,
+        createdAt: r.created_at,
+      }))
+    })
+  } catch (error) {
+    console.error("Fetch kitchen payouts error:", error)
+    res.status(500).json({ message: "Failed to fetch payouts" })
+  }
+})
+
 router.post("/me/fssai-license", authRequired, requireRole("kitchen"), (req, res) => {
   fssaiLicenseUpload.single("fssaiLicense")(req, res, async (err) => {
     if (err) {

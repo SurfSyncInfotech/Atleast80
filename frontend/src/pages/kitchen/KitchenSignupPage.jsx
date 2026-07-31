@@ -19,6 +19,7 @@ import {
   FileText,
   Download,
   FileCheck,
+  LocateFixed,
 } from "lucide-react"
 import Button from "../../components/ui/Button"
 import PasswordInput from "../../components/ui/PasswordInput"
@@ -62,13 +63,14 @@ const perks = [
 
 export default function KitchenSignupPage() {
   const navigate = useNavigate()
-  const { registerKitchen, verifyKitchenRegisterOtp } = useAuth()
+  const { registerKitchen, verifyKitchenRegisterOtp, logoutKitchen } = useAuth()
   const [form, setForm] = useState(initialForm)
   const [identifierType, setIdentifierType] = useState("phone")
   const [fssaiLicenseFile, setFssaiLicenseFile] = useState(null)
   const [step, setStep] = useState(1)
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
+  const [detectingLocation, setDetectingLocation] = useState(false)
 
   const [signupOtpVisible, setSignupOtpVisible] = useState(false)
   const [signupUserId, setSignupUserId] = useState(null)
@@ -90,6 +92,61 @@ export default function KitchenSignupPage() {
   const [videoWatched, setVideoWatched] = useState(false)
 
   const update = (field) => (e) => setForm({ ...form, [field]: e.target.value })
+
+  const handleAutoDetectLocation = () => {
+    if (!navigator.geolocation) {
+      setError("Location detection is not supported by your browser")
+      return
+    }
+    setError("")
+    setDetectingLocation(true)
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const { latitude, longitude } = pos.coords
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`,
+            { headers: { "User-Agent": "Atleast80Web/1.0" } }
+          )
+          const data = await res.json()
+          if (data?.address) {
+            const addr = data.address
+            const rawState = addr.state || ""
+            const rawCity = addr.city || addr.town || addr.village || addr.county || ""
+            const state = rawState ? rawState.charAt(0).toUpperCase() + rawState.slice(1) : ""
+            const city = rawCity ? rawCity.charAt(0).toUpperCase() + rawCity.slice(1) : ""
+            const road = addr.road || addr.suburb || addr.neighbourhood || ""
+            const houseNumber = addr.house_number || ""
+            const postcode = addr.postcode || ""
+
+            let streetAddress = [houseNumber, road].filter(Boolean).join(", ")
+            if (!streetAddress && data.display_name) {
+              streetAddress = data.display_name.split(",").slice(0, 2).map((s) => s.trim()).join(", ")
+            }
+
+            setForm((f) => ({
+              ...f,
+              address: streetAddress || f.address,
+              state: state || f.state,
+              city: city || f.city,
+              pincode: postcode || f.pincode,
+            }))
+          } else {
+            setError("Could not resolve address details. Please fill manually.")
+          }
+        } catch {
+          setError("Failed to detect location. Please fill manually.")
+        } finally {
+          setDetectingLocation(false)
+        }
+      },
+      () => {
+        setError("Location permission denied. Please allow access or fill manually.")
+        setDetectingLocation(false)
+      },
+      { timeout: 12000, maximumAge: 300000, enableHighAccuracy: false }
+    )
+  }
 
   const switchIdentifierType = (type) => {
     setIdentifierType(type)
@@ -227,7 +284,8 @@ export default function KitchenSignupPage() {
         setSignupOtpError("")
         setSignupOtpVisible(true)
       } else {
-        navigate("/kitchen/dashboard", { state: { newSignup: true } })
+        logoutKitchen()
+        navigate("/kitchen/login")
       }
     } catch (err) {
       setError(err.message || "Registration failed")
@@ -246,9 +304,10 @@ export default function KitchenSignupPage() {
     setSignupOtpError("")
     setOtpVerifying(true)
     try {
-      const data = await verifyKitchenRegisterOtp(signupUserId, otpVal)
+      await verifyKitchenRegisterOtp(signupUserId, otpVal)
       setSignupOtpVisible(false)
-      alert(data.message || "Your registration is submitted. Please log in to verify your identity.")
+      logoutKitchen()
+      // Directly navigate to login after successful OTP verification
       navigate("/kitchen/login")
     } catch (err) {
       setSignupOtpError(err.message || "Invalid or expired OTP")
@@ -604,15 +663,36 @@ export default function KitchenSignupPage() {
                       title="Location & kitchen details"
                       subtitle="Customers and admin will verify this information"
                     />
-                    <Field label="Full Address" required icon={MapPin}>
-                      <input
-                        className={inputClass}
-                        value={form.address}
-                        onChange={update("address")}
-                        placeholder="House no., street, area, landmark"
-                        required
-                      />
-                    </Field>
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="font-poppins text-sm font-medium text-dark-light">
+                          Full Address<span className="text-accent ml-0.5">*</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={handleAutoDetectLocation}
+                          disabled={detectingLocation}
+                          className="flex items-center gap-1.5 text-xs font-poppins font-semibold text-primary hover:underline disabled:opacity-60 disabled:no-underline"
+                        >
+                          {detectingLocation ? (
+                            <span className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <LocateFixed size={14} />
+                          )}
+                          {detectingLocation ? "Detecting..." : "Use current location"}
+                        </button>
+                      </div>
+                      <div className="relative">
+                        <MapPin size={17} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray pointer-events-none" />
+                        <input
+                          className={cn(inputClass, "pl-11")}
+                          value={form.address}
+                          onChange={update("address")}
+                          placeholder="House no., street, area, landmark"
+                          required
+                        />
+                      </div>
+                    </div>
                     <div className="grid sm:grid-cols-3 gap-5">
                       <div className="sm:col-span-2">
                         <Field label="State & City" required>
@@ -687,7 +767,7 @@ export default function KitchenSignupPage() {
                       title="Partner Agreement & Terms"
                       subtitle="Please review the agreement before submitting your application"
                     />
-{
+                    {
                       agreementLoading && (
                         <div className="flex items-center justify-center py-16 text-gray font-nunito text-sm">
                           Loading agreement...
@@ -740,7 +820,7 @@ export default function KitchenSignupPage() {
                               <p className="font-nunito text-xs text-gray">
                                 Learn about our hygiene standards, delivery process, and dashboard management tools.
                               </p>
-                              
+
                               <div className="rounded-xl overflow-hidden bg-black max-w-[480px]">
                                 <video
                                   src={agreement.videoUrl}
@@ -812,7 +892,7 @@ export default function KitchenSignupPage() {
                     )}
                   </motion.div>
                 )}
-                           {step === 5 && (
+                {step === 5 && (
                   <motion.div
                     key="step5"
                     initial={{ opacity: 0, x: 20 }}
@@ -968,22 +1048,22 @@ export default function KitchenSignupPage() {
               )}
 
               {/* Navigation buttons */}
-              <div className="flex gap-3 mt-8">
+              <div className="flex items-center gap-3 mt-8">
                 {step > 1 && (
-                  <Button type="button" variant="outline" size="lg" onClick={prevStep} className="flex-1 sm:flex-none sm:px-8">
-                    <ArrowLeft size={18} />
+                  <Button type="button" variant="outline" size="md" onClick={prevStep} className="h-12 px-4 sm:px-6 rounded-full whitespace-nowrap text-sm shrink-0">
+                    <ArrowLeft size={16} />
                     Back
                   </Button>
                 )}
                 {step < 5 ? (
-                  <Button type="button" size="lg" onClick={nextStep} className="flex-1">
+                  <Button type="button" size="md" onClick={nextStep} className="flex-1 h-12 rounded-full whitespace-nowrap text-sm sm:text-base">
                     Continue
-                    <ArrowRight size={18} />
+                    <ArrowRight size={16} />
                   </Button>
                 ) : (
-                  <Button type="submit" size="lg" className="flex-1" disabled={loading}>
+                  <Button type="submit" size="md" className="flex-1 h-12 rounded-full whitespace-nowrap text-xs sm:text-sm md:text-base px-2 sm:px-6" disabled={loading}>
                     {loading ? "Submitting..." : "Submit for Approval"}
-                    <ArrowRight size={18} />
+                    <ArrowRight size={16} className="shrink-0" />
                   </Button>
                 )}
               </div>

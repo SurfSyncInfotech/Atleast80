@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
-import { View, Text, ScrollView, TouchableOpacity, Modal, ActivityIndicator, KeyboardAvoidingView, Platform, Image } from "react-native"
+import { View, Text, ScrollView, TouchableOpacity, Modal, ActivityIndicator, KeyboardAvoidingView, Platform, Image, Alert } from "react-native"
+import * as Location from "expo-location"
 import { useRouter } from "expo-router"
 import { SafeAreaView } from "react-native-safe-area-context"
 import { Mail, Phone, MapPin, Pencil, LogOut, ChevronRight, X, ShoppingBag, Clock, User, Award, Check, Sparkles, Truck, ChefHat } from "lucide-react-native"
@@ -162,6 +163,54 @@ export default function ProfileScreen() {
   const [form, setForm] = useState({ name: "", email: "", phone: "", address: "", city: "", pincode: "" })
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
+  const [detectingLocation, setDetectingLocation] = useState(false)
+
+  const handleAutoDetectLocation = async () => {
+    setDetectingLocation(true)
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync()
+      if (status !== "granted") {
+        Alert.alert("Permission Denied", "Please allow location access to auto-detect your address.")
+        setDetectingLocation(false)
+        return
+      }
+
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+      const { latitude, longitude } = loc.coords
+
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`, {
+        headers: {
+          "User-Agent": "Atleast80App/1.0"
+        }
+      })
+      const data = await res.json()
+      if (data && data.address) {
+        const addr = data.address
+        const road = addr.road || addr.suburb || addr.neighbourhood || ""
+        const houseNumber = addr.house_number || ""
+        const city = addr.city || addr.town || addr.village || addr.county || ""
+        const postcode = addr.postcode || ""
+
+        let streetAddress = [houseNumber, road].filter(Boolean).join(", ")
+        if (!streetAddress && data.display_name) {
+          streetAddress = data.display_name.split(",").slice(0, 2).map(s => s.trim()).join(", ")
+        }
+
+        setForm(prev => ({
+          ...prev,
+          address: streetAddress || prev.address,
+          city: city || prev.city,
+          pincode: postcode || prev.pincode
+        }))
+      } else {
+        Alert.alert("Location Error", "Could not resolve address details. Please fill manually.")
+      }
+    } catch (err) {
+      Alert.alert("Location Error", "Failed to auto-detect location: " + err.message)
+    } finally {
+      setDetectingLocation(false)
+    }
+  }
 
   useEffect(() => {
     const loadData = async () => {
@@ -659,7 +708,21 @@ export default function ProfileScreen() {
                 </View>
 
                 <View className="mb-3">
-                  <Text className="font-poppins text-xs font-bold text-dark-light mb-1.5">Delivery Address</Text>
+                  <View className="flex-row justify-between items-center mb-1.5">
+                    <Text className="font-poppins text-xs font-bold text-dark-light">Delivery Address</Text>
+                    <TouchableOpacity
+                      onPress={handleAutoDetectLocation}
+                      disabled={detectingLocation}
+                      className="flex-row items-center gap-1"
+                    >
+                      {detectingLocation ? (
+                        <ActivityIndicator size="small" color="#0B6B3A" />
+                      ) : (
+                        <MapPin size={12} color="#0B6B3A" />
+                      )}
+                      <Text className="text-[11px] font-poppins font-bold text-primary">Auto Detect</Text>
+                    </TouchableOpacity>
+                  </View>
                   <Input
                     value={form.address}
                     onChangeText={(v) => setForm({ ...form, address: v })}

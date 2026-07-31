@@ -31,7 +31,6 @@ app.use(
   cors({
     origin: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
   })
 )
 app.use(express.json({ limit: "1gb" }))
@@ -65,6 +64,7 @@ app.get("/api/health", async (_req, res) => {
 
 app.use("/api/auth", authRoutes)
 app.use("/api/kitchens", kitchenRoutes)
+app.use("/api/kitchen", kitchenRoutes)
 app.use("/api/admin", adminRoutes)
 app.use("/api/menu", menuRoutes)
 app.use("/api/stories", storyRoutes)

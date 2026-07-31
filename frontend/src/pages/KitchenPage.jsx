@@ -203,7 +203,7 @@ export default function KitchenPage() {
         } else if (hasCombo) {
           setActiveTab("combo")
         } else {
-          setActiveTab("offers")
+          setActiveTab("food")
         }
 
       } catch {
@@ -495,26 +495,6 @@ export default function KitchenPage() {
                   <Icon size={15} />
 
                   {tab.label}
-
-                  {tab.id === "offers" && offerCount > 0 && (
-
-                    <span
-
-                      className={cn(
-
-                        "min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-poppins font-bold flex items-center justify-center",
-
-                        active ? "bg-white/20 text-white" : "bg-accent/15 text-accent"
-
-                      )}
-
-                    >
-
-                      {offerCount}
-
-                    </span>
-
-                  )}
 
                 </button>
 

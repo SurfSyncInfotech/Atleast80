@@ -28,20 +28,23 @@ import KitchenOrdersPage from "./pages/kitchen/KitchenOrdersPage"
 import OrdersPage from "./pages/OrdersPage"
 import KitchenLoginPage from "./pages/kitchen/KitchenLoginPage"
 import KitchenSignupPage from "./pages/kitchen/KitchenSignupPage"
+import KitchenForgotPasswordPage from "./pages/kitchen/KitchenForgotPasswordPage"
 import KitchenDashboardPage from "./pages/kitchen/KitchenDashboardPage"
 import KitchenMenuPage from "./pages/kitchen/KitchenMenuPage"
 import KitchenProfilePage from "./pages/kitchen/KitchenProfilePage"
 import KitchenBulkEnquiriesPage from "./pages/kitchen/KitchenBulkEnquiriesPage"
+import KitchenPayoutsPage from "./pages/kitchen/KitchenPayoutsPage"
 import AdminLoginPage from "./pages/admin/AdminLoginPage"
 import AdminDashboardPage from "./pages/admin/AdminDashboardPage"
 import AdminFeaturedKitchensPage from "./pages/admin/AdminFeaturedKitchensPage"
-import AdminCustomersPage from "./pages/admin/AdminCustomersPage"
+import AdminUsersPage from "./pages/admin/AdminUsersPage"
 import AdminRidersPage from "./pages/admin/AdminRidersPage"
 import AdminAlertsPage from "./pages/admin/AdminAlertsPage"
 import AdminSettingsPage from "./pages/admin/AdminSettingsPage"
 import AdminMenuPage from "./pages/admin/AdminMenuPage"
 import AdminHygienePage from "./pages/admin/AdminHygienePage"
 import AdminOrdersPage from "./pages/admin/AdminOrdersPage"
+import AdminPaymentsPage from "./pages/admin/AdminPaymentsPage"
 
 const pagesWithBottomNav = ["/home", "/search", "/stories", "/orders", "/profile"]
 
@@ -68,6 +71,7 @@ function AppContent() {
           <Route path="/stories" element={<HomePage />} />
           <Route path="/kitchen/login" element={<KitchenLoginPage />} />
           <Route path="/kitchen/signup" element={<KitchenSignupPage />} />
+          <Route path="/kitchen/forgot-password" element={<KitchenForgotPasswordPage />} />
           <Route
             path="/kitchen/dashboard"
             element={
@@ -105,6 +109,14 @@ function AppContent() {
             element={
               <ProtectedRoute role="kitchen">
                 <KitchenOrdersPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/kitchen/payouts"
+            element={
+              <ProtectedRoute role="kitchen">
+                <KitchenPayoutsPage />
               </ProtectedRoute>
             }
           />
@@ -205,6 +217,14 @@ function AppContent() {
             }
           />
           <Route
+            path="/admin/payments"
+            element={
+              <ProtectedRoute role="admin">
+                <AdminPaymentsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/admin/featured"
             element={
               <ProtectedRoute role="admin">
@@ -216,7 +236,15 @@ function AppContent() {
             path="/admin/customers"
             element={
               <ProtectedRoute role="admin">
-                <AdminCustomersPage />
+                <AdminUsersPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/users"
+            element={
+              <ProtectedRoute role="admin">
+                <AdminUsersPage />
               </ProtectedRoute>
             }
           />

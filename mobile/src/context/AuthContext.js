@@ -1,4 +1,8 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react"
+import { Platform, Alert } from "react-native"
+import Constants from "expo-constants"
+import * as Notifications from "expo-notifications"
+import * as Device from "expo-device"
 import {
   api,
   ApiError,
@@ -14,6 +18,63 @@ import {
   clearStoredAuth,
   readStoredAuthSync,
 } from "../lib/authStorage"
+
+// Configure foreground notifications handler
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+})
+
+async function registerForPushNotificationsAsync() {
+  let token
+  if (Platform.OS === "web") return null
+
+  try {
+    if (Device.isDevice) {
+      const { status: existingStatus } = await Notifications.getPermissionsAsync()
+      let finalStatus = existingStatus
+      if (existingStatus !== "granted") {
+        const { status } = await Notifications.requestPermissionsAsync()
+        finalStatus = status
+      }
+      if (finalStatus !== "granted") {
+        Alert.alert("Notification Permission", "Permission was denied. Please enable notifications in your phone Settings to receive updates.")
+        return null
+      }
+
+      try {
+        token = (await Notifications.getDevicePushTokenAsync()).data
+        console.log("FCM Device Token:", token)
+      } catch (e) {
+        try {
+          const projectId = Constants?.expoConfig?.extra?.eas?.projectId
+          token = (await Notifications.getExpoPushTokenAsync({ projectId })).data
+          console.log("Expo Push Token (Fallback):", token)
+        } catch (err) {
+          console.warn("Failed to retrieve push token from services: " + err.message)
+        }
+      }
+    } else {
+      console.log("Push notifications are only supported on physical devices, not simulators.")
+    }
+  } catch (err) {
+    console.error("Failed during registration process: " + err.message)
+  }
+
+  if (Platform.OS === "android") {
+    Notifications.setNotificationChannelAsync("default", {
+      name: "default",
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: "#FF231F7C",
+    })
+  }
+
+  return token
+}
 
 const AuthContext = createContext(null)
 
@@ -41,6 +102,22 @@ export function AuthProvider({ children }) {
     setUser(authData.user)
     setKitchen(authData.kitchen ?? null)
     setRider(authData.rider ?? null)
+
+    // Trigger push token registration on successful session initialization
+    setTimeout(async () => {
+      try {
+        const token = await registerForPushNotificationsAsync()
+        if (token) {
+          await api("/api/auth/push-token", {
+            method: "POST",
+            body: JSON.stringify({ token }),
+          })
+          console.log("✅ FCM Push token registered to user account.")
+        }
+      } catch (err) {
+        console.warn("Push token registration skipped or failed:", err.message)
+      }
+    }, 1000)
   }, [])
 
   const persist = useCallback(
@@ -104,6 +181,15 @@ export function AuthProvider({ children }) {
     return data
   }
 
+  const verifyRiderLoginOtp = async (identifier, password, otp) => {
+    const data = await api("/api/auth/rider/login/verify-otp", {
+      method: "POST",
+      body: JSON.stringify({ identifier, password, otp }),
+    })
+    await persist({ token: data.token, user: data.user, rider: data.rider })
+    return data
+  }
+
   const registerRider = async (form, aadhaarCardFile, aadhaarCardBackFile, panCardFile, drivingLicenseFile) => {
     const data = await registerRiderApi(form, aadhaarCardFile, aadhaarCardBackFile, panCardFile, drivingLicenseFile)
     return data
@@ -139,13 +225,27 @@ export function AuthProvider({ children }) {
     })
   }
 
-  const loginCustomer = async (email, password) => {
-    console.log("[AuthContext] loginCustomer calling API for email:", email)
+  const verifySignupOtp = async (userId, otp) => {
+    return api("/api/auth/customer/register/verify-otp", {
+      method: "POST",
+      body: JSON.stringify({ userId, otp }),
+    })
+  }
+
+  const resendSignupOtp = async (userId) => {
+    return api("/api/auth/customer/register/resend-otp", {
+      method: "POST",
+      body: JSON.stringify({ userId }),
+    })
+  }
+
+  const loginCustomer = async (identifier, password) => {
+    const isPhone = /^[6-9]\d{9}$/.test(identifier.replace(/\D/g, ""))
+    const body = isPhone ? { phone: identifier.replace(/\D/g, ""), password } : { email: identifier, password }
     const data = await api("/api/auth/customer/login", {
       method: "POST",
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify(body),
     })
-    console.log("[AuthContext] loginCustomer API succeeded. Requires OTP:", !!data.requiresOtp, "User:", data.user, "Has Token:", !!data.token)
     if (data.requiresOtp) {
       return data
     }
@@ -153,28 +253,34 @@ export function AuthProvider({ children }) {
     return data
   }
 
-  const verifyLoginOtp = async (email, password, otp) => {
-    console.log("[AuthContext] verifyLoginOtp calling API for:", email)
+  const verifyLoginOtp = async (identifier, password, otp) => {
+    const isPhone = /^[6-9]\d{9}$/.test(identifier.replace(/\D/g, ""))
+    const body = isPhone ? { phone: identifier.replace(/\D/g, ""), password, otp } : { email: identifier, password, otp }
     const data = await api("/api/auth/customer/login/verify-otp", {
       method: "POST",
-      body: JSON.stringify({ email, password, otp }),
+      body: JSON.stringify(body),
     })
-    console.log("[AuthContext] verifyLoginOtp succeeded. User:", data.user, "Has Token:", !!data.token)
     await persist({ token: data.token, user: data.user, kitchen: null })
     return data
   }
 
-  const sendForgotPasswordOtp = async (email) => {
+  const sendForgotPasswordOtp = async (phoneOrEmail) => {
+    const isEmail = phoneOrEmail.includes("@")
+    const body = isEmail ? { email: phoneOrEmail } : { phone: phoneOrEmail }
     return api("/api/auth/customer/forgot-password/send-otp", {
       method: "POST",
-      body: JSON.stringify({ email }),
+      body: JSON.stringify(body),
     })
   }
 
-  const resetPassword = async ({ email, otp, password }) => {
+  const resetPassword = async ({ phoneOrEmail, otp, password }) => {
+    const isEmail = phoneOrEmail.includes("@")
+    const body = isEmail 
+      ? { email: phoneOrEmail, otp, password } 
+      : { phone: phoneOrEmail, otp, password }
     return api("/api/auth/customer/forgot-password/reset", {
       method: "POST",
-      body: JSON.stringify({ email, otp, password }),
+      body: JSON.stringify(body),
     })
   }
 
@@ -266,10 +372,11 @@ export function AuthProvider({ children }) {
         })
       } catch (err) {
         if (cancelled) return
-        console.error("[AuthContext] Bootstrap validation failed with error:", err)
         if (err instanceof ApiError && err.status === 401) {
-          console.log("[AuthContext] Error status is 401, clearing invalid/expired session.")
+          console.log("[AuthContext] Stored token was invalid or expired (401). Clearing invalid session.")
           await applySession(null)
+        } else {
+          console.warn("[AuthContext] Bootstrap validation failed with error:", err)
         }
       } finally {
         if (!cancelled) setLoading(false)
@@ -298,11 +405,14 @@ export function AuthProvider({ children }) {
         registerKitchen,
         verifyKitchenRegisterOtp,
         loginRider,
+        verifyRiderLoginOtp,
         registerRider,
         verifyRiderRegisterOtp,
         loginAdmin,
         registerCustomer,
         signupCustomer,
+        verifySignupOtp,
+        resendSignupOtp,
         loginCustomer,
         verifyLoginOtp,
         sendForgotPasswordOtp,

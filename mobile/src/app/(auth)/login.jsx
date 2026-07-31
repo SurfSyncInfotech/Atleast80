@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react"
 import { View, Text, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, Image, TextInput, ActivityIndicator } from "react-native"
 import { useLocalSearchParams, useRouter } from "expo-router"
-import { ArrowLeft, Mail, Lock, ArrowRight, Eye, EyeOff } from "lucide-react-native"
+import { ArrowLeft, Mail, Lock, ArrowRight, Eye, EyeOff, AtSign } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import { useAuth } from "../../context/AuthContext"
 import Svg, { Path } from "react-native-svg"
@@ -24,7 +24,7 @@ function WheatBackground() {
         <Path d="M 100 100 Q 80 80 70 85 Q 85 100 100 100" fill="#8D7E50" />
         <Path d="M 110 80 Q 130 60 140 65 Q 125 80 110 80" fill="#8D7E50" />
       </Svg>
-      
+
       {/* Bottom left wheat */}
       <Svg width="200" height="300" viewBox="0 0 200 300" style={{ position: "absolute", bottom: -20, left: -40, opacity: 0.15 }}>
         <Path
@@ -86,69 +86,56 @@ function CustomInput({
 }) {
   const [isFocused, setIsFocused] = useState(false)
 
-  const innerContent = (
-    <View style={{
-      backgroundColor: "#FAF9F6",
-      borderRadius: 23,
-      flexDirection: "row",
-      alignItems: "center",
-      paddingHorizontal: 16,
-      height: 52,
-    }}>
-      {Icon && <Icon size={18} color="#7A7A7A" style={{ marginRight: 12 }} />}
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor="#9A9A9A"
-        keyboardType={keyboardType}
-        secureTextEntry={secureTextEntry}
-        autoCapitalize={autoCapitalize}
-        onFocus={() => setIsFocused(true)}
-        onBlur={() => setIsFocused(false)}
-        style={{
-          flex: 1,
-          height: "100%",
-          fontSize: 14,
-          fontFamily: "Nunito",
-          color: "#1F1F1F",
-          ...Platform.select({
-            web: {
-              outlineStyle: "none",
-              outlineWidth: 0,
-              outlineColor: "transparent",
-            },
-          }),
-        }}
-      />
-      {showToggle && onTogglePress && (
-        <TouchableOpacity onPress={onTogglePress} style={{ padding: 4 }}>
-          {isToggled ? <EyeOff size={18} color="#7A7A7A" /> : <Eye size={18} color="#7A7A7A" />}
-        </TouchableOpacity>
-      )}
-    </View>
-  )
-
-  if (isGradientBorder || isFocused) {
-    return (
-      <LinearGradient
-        colors={isFocused ? ["#0B6B3A", "#0B6B3A"] : ["#0C4240", "#C5A85A"]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={{ borderRadius: 24, padding: 1.5 }}
-      >
-        {innerContent}
-      </LinearGradient>
-    )
-  }
-
   return (
-    <View style={{
-      borderRadius: 24,
-      padding: 1.5,
-      backgroundColor: "#E3DFD5",
-    }}>
-      {innerContent}
+    <View
+      style={{
+        borderRadius: 24,
+        padding: 1.5,
+        backgroundColor: isFocused ? "#0B6B3A" : "#E3DFD5",
+      }}
+    >
+      <View
+        style={{
+          backgroundColor: "#FAF9F6",
+          borderRadius: 23,
+          flexDirection: "row",
+          alignItems: "center",
+          paddingHorizontal: 16,
+          height: 52,
+        }}
+      >
+        {Icon && <Icon size={18} color={isFocused ? "#0B6B3A" : "#7A7A7A"} style={{ marginRight: 12 }} />}
+        <TextInput
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor="#9A9A9A"
+          keyboardType={keyboardType}
+          secureTextEntry={secureTextEntry}
+          autoCapitalize={autoCapitalize}
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => setIsFocused(false)}
+          style={{
+            flex: 1,
+            height: "100%",
+            fontSize: 14,
+            fontFamily: "Nunito",
+            color: "#1F1F1F",
+            ...Platform.select({
+              web: {
+                outlineStyle: "none",
+                outlineWidth: 0,
+                outlineColor: "transparent",
+              },
+            }),
+          }}
+        />
+        {showToggle && onTogglePress && (
+          <TouchableOpacity onPress={onTogglePress} style={{ padding: 4 }}>
+            {isToggled ? <EyeOff size={18} color="#7A7A7A" /> : <Eye size={18} color="#7A7A7A" />}
+          </TouchableOpacity>
+        )}
+      </View>
     </View>
   )
 }
@@ -207,7 +194,7 @@ export default function LoginPage() {
   const initialEmail = params?.email
 
   const { loginCustomer, verifyLoginOtp, user } = useAuth()
-  const [email, setEmail] = useState("")
+  const [identifier, setIdentifier] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState("")
@@ -223,10 +210,10 @@ export default function LoginPage() {
 
   const [prevInitialEmail, setPrevInitialEmail] = useState(null)
 
-  // Sync email state when initialEmail parameter changes during render
+  // Sync identifier state when initialEmail parameter changes during render
   if (initialEmail && initialEmail !== prevInitialEmail) {
     setPrevInitialEmail(initialEmail)
-    setEmail(initialEmail)
+    setIdentifier(initialEmail)
   }
 
   useEffect(() => {
@@ -238,17 +225,16 @@ export default function LoginPage() {
   if (user?.role === "customer") return null
 
   const handleSubmit = async () => {
-    if (!email || !password) {
+    if (!identifier || !password) {
       setError("Please fill in all fields")
       return
     }
     setError("")
     setLoading(true)
     try {
-      const data = await loginCustomer(email, password)
+      const data = await loginCustomer(identifier, password)
       if (data?.requiresOtp) {
         setPhoneHint(data.phoneHint || "")
-        if (data.demoOtp) setDemoOtp(data.demoOtp)
         setStep("otp")
         setOtp(["", "", "", ""])
       } else {
@@ -270,7 +256,7 @@ export default function LoginPage() {
     setError("")
     setLoading(true)
     try {
-      await verifyLoginOtp(email, password, otpValue)
+      await verifyLoginOtp(identifier, password, otpValue)
       router.replace("/(customer)/home")
     } catch (err) {
       setError(err.message || "Failed to verify OTP")
@@ -327,9 +313,9 @@ export default function LoginPage() {
         style={{ flex: 1 }}
       >
         <WheatBackground />
-        
-        <ScrollView 
-          contentContainerStyle={{ flexGrow: 1, justifyContent: "space-between" }} 
+
+        <ScrollView
+          contentContainerStyle={{ flexGrow: 1, justifyContent: "space-between" }}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
@@ -353,14 +339,14 @@ export default function LoginPage() {
               {step === "otp" ? "Verify your phone" : "Welcome back"}
             </Text>
             <Text className="font-nunito text-gray text-sm mt-1">
-              {step === "otp" 
+              {step === "otp"
                 ? `One-time verification sent to ${phoneHint || "your phone"}`
                 : "Sign in to order homemade food"}
             </Text>
           </View>
- 
+
           {/* White Card Container */}
-          <View 
+          <View
             style={{
               backgroundColor: "#FFFFFF",
               borderTopLeftRadius: 36,
@@ -392,34 +378,34 @@ export default function LoginPage() {
             >
               <ArrowLeft size={18} color="#1F1F1F" />
             </TouchableOpacity>
- 
+
             {successMessage ? (
               <View className="mb-4 rounded-xl border border-green-200 bg-green-50 px-4 py-3">
                 <Text className="font-nunito text-sm text-green-800">{successMessage}</Text>
               </View>
             ) : null}
- 
+
             {error ? (
               <View className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
                 <Text className="font-nunito text-sm text-red-700">{error}</Text>
               </View>
             ) : null}
- 
+
             {step === "credentials" ? (
               <View style={{ gap: 16 }}>
                 <View>
-                  <Text className="font-poppins font-semibold text-[13px] text-dark mb-2">Email Address</Text>
+                  <Text className="font-poppins font-semibold text-[13px] text-dark mb-2">Email or Phone</Text>
                   <CustomInput
-                    value={email}
-                    onChangeText={setEmail}
-                    placeholder="you@example.com"
-                    icon={Mail}
-                    keyboardType="email-address"
+                    value={identifier}
+                    onChangeText={setIdentifier}
+                    placeholder="Email or phone number"
+                    icon={AtSign}
+                    keyboardType="default"
                     autoCapitalize="none"
                     isGradientBorder={true}
                   />
                 </View>
- 
+
                 <View>
                   <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                     <Text className="font-poppins font-semibold text-[13px] text-dark">Password</Text>
@@ -438,15 +424,15 @@ export default function LoginPage() {
                     onTogglePress={() => setShowPassword(!showPassword)}
                   />
                 </View>
- 
+
                 <View style={{ paddingTop: 16 }}>
-                  <PremiumButton 
-                    onPress={handleSubmit} 
-                    label="Sign in" 
-                    loading={loading} 
+                  <PremiumButton
+                    onPress={handleSubmit}
+                    label="Sign in"
+                    loading={loading}
                   />
                 </View>
- 
+
                 <View className="flex-row justify-center mt-6">
                   <Text className="font-nunito text-sm text-gray">{"Don't have an account? "}</Text>
                   <TouchableOpacity onPress={() => router.push("/(auth)/signup")}>
@@ -456,14 +442,7 @@ export default function LoginPage() {
               </View>
             ) : (
               <View style={{ gap: 16 }}>
-                {demoOtp ? (
-                  <View className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-                    <Text className="font-nunito text-sm text-amber-900">
-                      Demo OTP: <Text className="font-poppins font-bold tracking-widest">{demoOtp}</Text>
-                    </Text>
-                  </View>
-                ) : null}
- 
+
                 {/* 4 Digit OTP Inputs */}
                 <View style={{ flexDirection: "row", gap: 12, justifyContent: "center", paddingVertical: 8 }}>
                   {otp.map((digit, i) => (
@@ -490,18 +469,18 @@ export default function LoginPage() {
                     />
                   ))}
                 </View>
- 
+
                 <View style={{ paddingTop: 16 }}>
-                  <PremiumButton 
-                    onPress={handleVerifyOtp} 
-                    label={loading ? "Verifying..." : "Verify & sign in"} 
-                    loading={loading} 
+                  <PremiumButton
+                    onPress={handleVerifyOtp}
+                    label={loading ? "Verifying..." : "Verify & sign in"}
+                    loading={loading}
                     disabled={otp.some((d) => !d)}
                   />
                 </View>
- 
-                <TouchableOpacity 
-                  onPress={handleResendOtp} 
+
+                <TouchableOpacity
+                  onPress={handleResendOtp}
                   disabled={loading}
                   style={{ alignSelf: "center", marginTop: 12 }}
                 >
@@ -509,7 +488,7 @@ export default function LoginPage() {
                 </TouchableOpacity>
               </View>
             )}
- 
+
             {/* Bottom Brand Slogan */}
             <Text style={{ color: "#8D7E50", fontSize: 9, fontFamily: "Poppins", fontWeight: "bold", letterSpacing: 2, textAlign: "center", marginTop: 40 }}>
               HOMEMADE FOOD AT YOUR FINGERTIPS

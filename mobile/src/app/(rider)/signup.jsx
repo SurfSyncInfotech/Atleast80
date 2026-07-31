@@ -12,6 +12,7 @@ import {
   ActivityIndicator
 } from "react-native"
 import { useRouter } from "expo-router"
+import { Linking } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import {
   Truck,
@@ -73,6 +74,23 @@ export default function RiderSignupPage() {
 
   // Onboarding Terms
   const [termsAccepted, setTermsAccepted] = useState(false)
+
+  // Rider Agreement
+  const [agreement, setAgreement] = useState(null)
+  const [agreementLoading, setAgreementLoading] = useState(false)
+  const [agreementRead, setAgreementRead] = useState(false)
+
+  // Fetch rider agreement when step 4 is reached
+  useEffect(() => {
+    if (step === 4 && !agreement) {
+      setAgreementLoading(true)
+      fetch(`${process.env.EXPO_PUBLIC_API_URL || "http://localhost:3000"}/api/rider/rider-agreement`)
+        .then((r) => r.json())
+        .then((data) => setAgreement(data))
+        .catch(() => {})
+        .finally(() => setAgreementLoading(false))
+    }
+  }, [step])
 
   // OTP Modal
   const [signupOtpVisible, setSignupOtpVisible] = useState(false)
@@ -150,6 +168,10 @@ export default function RiderSignupPage() {
       }
     }
     if (step === 4) {
+      if (!agreementRead) {
+        setError("Please read the Rider Agreement before accepting")
+        return false
+      }
       if (!termsAccepted) {
         setError("Please accept the terms of partnership to continue")
         return false
@@ -218,11 +240,8 @@ export default function RiderSignupPage() {
     try {
       await verifyRiderRegisterOtp(signupUserId, otpValue)
       setSignupOtpVisible(false)
-      Alert.alert(
-        "Verification Success",
-        "Your details are successfully submitted. Admin will review and approve your account shortly.",
-        [{ text: "Go to Login", onPress: () => router.replace("/(rider)/login") }]
-      )
+      // Navigate directly to login after successful OTP verification
+      router.replace("/(rider)/login")
     } catch (err) {
       setError(err.message || "Invalid OTP")
     } finally {
@@ -584,39 +603,82 @@ export default function RiderSignupPage() {
               <View className="gap-4">
                 <Text className="font-poppins font-bold text-dark text-base">Rider Partnership Agreement</Text>
                 <Text className="font-nunito text-xs text-gray leading-5">
-                  Please read the delivery partner terms. By ticking the checkbox below, you agree to comply with our delivery guidelines, payout structures, and background checks.
+                  Please read the complete Rider Agreement below. You must open and read the agreement before you can accept the terms.
                 </Text>
 
-                <TouchableOpacity
-                  onPress={() => setTermsAccepted(!termsAccepted)}
-                  style={{
-                    flexDirection: "row",
-                    gap: 12,
-                    backgroundColor: "#FAF9F6",
-                    borderRadius: 16,
-                    padding: 16,
-                    borderWidth: 1.5,
-                    borderColor: termsAccepted ? "#0B6B3A" : "#E5E5E5",
-                  }}
-                >
-                  <View
+                {agreementLoading ? (
+                  <View style={{ alignItems: "center", padding: 20 }}>
+                    <ActivityIndicator size="small" color="#0B6B3A" />
+                    <Text style={{ fontFamily: "Nunito", fontSize: 12, color: "#7A7A7A", marginTop: 8 }}>Loading agreement...</Text>
+                  </View>
+                ) : agreement?.url ? (
+                  <TouchableOpacity
+                    onPress={() => {
+                      Linking.openURL(agreement.url)
+                      setAgreementRead(true)
+                    }}
                     style={{
-                      width: 20,
-                      height: 20,
-                      borderRadius: 6,
-                      borderWidth: 2,
-                      borderColor: "#0B6B3A",
-                      backgroundColor: termsAccepted ? "#0B6B3A" : "transparent",
+                      flexDirection: "row",
+                      gap: 10,
+                      backgroundColor: agreementRead ? "#F0FBF4" : "#FFF8E7",
+                      borderRadius: 14,
+                      padding: 16,
+                      borderWidth: 1.5,
+                      borderColor: agreementRead ? "#0B6B3A" : "#F4C400",
                       alignItems: "center",
-                      justifyContent: "center",
                     }}
                   >
-                    {termsAccepted && <Check size={14} color="#FFFFFF" />}
+                    <FileText size={20} color={agreementRead ? "#0B6B3A" : "#B8900A"} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontFamily: "Poppins", fontWeight: "600", fontSize: 13, color: agreementRead ? "#0B6B3A" : "#B8900A" }}>
+                        {agreementRead ? "Agreement Read ✓" : "Read Rider Agreement (Required)"}
+                      </Text>
+                      <Text style={{ fontFamily: "Nunito", fontSize: 11, color: "#7A7A7A", marginTop: 2 }}>
+                        Version {agreement.version} · Tap to open PDF
+                      </Text>
+                    </View>
+                    {!agreementRead && <ArrowRight size={16} color="#B8900A" />}
+                  </TouchableOpacity>
+                ) : (
+                  <View style={{ backgroundColor: "#FEF2F2", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#FECACA" }}>
+                    <Text style={{ fontFamily: "Nunito", fontSize: 12, color: "#DC2626", textAlign: "center" }}>
+                      No Rider Agreement has been uploaded by admin yet. Please check back later.
+                    </Text>
                   </View>
-                  <Text className="flex-1 font-nunito text-xs text-dark leading-5">
-                    I agree to the Rider Terms and Conditions, code of conduct, and consent to identity verification checks.
-                  </Text>
-                </TouchableOpacity>
+                )}
+
+                {agreementRead && (
+                  <TouchableOpacity
+                    onPress={() => setTermsAccepted(!termsAccepted)}
+                    style={{
+                      flexDirection: "row",
+                      gap: 12,
+                      backgroundColor: "#FAF9F6",
+                      borderRadius: 16,
+                      padding: 16,
+                      borderWidth: 1.5,
+                      borderColor: termsAccepted ? "#0B6B3A" : "#E5E5E5",
+                    }}
+                  >
+                    <View
+                      style={{
+                        width: 20,
+                        height: 20,
+                        borderRadius: 6,
+                        borderWidth: 2,
+                        borderColor: "#0B6B3A",
+                        backgroundColor: termsAccepted ? "#0B6B3A" : "transparent",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      {termsAccepted && <Check size={14} color="#FFFFFF" />}
+                    </View>
+                    <Text className="flex-1 font-nunito text-xs text-dark leading-5">
+                      I have read and agree to the Rider Agreement, terms and conditions, code of conduct, and consent to identity verification checks.
+                    </Text>
+                  </TouchableOpacity>
+                )}
               </View>
             ) : null}
 
@@ -629,18 +691,19 @@ export default function RiderSignupPage() {
                   onPress={prevStep}
                   style={{
                     flex: 1,
-                    height: 48,
+                    height: 50,
                     borderWidth: 1.5,
                     borderColor: "#0B6B3A",
-                    borderRadius: 999,
+                    borderRadius: 25,
                     alignItems: "center",
                     justifyContent: "center",
                     flexDirection: "row",
                     gap: 6,
+                    paddingHorizontal: 12,
                   }}
                 >
                   <ArrowLeft size={16} color="#0B6B3A" />
-                  <Text style={{ color: "#0B6B3A", fontWeight: "bold", fontSize: 13, fontFamily: "Poppins" }}>Back</Text>
+                  <Text numberOfLines={1} style={{ color: "#0B6B3A", fontWeight: "bold", fontSize: 14, fontFamily: "Poppins" }}>Back</Text>
                 </TouchableOpacity>
               )}
 
@@ -649,21 +712,22 @@ export default function RiderSignupPage() {
                 disabled={loading}
                 style={{
                   flex: 1,
-                  height: 48,
+                  height: 50,
                   backgroundColor: "#0B6B3A",
-                  borderRadius: 999,
+                  borderRadius: 25,
                   alignItems: "center",
                   justifyContent: "center",
                   flexDirection: "row",
                   gap: 6,
+                  paddingHorizontal: 12,
                 }}
               >
                 {loading ? (
                   <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
                   <>
-                    <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontSize: 13, fontFamily: "Poppins" }}>
-                      {step === 4 ? "Submit" : "Continue"}
+                    <Text numberOfLines={1} style={{ color: "#FFFFFF", fontWeight: "bold", fontSize: 13, fontFamily: "Poppins" }}>
+                      {step === 4 ? "Submit for Approval" : "Continue"}
                     </Text>
                     {step < 4 && <ArrowRight size={16} color="#FFFFFF" />}
                   </>

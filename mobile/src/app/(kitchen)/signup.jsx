@@ -36,11 +36,13 @@ import {
   Video,
   CheckCircle,
   AlertTriangle,
-  Shield
+  Shield,
+  LocateFixed
 } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import * as DocumentPicker from "expo-document-picker"
 import * as WebBrowser from "expo-web-browser"
+import * as Location from "expo-location"
 import Button from "../../components/ui/Button"
 import Input from "../../components/ui/Input"
 import PasswordInput from "../../components/ui/PasswordInput"
@@ -62,6 +64,7 @@ export default function KitchenSignupPage() {
   const [step, setStep] = useState(1)
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
+  const [detectingLocation, setDetectingLocation] = useState(false)
 
   // Form State
   const [form, setForm] = useState({
@@ -148,6 +151,74 @@ export default function KitchenSignupPage() {
       setCitiesList([])
     } finally {
       setCitiesLoading(false)
+    }
+  }
+
+  const handleAutoDetectLocation = async () => {
+    setError("")
+    setDetectingLocation(true)
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync()
+      if (status !== "granted") {
+        Alert.alert("Permission Denied", "Please allow location access to auto-detect your address.")
+        return
+      }
+
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+      const { latitude, longitude } = loc.coords
+
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`, {
+        headers: { "User-Agent": "Atleast80App/1.0" },
+      })
+      const data = await res.json()
+
+      if (!data?.address) {
+        Alert.alert("Location Error", "Could not resolve address details. Please fill manually.")
+        return
+      }
+
+      const addr = data.address
+      const rawState = addr.state || ""
+      const rawCity = addr.city || addr.town || addr.village || addr.county || ""
+      const state = rawState ? rawState.charAt(0).toUpperCase() + rawState.slice(1) : ""
+      const city = rawCity ? rawCity.charAt(0).toUpperCase() + rawCity.slice(1) : ""
+      const road = addr.road || addr.suburb || addr.neighbourhood || ""
+      const houseNumber = addr.house_number || ""
+      const postcode = addr.postcode || ""
+
+      let streetAddress = [houseNumber, road].filter(Boolean).join(", ")
+      if (!streetAddress && data.display_name) {
+        streetAddress = data.display_name.split(",").slice(0, 2).map((s) => s.trim()).join(", ")
+      }
+
+      setForm((f) => ({
+        ...f,
+        address: streetAddress || f.address,
+        state: state || f.state,
+        city: city || f.city,
+        pincode: postcode || f.pincode,
+      }))
+
+      if (state) {
+        try {
+          const statesData = statesList.length ? { states: statesList } : await api("/api/locations/states")
+          if (!statesList.length) setStatesList(statesData.states || [])
+          const match = (statesData.states || []).find((s) => s.name.toLowerCase() === state.toLowerCase())
+          if (match) {
+            setCitiesLoading(true)
+            const cdata = await api(`/api/locations/cities?state=${match.iso2}`)
+            setCitiesList(cdata.cities || [])
+          }
+        } catch {
+          // Non-critical — manual state/city picker will still fetch on demand
+        } finally {
+          setCitiesLoading(false)
+        }
+      }
+    } catch (err) {
+      Alert.alert("Location Error", "Failed to auto-detect location: " + err.message)
+    } finally {
+      setDetectingLocation(false)
     }
   }
 
@@ -350,23 +421,10 @@ export default function KitchenSignupPage() {
     setSignupOtpError("")
     setOtpVerifying(true)
     try {
-      const data = await verifyKitchenRegisterOtp(signupUserId, otpVal)
+      await verifyKitchenRegisterOtp(signupUserId, otpVal)
       setSignupOtpVisible(false)
-      if (Platform.OS === "web") {
-        window.alert(data.message || "Your registration is submitted. Please log in to continue.")
-        router.replace("/(kitchen)/login")
-      } else {
-        Alert.alert(
-          "Verification Success",
-          data.message || "Your registration is submitted. Please log in to verify your identity.",
-          [
-            { 
-              text: "Go to Login", 
-              onPress: () => router.replace("/(kitchen)/login")
-            }
-          ]
-        )
-      }
+      // Directly navigate to login after successful OTP verification
+      router.replace("/(kitchen)/login")
     } catch (err) {
       setSignupOtpError(err.message || "Invalid or expired OTP")
     } finally {
@@ -702,7 +760,23 @@ export default function KitchenSignupPage() {
                 </Text>
 
                 <View>
-                  <Text className="font-poppins text-xs font-semibold text-dark mb-1.5">Full Address *</Text>
+                  <View className="flex-row justify-between items-center mb-1.5">
+                    <Text className="font-poppins text-xs font-semibold text-dark">Full Address *</Text>
+                    <TouchableOpacity
+                      onPress={handleAutoDetectLocation}
+                      disabled={detectingLocation}
+                      className="flex-row items-center gap-1"
+                    >
+                      {detectingLocation ? (
+                        <ActivityIndicator size="small" color="#0B6B3A" />
+                      ) : (
+                        <LocateFixed size={12} color="#0B6B3A" />
+                      )}
+                      <Text className="text-[11px] font-poppins font-bold text-primary">
+                        {detectingLocation ? "Detecting..." : "Use current location"}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                   <Input
                     value={form.address}
                     onChangeText={(val) => setForm({ ...form, address: val })}
@@ -1170,24 +1244,27 @@ export default function KitchenSignupPage() {
             ) : null}
 
             {/* Navigation buttons */}
-            <View className="flex-row gap-3 mt-6">
+            <View style={{ flexDirection: "row", gap: 12, marginTop: 24 }}>
               {step > 1 ? (
                 <TouchableOpacity
                   onPress={prevStep}
                   style={{
                     flex: 1,
-                    paddingVertical: 14,
-                    borderWidth: 2,
+                    height: 50,
+                    borderWidth: 1.5,
                     borderColor: "#0B6B3A",
-                    borderRadius: 999,
+                    borderRadius: 25,
                     alignItems: "center",
                     justifyContent: "center",
                     flexDirection: "row",
                     gap: 6,
+                    paddingHorizontal: 12,
                   }}
                 >
                   <ArrowLeft size={16} color="#0B6B3A" />
-                  <Text className="text-primary font-poppins font-bold text-sm">Back</Text>
+                  <Text numberOfLines={1} style={{ color: "#0B6B3A", fontWeight: "bold", fontSize: 14, fontFamily: "Poppins" }}>
+                    Back
+                  </Text>
                 </TouchableOpacity>
               ) : null}
 
@@ -1196,27 +1273,49 @@ export default function KitchenSignupPage() {
                   onPress={nextStep}
                   style={{
                     flex: 1,
-                    paddingVertical: 14,
+                    height: 50,
                     backgroundColor: "#0B6B3A",
-                    borderRadius: 999,
+                    borderRadius: 25,
                     alignItems: "center",
                     justifyContent: "center",
                     flexDirection: "row",
                     gap: 6,
+                    paddingHorizontal: 12,
                   }}
                 >
-                  <Text className="text-white font-poppins font-bold text-sm">Continue</Text>
+                  <Text numberOfLines={1} style={{ color: "#FFFFFF", fontWeight: "bold", fontSize: 14, fontFamily: "Poppins" }}>
+                    Continue
+                  </Text>
                   <ArrowRight size={16} color="#FFFFFF" />
                 </TouchableOpacity>
               ) : (
-                <Button
+                <TouchableOpacity
                   onPress={handleSubmit}
-                  size="lg"
-                  className="flex-1 h-12 rounded-full"
-                  loading={loading}
+                  disabled={loading}
+                  style={{
+                    flex: 1,
+                    height: 50,
+                    backgroundColor: "#0B6B3A",
+                    borderRadius: 25,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexDirection: "row",
+                    gap: 6,
+                    paddingHorizontal: 12,
+                    opacity: loading ? 0.7 : 1,
+                  }}
                 >
-                  <Text className="text-white text-base font-bold">Register</Text>
-                </Button>
+                  {loading ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Text numberOfLines={1} style={{ color: "#FFFFFF", fontWeight: "bold", fontSize: 13, fontFamily: "Poppins" }}>
+                        Submit for Approval
+                      </Text>
+                      <ArrowRight size={16} color="#FFFFFF" />
+                    </>
+                  )}
+                </TouchableOpacity>
               )}
             </View>
           </View>

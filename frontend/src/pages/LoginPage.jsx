@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react"
 import { Link, useNavigate, useLocation } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { ArrowRight, ArrowLeft, Mail, Lock, ShieldCheck, UtensilsCrossed, ShoppingCart } from "lucide-react"
+import { ArrowRight, ArrowLeft, Mail, Lock, ShieldCheck, UtensilsCrossed, ShoppingCart, AtSign } from "lucide-react"
 import Button from "../components/ui/Button"
 import PasswordInput from "../components/ui/PasswordInput"
 import { useAuth } from "../context/AuthContext"
@@ -13,7 +13,7 @@ export default function LoginPage() {
   const { loginCustomer, verifyLoginOtp } = useAuth()
   useRoleRedirect("customer")
   const [step, setStep] = useState("credentials")
-  const [email, setEmail] = useState("")
+  const [identifier, setIdentifier] = useState("")
   const [password, setPassword] = useState("")
   const [otp, setOtp] = useState(["", "", "", ""])
   const [phoneHint, setPhoneHint] = useState("")
@@ -27,7 +27,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (location.state?.email) {
-      setEmail(location.state.email)
+      setIdentifier(location.state.email)
     }
   }, [location.state?.email])
 
@@ -44,7 +44,11 @@ export default function LoginPage() {
     setError("")
     setLoading(true)
     try {
-      const data = await loginCustomer(email.trim().toLowerCase(), password)
+      const isPhone = /^[6-9]\d{9}$/.test(identifier.replace(/\D/g, ""))
+      const loginPayload = isPhone
+        ? { phone: identifier.replace(/\D/g, ""), password }
+        : { email: identifier.trim().toLowerCase(), password }
+      const data = await loginCustomer(identifier.trim(), password)
       if (data.requiresOtp) {
         setPhoneHint(data.phoneHint || "")
         setDemoOtp(data.demoOtp ?? null)
@@ -65,7 +69,7 @@ export default function LoginPage() {
     setError("")
     setLoading(true)
     try {
-      await verifyLoginOtp(email.trim().toLowerCase(), password, otpValue)
+      await verifyLoginOtp(identifier.trim(), password, otpValue)
       navigate(from, { replace: true })
     } catch (err) {
       setError(err.message || "Invalid OTP")
@@ -78,7 +82,7 @@ export default function LoginPage() {
     setError("")
     setLoading(true)
     try {
-      const data = await loginCustomer(email.trim().toLowerCase(), password)
+      const data = await loginCustomer(identifier.trim(), password)
       if (data.requiresOtp) {
         setDemoOtp(data.demoOtp ?? null)
         setOtp(["", "", "", ""])
@@ -172,14 +176,14 @@ export default function LoginPage() {
                 exit={{ opacity: 0, y: -10 }}
               >
                 <div>
-                  <label className="font-poppins font-medium text-sm text-dark block mb-2">Email</label>
+                  <label className="font-poppins font-medium text-sm text-dark block mb-2">Email or Phone</label>
                   <div className="relative">
-                    <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray" />
+                    <AtSign size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray" />
                     <input
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="you@example.com"
+                      type="text"
+                      value={identifier}
+                      onChange={(e) => setIdentifier(e.target.value)}
+                      placeholder="Email or phone number"
                       className="w-full pl-12 pr-4 py-4 bg-white rounded-2xl border-2 border-gray-light font-nunito focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10"
                       required
                     />
@@ -222,14 +226,6 @@ export default function LoginPage() {
                 <p className="font-nunito text-sm text-gray md:hidden">
                   One-time verification sent to {phoneHint || "your phone"}
                 </p>
-
-                {demoOtp && (
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-                    <p className="font-nunito text-xs text-amber-900">
-                      Demo OTP: <span className="font-poppins font-bold tracking-widest">{demoOtp}</span>
-                    </p>
-                  </div>
-                )}
 
                 <div className="flex gap-3 justify-center">
                   {otp.map((digit, i) => (

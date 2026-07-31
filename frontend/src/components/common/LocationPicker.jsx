@@ -28,6 +28,7 @@ export default function LocationPicker({ transparent = false, className }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
+        title={display}
         className={cn(
           "flex items-center gap-1.5 cursor-pointer group transition-all duration-200",
           transparent
@@ -51,7 +52,12 @@ export default function LocationPicker({ transparent = false, className }) {
 
       {open && (
         <div className="absolute top-full left-0 mt-2 z-[100] w-[min(100vw-2rem,320px)] bg-white rounded-xl shadow-xl border border-gray-100 p-4">
-          <p className="font-poppins font-semibold text-sm text-dark mb-3">Choose state & city</p>
+          <p className="font-poppins font-semibold text-sm text-dark mb-1">Choose state & city</p>
+          {label && (
+            <p className="font-nunito text-xs text-gray mb-3 border-b border-gray-100 pb-2">
+              Current: <span className="text-primary font-semibold">{label}</span>
+            </p>
+          )}
           <StateCitySelect
             state={state}
             city={city}

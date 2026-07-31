@@ -5,7 +5,7 @@ if (fs.existsSync(path)) {
   const code = fs.readFileSync(path, "utf8")
   const lines = code.split("\n")
   lines.forEach((line, index) => {
-    if (line.includes("Notification") || line.includes("accept") || line.includes("push") || line.includes("assign")) {
+    if (line.includes("api(") || line.includes("online") || line.includes("Online") || line.includes("Location") || line.includes("location")) {
       console.log(`${index + 1}: ${line.trim()}`)
     }
   })

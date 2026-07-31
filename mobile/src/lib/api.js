@@ -6,16 +6,7 @@ const getApiUrl = () => {
   if (process.env.EXPO_PUBLIC_API_URL) {
     return process.env.EXPO_PUBLIC_API_URL
   }
-  if (Platform.OS === "web") {
-    return "http://localhost:8080"
-  }
-  // Dynamically detect local dev machine IP from Expo host URI
-  const hostUri = Constants.expoConfig?.hostUri
-  if (hostUri) {
-    const ip = hostUri.split(":")[0]
-    return `http://${ip}:8080`
-  }
-  return "http://10.0.2.2:8080" // Fallback for android emulators
+  return "https://backend.atleast80.com"
 }
 
 export const API_URL = getApiUrl()

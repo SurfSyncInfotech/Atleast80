@@ -17,6 +17,7 @@ export async function api(path, options = {}, role) {
   const token = getToken(role)
   const headers = {
     "Content-Type": "application/json",
+    "X-Client": "web",
     ...options.headers,
   }
 
@@ -163,4 +164,19 @@ export async function deletePartnerAgreementPdf() {
 
 export async function deleteTrainingVideo() {
   return api("/api/admin/settings/training-video", { method: "DELETE" }, "admin")
+}
+
+// Rider Agreement
+export async function getRiderAgreement() {
+  return api("/api/rider/rider-agreement")
+}
+
+export async function uploadRiderAgreementPdf(file) {
+  const formData = new FormData()
+  formData.append("agreement", file)
+  return uploadFormData("/api/admin/settings/rider-agreement", formData, "admin")
+}
+
+export async function deleteRiderAgreementPdf() {
+  return api("/api/admin/settings/rider-agreement", { method: "DELETE" }, "admin")
 }

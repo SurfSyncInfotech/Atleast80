@@ -13,7 +13,7 @@ export default function CheckoutPage() {
   const location = useLocation()
   const { user } = useAuth()
   const { cart, itemCount, total, clearCart } = useCart()
-  const [payment, setPayment] = useState("cod")
+  const [payment, setPayment] = useState("")
   const [orderPlaced, setOrderPlaced] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -28,6 +28,10 @@ export default function CheckoutPage() {
   const deliveryAddress = [user?.address, user?.city, user?.pincode].filter(Boolean).join(", ")
 
   const handlePlaceOrder = async () => {
+    if (!payment) {
+      setError("Please select a payment method (UPI / Google Pay or Cash on Delivery) to proceed.")
+      return
+    }
     if (!kitchenId) {
       setError("Missing kitchen information. Please add items from a kitchen page.")
       return

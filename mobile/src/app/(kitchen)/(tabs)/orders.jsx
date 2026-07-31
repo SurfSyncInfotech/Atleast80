@@ -87,11 +87,19 @@ function formatDate(value) {
 function StatusBadge({ order, status }) {
   const targetOrder = order || { status: status }
   const isHandoverPending = targetOrder.paymentMethod === "cod" && targetOrder.deliveryStatus === "handover_pending"
+  const isRescueTimeout = targetOrder.status === "cancelled" && targetOrder.deliveryStatus === "rescue_timeout"
+  const isReturned = targetOrder.status === "cancelled" && targetOrder.deliveryStatus === "returned"
   const displayStatus = targetOrder.showCancelledAlert ? "cancelled" : targetOrder.status
-  const label = isHandoverPending ? "Pending Handover" : (STATUS_LABELS[displayStatus] || displayStatus)
-  const colorClass = isHandoverPending
-    ? "bg-amber-100 text-amber-800 border-amber-200"
-    : (STATUS_COLORS[displayStatus] || "bg-gray-100 text-gray border-gray-200")
+  
+  let label = STATUS_LABELS[displayStatus] || displayStatus
+  if (isHandoverPending) label = "Pending Handover"
+  else if (isRescueTimeout) label = "Rescue Timeout"
+  else if (isReturned) label = "Food Returned"
+
+  let colorClass = STATUS_COLORS[displayStatus] || "bg-gray-100 text-gray border-gray-200"
+  if (isHandoverPending) colorClass = "bg-amber-100 text-amber-800 border-amber-200"
+  else if (isRescueTimeout) colorClass = "bg-red-100 text-red-800 border-red-200 animate-pulse"
+  else if (isReturned) colorClass = "bg-slate-100 text-slate-800 border-slate-200"
 
   return (
     <View className={cn("px-2.5 py-0.5 rounded-full border", colorClass)}>
@@ -450,6 +458,20 @@ export default function KitchenOrdersScreen() {
                          ) : (
                            <Text className="font-poppins font-bold text-xs text-white">
                              Received Cash (₹{order.grandTotal})
+                           </Text>
+                         )}
+                       </TouchableOpacity>
+                     ) : order.status === "cancelled" && order.deliveryStatus === "rescue_timeout" ? (
+                       <TouchableOpacity
+                         onPress={() => handleConfirmHandover(order.id)}
+                         disabled={updating}
+                         className="flex-[2] py-2.5 bg-rose-500 rounded-xl items-center justify-center"
+                       >
+                         {updating ? (
+                           <ActivityIndicator size="small" color="#FFFFFF" />
+                         ) : (
+                           <Text className="font-poppins font-bold text-xs text-white">
+                             Confirm Food Returned 🍲
                            </Text>
                          )}
                        </TouchableOpacity>

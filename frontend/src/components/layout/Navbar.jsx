@@ -103,6 +103,7 @@ export default function Navbar({ transparent = false }) {
         {isCustomer ? (
           <>
             <button
+              id="navbar-profile-btn"
               onClick={() => navigate("/profile")}
               className={`hidden md:flex items-center gap-2.5 pl-1.5 pr-4 py-1.5 rounded-full cursor-pointer transition-all ${
                 transparent

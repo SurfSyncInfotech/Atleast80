@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react"
-import { View, Text, ScrollView, TouchableOpacity, Image, ActivityIndicator } from "react-native"
+import { View, Text, ScrollView, TouchableOpacity, Image, ActivityIndicator, Modal } from "react-native"
 import { useLocalSearchParams, useRouter } from "expo-router"
 import { SafeAreaView } from "react-native-safe-area-context"
-import { ArrowLeft, MapPin, Clock, CreditCard, Wallet, CheckCircle } from "lucide-react-native"
+import { ArrowLeft, MapPin, Clock, CreditCard, Wallet, CheckCircle, X, QrCode, ShieldCheck } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import Button from "../../components/ui/Button"
 import { useCart } from "../../context/CartContext"
@@ -15,7 +15,8 @@ export default function CheckoutScreen() {
   const params = useLocalSearchParams()
   const { user } = useAuth()
   const { cart, itemCount, total, clearCart } = useCart()
-  const [payment, setPayment] = useState("cod")
+  const [payment, setPayment] = useState("")
+  const [upiModalVisible, setUpiModalVisible] = useState(false)
   const [orderPlaced, setOrderPlaced] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -35,16 +36,7 @@ export default function CheckoutScreen() {
     }
   }, [cart, orderPlaced, router])
 
-  const handlePlaceOrder = async () => {
-    if (!kitchenId) {
-      setError("Missing kitchen information. Please add items from a kitchen page.")
-      return
-    }
-    if (!deliveryAddress) {
-      setError("Please add a delivery address in your Profile before placing an order.")
-      return
-    }
-
+  const executeOrderPlacement = async (selectedPayment) => {
     setLoading(true)
     setError("")
     try {
@@ -60,7 +52,7 @@ export default function CheckoutScreen() {
             qty: item.qty,
             image: item.image,
           })),
-          paymentMethod: payment,
+          paymentMethod: selectedPayment,
           packingType,
           deliveryMethod,
           packingFee,
@@ -69,6 +61,7 @@ export default function CheckoutScreen() {
         }),
       })
 
+      setUpiModalVisible(false)
       setOrderPlaced(true)
       clearCart()
       setTimeout(() => {
@@ -76,8 +69,30 @@ export default function CheckoutScreen() {
       }, 2000)
     } catch (err) {
       setError(err.message || "Failed to place order")
+      setUpiModalVisible(false)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handlePlaceOrder = () => {
+    if (!payment) {
+      setError("Please select a payment method (UPI / Google Pay or Cash on Delivery) to proceed.")
+      return
+    }
+    if (!kitchenId) {
+      setError("Missing kitchen information. Please add items from a kitchen page.")
+      return
+    }
+    if (!deliveryAddress) {
+      setError("Please add a delivery address in your Profile before placing an order.")
+      return
+    }
+
+    if (payment === "upi") {
+      setUpiModalVisible(true)
+    } else {
+      executeOrderPlacement("cod")
     }
   }
 
@@ -237,6 +252,71 @@ export default function CheckoutScreen() {
           </Text>
         </Button>
       </View>
+
+      {/* UPI / Google Pay Payment Modal */}
+      <Modal visible={upiModalVisible} animationType="slide" transparent={true} onRequestClose={() => setUpiModalVisible(false)}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" }}>
+          <View style={{ backgroundColor: "#FFFFFF", borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24 }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: "#EAF7EE", alignItems: "center", justifyContent: "center" }}>
+                  <Wallet size={20} color="#0B6B3A" />
+                </View>
+                <View>
+                  <Text style={{ fontSize: 16, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F" }}>Pay via UPI / Google Pay</Text>
+                  <Text style={{ fontSize: 12, fontFamily: "Nunito", color: "#7A7A7A" }}>Instant & Secure Payment</Text>
+                </View>
+              </View>
+              <TouchableOpacity onPress={() => setUpiModalVisible(false)}>
+                <X size={20} color="#7A7A7A" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ backgroundColor: "#F8FAFC", borderRadius: 16, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: "#E2E8F0", alignItems: "center" }}>
+              <Text style={{ fontSize: 12, fontFamily: "Nunito", color: "#64748B" }}>Total Payable Amount</Text>
+              <Text style={{ fontSize: 28, fontWeight: "bold", fontFamily: "Poppins", color: "#0B6B3A", marginVertical: 4 }}>₹{grandTotal}</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
+                <ShieldCheck size={14} color="#10B981" />
+                <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#10B981", fontWeight: "600" }}>Secured by Atleast80 UPI Gateway</Text>
+              </View>
+            </View>
+
+            <View style={{ marginBottom: 24, gap: 10 }}>
+              <Text style={{ fontSize: 12, fontWeight: "bold", fontFamily: "Poppins", color: "#475569", textTransform: "uppercase", letterSpacing: 0.5 }}>Select UPI App</Text>
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                {["Google Pay", "PhonePe", "Paytm", "BHIM"].map((appName) => (
+                  <View key={appName} style={{ flex: 1, backgroundColor: "#F1F5F9", borderRadius: 12, paddingVertical: 10, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#E2E8F0" }}>
+                    <Text style={{ fontSize: 11, fontWeight: "bold", fontFamily: "Poppins", color: "#1E293B" }}>{appName}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+
+            <TouchableOpacity
+              onPress={() => executeOrderPlacement("upi")}
+              disabled={loading}
+              style={{
+                backgroundColor: "#0B6B3A",
+                borderRadius: 999,
+                paddingVertical: 16,
+                alignItems: "center",
+                justifyContent: "center",
+                flexDirection: "row",
+                gap: 8,
+                opacity: loading ? 0.7 : 1,
+              }}
+            >
+              {loading ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins", fontSize: 15 }}>
+                  Verify & Pay ₹{grandTotal}
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   )
 }

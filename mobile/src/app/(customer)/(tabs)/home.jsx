@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react"
-import { 
-  View, Text, ScrollView, Image, TouchableOpacity, Platform, 
-  Animated, useWindowDimensions, RefreshControl, Modal, Pressable, ActivityIndicator
+import {
+  View, Text, ScrollView, Image, TouchableOpacity, Platform,
+  Animated, useWindowDimensions, RefreshControl, Modal, Pressable, ActivityIndicator, Alert, TextInput
 } from "react-native"
+import * as Location from "expo-location"
 import { useRouter } from "expo-router"
 import { SafeAreaView } from "react-native-safe-area-context"
 import { LinearGradient } from "expo-linear-gradient"
@@ -184,20 +185,226 @@ export default function HomeScreen() {
   const [tempState, setTempState] = useState("")
   const [tempStateIso, setTempStateIso] = useState("")
   const [tempCity, setTempCity] = useState("")
+  const [tempAddress, setTempAddress] = useState("")
+  const [tempPincode, setTempPincode] = useState("")
+  const [detectingLocation, setDetectingLocation] = useState(false)
+
+  const handleAutoDetectLocation = async () => {
+    setDetectingLocation(true)
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync()
+      if (status !== "granted") {
+        Alert.alert("Permission Denied", "Please allow location access to auto-detect your location.")
+        setDetectingLocation(false)
+        return
+      }
+
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+      const { latitude, longitude } = loc.coords
+
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`, {
+        headers: {
+          "User-Agent": "Atleast80App/1.0"
+        }
+      })
+      const data = await res.json()
+      if (data && data.address) {
+        const addr = data.address
+        const state = addr.state || ""
+        const city = addr.city || addr.town || addr.village || addr.county || addr.suburb || ""
+        const road = addr.road || addr.suburb || addr.neighbourhood || ""
+        const houseNumber = addr.house_number || ""
+        const postcode = addr.postcode || ""
+
+        let streetAddress = [houseNumber, road].filter(Boolean).join(", ")
+        if (!streetAddress && data.display_name) {
+          streetAddress = data.display_name.split(",").slice(0, 2).map(s => s.trim()).join(", ")
+        }
+
+        let detectedIso = ""
+        if (state) {
+          const displayState = state.charAt(0).toUpperCase() + state.slice(1)
+          setTempState(displayState)
+          const matchedStateObj = FALLBACK_LOCATIONS.states.find(
+            (s) => s.name.toLowerCase() === state.toLowerCase()
+          )
+          detectedIso = matchedStateObj ? matchedStateObj.iso2 : ""
+          setTempStateIso(detectedIso)
+        } else {
+          setTempState("")
+          setTempStateIso("")
+        }
+
+        let displayCity = ""
+        if (city) {
+          displayCity = city.charAt(0).toUpperCase() + city.slice(1)
+          setTempCity(displayCity)
+        } else {
+          setTempCity("")
+        }
+
+        setTempAddress(streetAddress)
+        setTempPincode(postcode)
+
+        // Load cities for detected state so city picker dropdown has options
+        if (detectedIso || state) {
+          try {
+            let fetched = []
+            if (detectedIso) {
+              const cData = await api(`/api/locations/cities?state=${detectedIso}`)
+              fetched = cData.cities || []
+            }
+            if (fetched.length === 0 && detectedIso) {
+              fetched = FALLBACK_LOCATIONS.cities[detectedIso] || []
+            }
+            if (displayCity && !fetched.some((c) => c.name?.toLowerCase() === displayCity.toLowerCase())) {
+              fetched = [{ name: displayCity }, ...fetched]
+            }
+            setCitiesList(fetched.length > 0 ? fetched : displayCity ? [{ name: displayCity }] : [])
+          } catch (e) {
+            console.warn("Error fetching cities after auto detect:", e)
+            if (displayCity) {
+              setCitiesList([{ name: displayCity }])
+            }
+          }
+        } else if (displayCity) {
+          setCitiesList([{ name: displayCity }])
+        }
+
+        if (!state && !city) {
+          Alert.alert("Location Error", "Could not resolve your location. Please select manually.")
+        }
+      } else {
+        Alert.alert("Location Error", "Could not resolve your location. Please select manually.")
+      }
+    } catch (err) {
+      Alert.alert("Location Error", "Failed to detect location: " + err.message)
+    } finally {
+      setDetectingLocation(false)
+    }
+  }
  
   const [statePickerVisible, setStatePickerVisible] = useState(false)
   const [cityPickerVisible, setCityPickerVisible] = useState(false)
  
-  // Load location preference on mount
+  // Load and auto-detect location preference on mount
   useEffect(() => {
-    getLocationPreference().then((loc) => {
-      if (loc) {
-        setLocation(loc)
-        setTempState(loc.state)
-        setTempStateIso(loc.stateIso)
-        setTempCity(loc.city)
+    const startupLocation = async () => {
+      try {
+        const loc = await getLocationPreference()
+        if (loc && loc.state && loc.city) {
+          setLocation(loc)
+          setTempState(loc.state)
+          setTempStateIso(loc.stateIso)
+          setTempCity(loc.city)
+          setTempAddress(loc.address || "")
+          setTempPincode(loc.pincode || "")
+
+          // Silently refresh location in background if permission is already granted
+          const { status } = await Location.getForegroundPermissionsAsync()
+          if (status === "granted") {
+            const gpsLoc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+            const { latitude, longitude } = gpsLoc.coords
+            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`, {
+              headers: { "User-Agent": "Atleast80App/1.0" }
+            })
+            const data = await res.json()
+            if (data && data.address) {
+              const state = data.address.state || ""
+              const city = data.address.city || data.address.town || data.address.village || data.address.county || data.address.suburb || ""
+              const road = data.address.road || data.address.suburb || data.address.neighbourhood || ""
+              const houseNumber = data.address.house_number || ""
+              const postcode = data.address.postcode || ""
+
+              let streetAddress = [houseNumber, road].filter(Boolean).join(", ")
+              if (!streetAddress && data.display_name) {
+                streetAddress = data.display_name.split(",").slice(0, 2).map(s => s.trim()).join(", ")
+              }
+
+              if (state && city) {
+                const displayState = state.charAt(0).toUpperCase() + state.slice(1)
+                const displayCity = city.charAt(0).toUpperCase() + city.slice(1)
+
+                const matchedStateObj = FALLBACK_LOCATIONS.states.find(
+                  (s) => s.name.toLowerCase() === state.toLowerCase()
+                )
+                const stateIso = matchedStateObj ? matchedStateObj.iso2 : ""
+
+                if (displayState !== loc.state || displayCity !== loc.city || streetAddress !== loc.address) {
+                  const updated = await setLocationPreference({ 
+                    state: displayState, 
+                    city: displayCity, 
+                    stateIso,
+                    address: streetAddress,
+                    pincode: postcode
+                  })
+                  setLocation(updated)
+                  setTempState(displayState)
+                  setTempStateIso(stateIso)
+                  setTempCity(displayCity)
+                  setTempAddress(streetAddress)
+                  setTempPincode(postcode)
+                }
+              }
+            }
+          }
+        } else {
+          // First launch or no preference: Request location permission
+          const { status } = await Location.requestForegroundPermissionsAsync()
+          if (status === "granted") {
+            const gpsLoc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+            const { latitude, longitude } = gpsLoc.coords
+            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`, {
+              headers: { "User-Agent": "Atleast80App/1.0" }
+            })
+            const data = await res.json()
+            if (data && data.address) {
+              const state = data.address.state || ""
+              const city = data.address.city || data.address.town || data.address.village || data.address.county || data.address.suburb || ""
+              const road = data.address.road || data.address.suburb || data.address.neighbourhood || ""
+              const houseNumber = data.address.house_number || ""
+              const postcode = data.address.postcode || ""
+
+              let streetAddress = [houseNumber, road].filter(Boolean).join(", ")
+              if (!streetAddress && data.display_name) {
+                streetAddress = data.display_name.split(",").slice(0, 2).map(s => s.trim()).join(", ")
+              }
+
+              if (state && city) {
+                const displayState = state.charAt(0).toUpperCase() + state.slice(1)
+                const displayCity = city.charAt(0).toUpperCase() + city.slice(1)
+
+                const matchedStateObj = FALLBACK_LOCATIONS.states.find(
+                  (s) => s.name.toLowerCase() === state.toLowerCase()
+                )
+                const stateIso = matchedStateObj ? matchedStateObj.iso2 : ""
+
+                const updated = await setLocationPreference({ 
+                  state: displayState, 
+                  city: displayCity, 
+                  stateIso,
+                  address: streetAddress,
+                  pincode: postcode
+                })
+                setLocation(updated)
+                setTempState(displayState)
+                setTempStateIso(stateIso)
+                setTempCity(displayCity)
+                setTempAddress(streetAddress)
+                setTempPincode(postcode)
+                return
+              }
+            }
+          }
+          // Fallback to manual selection modal if permission denied or geocoding failed
+          setLocationModalVisible(true)
+        }
+      } catch (err) {
+        console.warn("Startup location load/auto-detect failed:", err)
+        setLocationModalVisible(true)
       }
-    })
+    }
+    startupLocation()
   }, [])
  
   // Load States list
@@ -243,16 +450,20 @@ export default function HomeScreen() {
       state: tempState,
       city: tempCity,
       stateIso: tempStateIso,
+      address: tempAddress,
+      pincode: tempPincode,
     })
     setLocation(next)
     setLocationModalVisible(false)
   }
  
   const handleClearLocation = async () => {
-    const next = await setLocationPreference({ state: "", city: "", stateIso: "" })
+    const next = await setLocationPreference({ state: "", city: "", stateIso: "", address: "", pincode: "" })
     setTempState("")
     setTempStateIso("")
     setTempCity("")
+    setTempAddress("")
+    setTempPincode("")
     setCitiesList([])
     setLocation(next)
     setLocationModalVisible(false)
@@ -403,9 +614,11 @@ export default function HomeScreen() {
             >
               <MapPin size={11} color="#0B6B3A" />
               <Text className="text-[10px] font-nunito font-semibold text-gray" numberOfLines={1}>
-                {location.city 
+                {location.address
+                  ? `${location.address} ▼`
+                  : location.city
                   ? `${location.city}, ${location.state} ▼`
-                  : location.state 
+                  : location.state
                     ? `${location.state} ▼`
                     : "Select Location ▼"}
               </Text>
@@ -1339,102 +1552,176 @@ export default function HomeScreen() {
               paddingHorizontal: 24, 
               paddingTop: 24, 
               paddingBottom: Platform.OS === "ios" ? 44 : 28, 
-              maxHeight: "80%" 
+              maxHeight: "85%" 
             }}
             onPress={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
               <Text style={{ fontSize: 18, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>Select Delivery Location</Text>
               <TouchableOpacity onPress={() => setLocationModalVisible(false)} style={{ padding: 4 }}>
                 <X size={20} color="#1F1F1F" />
               </TouchableOpacity>
             </View>
- 
-            {/* State Picker Box */}
-            <View style={{ marginBottom: 16 }}>
-              <Text style={{ fontSize: 13, fontWeight: "600", color: "#1F1F1F", fontFamily: "Poppins", marginBottom: 8 }}>State</Text>
+
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              {/* Auto Detect Button */}
               <TouchableOpacity
-                onPress={() => setStatePickerVisible(true)}
+                onPress={handleAutoDetectLocation}
+                disabled={detectingLocation}
                 style={{
                   flexDirection: "row",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  borderWidth: 2,
-                  borderColor: "#E8E8E8",
-                  borderRadius: 16,
-                  paddingHorizontal: 16,
-                  paddingVertical: 14,
-                  backgroundColor: "#FFFFFF",
-                }}
-              >
-                <Text style={{ fontSize: 14, color: "#1F1F1F", fontFamily: "Nunito" }}>
-                  {tempState || "Select State"}
-                </Text>
-                <ChevronDown size={16} color="#7A7A7A" />
-              </TouchableOpacity>
-            </View>
- 
-            {/* City Picker Box */}
-            <View style={{ marginBottom: 24 }}>
-              <Text style={{ fontSize: 13, fontWeight: "600", color: "#1F1F1F", fontFamily: "Poppins", marginBottom: 8 }}>City</Text>
-              <TouchableOpacity
-                disabled={!tempState}
-                onPress={() => setCityPickerVisible(true)}
-                style={{
-                  flexDirection: "row",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  borderWidth: 2,
-                  borderColor: tempState ? "#E8E8E8" : "#F5F5F3",
-                  borderRadius: 16,
-                  paddingHorizontal: 16,
-                  paddingVertical: 14,
-                  backgroundColor: tempState ? "#FFFFFF" : "#F5F5F3",
-                }}
-              >
-                <Text style={{ fontSize: 14, color: tempState ? "#1F1F1F" : "#7A7A7A", fontFamily: "Nunito" }}>
-                  {tempCity || "Select City"}
-                </Text>
-                <ChevronDown size={16} color="#7A7A7A" />
-              </TouchableOpacity>
-            </View>
- 
-            {/* Buttons Row */}
-            <View style={{ gap: 12 }}>
-              <TouchableOpacity
-                onPress={handleSaveLocation}
-                disabled={!tempState || !tempCity}
-                style={{
-                  backgroundColor: (!tempState || !tempCity) ? "#A3D3B8" : "#0B6B3A",
-                  borderRadius: 16,
-                  paddingVertical: 16,
                   alignItems: "center",
                   justifyContent: "center",
+                  backgroundColor: "#EAF7EE",
+                  borderRadius: 16,
+                  paddingVertical: 12,
+                  gap: 8,
+                  marginBottom: 16,
                 }}
               >
-                <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins", fontSize: 15 }}>
-                  Confirm Location
+                {detectingLocation ? (
+                  <ActivityIndicator size="small" color="#0B6B3A" />
+                ) : (
+                  <MapPin size={16} color="#0B6B3A" />
+                )}
+                <Text style={{ color: "#0B6B3A", fontWeight: "bold", fontFamily: "Poppins", fontSize: 14 }}>
+                  {detectingLocation ? "Detecting location..." : "Auto-Detect Current Location"}
                 </Text>
               </TouchableOpacity>
- 
-              {(location.state || location.city) ? (
+   
+              {/* State Picker Box */}
+              <View style={{ marginBottom: 16 }}>
+                <Text style={{ fontSize: 13, fontWeight: "600", color: "#1F1F1F", fontFamily: "Poppins", marginBottom: 8 }}>State</Text>
                 <TouchableOpacity
-                  onPress={handleClearLocation}
+                  onPress={() => setStatePickerVisible(true)}
                   style={{
-                    backgroundColor: "#F5F5F3",
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    borderWidth: 2,
+                    borderColor: "#E8E8E8",
+                    borderRadius: 16,
+                    paddingHorizontal: 16,
+                    paddingVertical: 14,
+                    backgroundColor: "#FFFFFF",
+                  }}
+                >
+                  <Text style={{ fontSize: 14, color: "#1F1F1F", fontFamily: "Nunito" }}>
+                    {tempState || "Select State"}
+                  </Text>
+                  <ChevronDown size={16} color="#7A7A7A" />
+                </TouchableOpacity>
+              </View>
+   
+              {/* City Picker Box */}
+              <View style={{ marginBottom: 16 }}>
+                <Text style={{ fontSize: 13, fontWeight: "600", color: "#1F1F1F", fontFamily: "Poppins", marginBottom: 8 }}>City</Text>
+                <TouchableOpacity
+                  disabled={!tempState}
+                  onPress={async () => {
+                    if (citiesList.length === 0 && tempState) {
+                      setCitiesLoading(true)
+                      try {
+                        let fetched = []
+                        if (tempStateIso) {
+                          const cData = await api(`/api/locations/cities?state=${tempStateIso}`)
+                          fetched = cData.cities || []
+                        }
+                        if (fetched.length === 0 && tempStateIso) {
+                          fetched = FALLBACK_LOCATIONS.cities[tempStateIso] || []
+                        }
+                        if (tempCity && !fetched.some((c) => c.name?.toLowerCase() === tempCity.toLowerCase())) {
+                          fetched = [{ name: tempCity }, ...fetched]
+                        }
+                        setCitiesList(fetched.length > 0 ? fetched : tempCity ? [{ name: tempCity }] : [])
+                      } catch (err) {
+                        setCitiesList(tempCity ? [{ name: tempCity }] : [])
+                      } finally {
+                        setCitiesLoading(false)
+                      }
+                    }
+                    setCityPickerVisible(true)
+                  }}
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    borderWidth: 2,
+                    borderColor: tempState ? "#E8E8E8" : "#F5F5F3",
+                    borderRadius: 16,
+                    paddingHorizontal: 16,
+                    paddingVertical: 14,
+                    backgroundColor: tempState ? "#FFFFFF" : "#F5F5F3",
+                  }}
+                >
+                  <Text style={{ fontSize: 14, color: tempState ? "#1F1F1F" : "#7A7A7A", fontFamily: "Nunito" }}>
+                    {tempCity || "Select City"}
+                  </Text>
+                  <ChevronDown size={16} color="#7A7A7A" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Exact Doorstep Address Input */}
+              <View style={{ marginBottom: 24 }}>
+                <Text style={{ fontSize: 13, fontWeight: "600", color: "#1F1F1F", fontFamily: "Poppins", marginBottom: 8 }}>
+                  Exact Doorstep Address (Optional)
+                </Text>
+                <TextInput
+                  value={tempAddress}
+                  onChangeText={setTempAddress}
+                  placeholder="Enter flat/house no, colony, landmark..."
+                  placeholderTextColor="#A3A3A3"
+                  style={{
+                    borderWidth: 2,
+                    borderColor: "#E8E8E8",
+                    borderRadius: 16,
+                    paddingHorizontal: 16,
+                    paddingVertical: 12,
+                    backgroundColor: "#FFFFFF",
+                    fontSize: 14,
+                    color: "#1F1F1F",
+                    fontFamily: "Nunito",
+                  }}
+                />
+              </View>
+   
+              {/* Buttons Row */}
+              <View style={{ gap: 12, paddingBottom: 16 }}>
+                <TouchableOpacity
+                  onPress={handleSaveLocation}
+                  disabled={!tempState || !tempCity}
+                  style={{
+                    backgroundColor: (!tempState || !tempCity) ? "#A3D3B8" : "#0B6B3A",
                     borderRadius: 16,
                     paddingVertical: 16,
                     alignItems: "center",
                     justifyContent: "center",
                   }}
                 >
-                  <Text style={{ color: "#EF4444", fontWeight: "bold", fontFamily: "Poppins", fontSize: 15 }}>
-                    Clear Filters
+                  <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins", fontSize: 15 }}>
+                    Confirm Location
                   </Text>
                 </TouchableOpacity>
-              ) : null}
-            </View>
+   
+                {(location.state || location.city) ? (
+                  <TouchableOpacity
+                    onPress={handleClearLocation}
+                    style={{
+                      backgroundColor: "#F5F5F3",
+                      borderRadius: 16,
+                      paddingVertical: 16,
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Text style={{ color: "#EF4444", fontWeight: "bold", fontFamily: "Poppins", fontSize: 15 }}>
+                      Clear Filters
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            </ScrollView>
           </Pressable>
         </Pressable>
       </Modal>
@@ -1473,10 +1760,13 @@ export default function HomeScreen() {
               {statesLoading ? (
                 <ActivityIndicator size="small" color="#0B6B3A" style={{ paddingVertical: 24 }} />
               ) : (
-                statesList.map((stateItem) => (
+                statesList.filter(s => s && s.name).map((stateItem) => (
                   <TouchableOpacity
-                    key={stateItem.iso2}
-                    onPress={() => handleSelectState(stateItem.name, stateItem.iso2)}
+                    key={stateItem.iso2 || stateItem.id || stateItem.name}
+                    onPress={() => {
+                      const code = stateItem.iso2 || (stateItem.id && stateItem.id.includes(":") ? stateItem.id.split(":")[1] : stateItem.id) || "";
+                      handleSelectState(stateItem.name, code);
+                    }}
                     style={{ paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: "#F5F5F3" }}
                   >
                     <Text style={{ fontSize: 16, color: "#1F1F1F", fontFamily: "Nunito" }}>{stateItem.name}</Text>

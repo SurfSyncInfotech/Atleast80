@@ -173,6 +173,70 @@ export async function connectDB() {
       console.error("❌ Auto-migration of delivery rider tables failed:", e.message)
     }
 
+    // Auto-migrate rider agreement columns in site_settings
+    try {
+      try {
+        await connection.query("ALTER TABLE site_settings ADD COLUMN rider_agreement_url VARCHAR(500) DEFAULT NULL")
+      } catch (_) {}
+      try {
+        await connection.query("ALTER TABLE site_settings ADD COLUMN rider_agreement_version INT NOT NULL DEFAULT 0")
+      } catch (_) {}
+      try {
+        await connection.query("ALTER TABLE site_settings ADD COLUMN rider_agreement_updated_at TIMESTAMP DEFAULT NULL")
+      } catch (_) {}
+      console.log("✅ Auto-migrated rider agreement columns in site_settings")
+    } catch (e) {
+      console.error("❌ Auto-migration of rider agreement columns failed:", e.message)
+    }
+
+    // Auto-migrate payment & settlement management tables
+    try {
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS rider_cash_remittances (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          rider_id INT NOT NULL,
+          amount DECIMAL(10, 2) NOT NULL,
+          utr_number VARCHAR(100) DEFAULT NULL,
+          status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
+          rejection_reason VARCHAR(255) DEFAULT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          verified_at TIMESTAMP DEFAULT NULL,
+          FOREIGN KEY (rider_id) REFERENCES riders(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `)
+
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS settlements (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          entity_type ENUM('kitchen', 'rider') NOT NULL,
+          entity_id INT NOT NULL,
+          period_type ENUM('daily', 'weekly', 'monthly') NOT NULL DEFAULT 'weekly',
+          period_start DATE NOT NULL,
+          period_end DATE NOT NULL,
+          gross_amount DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+          deductions_commissions DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+          cash_collected_deductions DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+          net_payout DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+          status ENUM('pending', 'paid') NOT NULL DEFAULT 'pending',
+          utr_number VARCHAR(100) DEFAULT NULL,
+          notes TEXT DEFAULT NULL,
+          paid_at TIMESTAMP DEFAULT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `)
+
+      try {
+        await connection.query("ALTER TABLE site_settings ADD COLUMN kitchen_payout_frequency VARCHAR(20) NOT NULL DEFAULT 'weekly'")
+      } catch (_) {}
+      try {
+        await connection.query("ALTER TABLE site_settings ADD COLUMN rider_payout_frequency VARCHAR(20) NOT NULL DEFAULT 'weekly'")
+      } catch (_) {}
+
+      console.log("✅ Auto-migrated payment & settlement tables and settings")
+    } catch (e) {
+      console.error("❌ Auto-migration of payment & settlement tables failed:", e.message)
+    }
+
     connection.release()
     console.log("✅ Database connected successfully")
     return pool

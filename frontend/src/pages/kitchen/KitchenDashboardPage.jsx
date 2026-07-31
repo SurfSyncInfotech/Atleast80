@@ -28,6 +28,22 @@ export default function KitchenDashboardPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [menuCount, setMenuCount] = useState(null)
   const [orderStats, setOrderStats] = useState({ todayOrders: 0, todayRevenue: 0, activeOrders: 0 })
+  const [payoutsModalOpen, setPayoutsModalOpen] = useState(false)
+  const [payoutsList, setPayoutsList] = useState([])
+  const [loadingPayouts, setLoadingPayouts] = useState(false)
+
+  const openPayoutsModal = async () => {
+    setPayoutsModalOpen(true)
+    setLoadingPayouts(true)
+    try {
+      const data = await api("/api/kitchens/me/payouts", {}, "kitchen")
+      setPayoutsList(data.payouts || [])
+    } catch (err) {
+      console.error("Failed to load payouts:", err)
+    } finally {
+      setLoadingPayouts(false)
+    }
+  }
 
   useEffect(() => { refreshKitchen().catch(() => {}) }, [refreshKitchen])
 
@@ -111,10 +127,11 @@ export default function KitchenDashboardPage() {
       </div>
 
       {isApproved && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 mb-6">
           {[
-            { label: "Today's Orders", value: String(orderStats.todayOrders), icon: ShoppingBag, gradient: "from-blue-500 to-indigo-600", iconBg: "bg-white/20" },
-            { label: "Revenue", value: `₹${orderStats.todayRevenue}`, icon: IndianRupee, gradient: "from-emerald-500 to-teal-600", iconBg: "bg-white/20" },
+            { label: "Today's Orders", value: String(orderStats.todayOrders || 0), icon: ShoppingBag, gradient: "from-blue-500 to-indigo-600", iconBg: "bg-white/20" },
+            { label: "Today's Revenue", value: `₹${orderStats.todayRevenue || 0}`, icon: IndianRupee, gradient: "from-emerald-500 to-teal-600", iconBg: "bg-white/20" },
+            { label: "Total Revenue", value: `₹${orderStats.totalRevenue || 0}`, icon: IndianRupee, gradient: "from-purple-500 to-violet-600", iconBg: "bg-white/20" },
             { label: "Rating", value: kitchen?.ratingVisible && kitchen?.rating ? Number(kitchen.rating).toFixed(1) : kitchen?.rating_count != null ? `${kitchen.rating_count}/10` : "—", icon: Star, gradient: "from-amber-400 to-orange-500", iconBg: "bg-white/25" },
             { label: "Menu Items", value: menuCount ?? "—", icon: UtensilsCrossed, gradient: "from-primary to-primary-dark", iconBg: "bg-white/20" },
           ].map((m) => {
@@ -190,7 +207,7 @@ export default function KitchenDashboardPage() {
             {[
               { icon: UtensilsCrossed, label: "Manage Menu", desc: "Add food & ration items", action: () => navigate("/kitchen/menu"), primary: true },
               { icon: ShoppingBag, label: "Orders", desc: `${orderStats.activeOrders} active`, action: () => navigate("/kitchen/orders"), primary: false },
-              { icon: IndianRupee, label: "Payouts", desc: "Coming soon", disabled: true },
+              { icon: IndianRupee, label: "Payouts & Settlements", desc: "View payout history", action: openPayoutsModal, primary: false },
             ].map((item) => {
               const Icon = item.icon
               return (
@@ -202,10 +219,10 @@ export default function KitchenDashboardPage() {
                   className={cn(
                     "rounded-xl border p-4 text-left transition-all",
                     item.disabled ? "opacity-50 cursor-not-allowed border-gray-100 bg-gray-50" : "cursor-pointer hover:shadow-md",
-                    item.primary ? "border-primary/30 bg-primary/5 hover:border-primary/50" : "border-gray-100 bg-white"
+                    item.primary ? "border-primary/30 bg-primary/5 hover:border-primary/50" : "border-gray-100 bg-white hover:bg-gray-50/80"
                   )}
                 >
-                  <Icon size={20} className={item.primary ? "text-primary" : "text-gray"} />
+                  <Icon size={20} className={item.primary ? "text-primary" : "text-emerald-700"} />
                   <p className="font-poppins font-semibold text-sm text-dark mt-2">{item.label}</p>
                   <p className="font-nunito text-xs text-gray mt-0.5">{item.desc}</p>
                 </button>
@@ -230,6 +247,89 @@ export default function KitchenDashboardPage() {
           >
             Edit profile <ChevronRight size={14} />
           </button>
+        </div>
+      )}
+
+      {/* Payouts History Modal */}
+      {payoutsModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl p-6 max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between pb-4 border-b border-gray-100">
+              <div>
+                <h3 className="font-poppins font-bold text-dark text-lg flex items-center gap-2">
+                  <IndianRupee className="text-emerald-600" size={22} /> Payout & Settlement History
+                </h3>
+                <p className="font-nunito text-xs text-gray mt-0.5">
+                  Record of all bank transfers and payouts credited by Admin.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPayoutsModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto py-4 flex-1 space-y-4">
+              {loadingPayouts ? (
+                <div className="text-center py-12">
+                  <RefreshCw size={24} className="animate-spin text-primary mx-auto mb-2" />
+                  <p className="font-nunito text-xs text-gray">Loading settlement history...</p>
+                </div>
+              ) : payoutsList.length === 0 ? (
+                <div className="text-center py-12 bg-gray-50 rounded-xl">
+                  <IndianRupee size={36} className="text-gray-300 mx-auto mb-2" />
+                  <p className="font-nunito text-gray text-sm">No payout settlements recorded yet.</p>
+                  <p className="font-nunito text-xs text-gray-400 mt-1">Admin payouts will appear here with Date and UTR Reference number once processed.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-gray-100 bg-gray-50 text-[11px] font-poppins font-bold text-gray uppercase tracking-wider">
+                        <th className="py-3 px-4">Paid Date</th>
+                        <th className="py-3 px-4">Gross Sales</th>
+                        <th className="py-3 px-4">Comm. (10%)</th>
+                        <th className="py-3 px-4">Net Received</th>
+                        <th className="py-3 px-4">UTR Reference</th>
+                        <th className="py-3 px-4">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50 font-nunito text-xs text-dark">
+                      {payoutsList.map((p) => (
+                        <tr key={p.id} className="hover:bg-gray-50/50">
+                          <td className="py-3.5 px-4 text-gray font-medium">
+                            {p.paidAt ? new Date(p.paidAt).toLocaleString("en-IN") : "—"}
+                          </td>
+                          <td className="py-3.5 px-4 font-semibold text-dark">₹{p.grossAmount}</td>
+                          <td className="py-3.5 px-4 text-red-600 font-medium">-₹{p.commissionDeduction}</td>
+                          <td className="py-3.5 px-4 font-poppins font-bold text-emerald-700 text-sm">₹{p.netPayout}</td>
+                          <td className="py-3.5 px-4 font-mono font-bold text-dark">{p.utrNumber || "—"}</td>
+                          <td className="py-3.5 px-4">
+                            <span className="bg-emerald-100 text-emerald-800 font-poppins font-bold text-[10px] px-2.5 py-0.5 rounded-full uppercase">
+                              Paid ✅
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="pt-3 border-t border-gray-100 text-right">
+              <button
+                type="button"
+                onClick={() => setPayoutsModalOpen(false)}
+                className="px-5 py-2 rounded-xl bg-gray-100 font-poppins font-semibold text-xs text-dark hover:bg-gray-200 cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </KitchenLayout>

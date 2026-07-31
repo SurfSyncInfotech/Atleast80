@@ -99,6 +99,20 @@ export function AuthProvider({ children }) {
     return data
   }
 
+  const sendKitchenForgotPasswordOtp = async (phone) => {
+    return api("/api/auth/kitchen/forgot-password/send-otp", {
+      method: "POST",
+      body: JSON.stringify({ phone }),
+    }, "kitchen")
+  }
+
+  const resetKitchenPassword = async ({ userId, otp, password }) => {
+    return api("/api/auth/kitchen/forgot-password/reset", {
+      method: "POST",
+      body: JSON.stringify({ userId, otp, password }),
+    }, "kitchen")
+  }
+
   const loginAdmin = async (email, password) => {
     const data = await api("/api/auth/admin/login", {
       method: "POST",
@@ -124,10 +138,12 @@ export function AuthProvider({ children }) {
     }, "customer")
   }
 
-  const loginCustomer = async (email, password) => {
+  const loginCustomer = async (identifier, password) => {
+    const isPhone = /^[6-9]\d{9}$/.test(identifier.replace(/\D/g, ""))
+    const body = isPhone ? { phone: identifier.replace(/\D/g, ""), password } : { email: identifier.toLowerCase(), password }
     const data = await api("/api/auth/customer/login", {
       method: "POST",
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify(body),
     }, "customer")
 
     if (data.requiresOtp) {
@@ -138,26 +154,48 @@ export function AuthProvider({ children }) {
     return data
   }
 
-  const verifyLoginOtp = async (email, password, otp) => {
+  const verifyLoginOtp = async (identifier, password, otp) => {
+    const isPhone = /^[6-9]\d{9}$/.test(identifier.replace(/\D/g, ""))
+    const body = isPhone ? { phone: identifier.replace(/\D/g, ""), password, otp } : { email: identifier.toLowerCase(), password, otp }
     const data = await api("/api/auth/customer/login/verify-otp", {
       method: "POST",
-      body: JSON.stringify({ email, password, otp }),
+      body: JSON.stringify(body),
     }, "customer")
     persistRole("customer", { token: data.token, user: data.user, kitchen: null })
     return data
   }
 
-  const sendForgotPasswordOtp = async (email) => {
+  const sendForgotPasswordOtp = async (phoneOrEmail) => {
+    const isEmail = phoneOrEmail.includes("@")
+    const body = isEmail ? { email: phoneOrEmail } : { phone: phoneOrEmail }
     return api("/api/auth/customer/forgot-password/send-otp", {
       method: "POST",
-      body: JSON.stringify({ email }),
+      body: JSON.stringify(body),
     }, "customer")
   }
 
-  const resetPassword = async ({ email, otp, password }) => {
+  const verifySignupOtp = async (userId, otp) => {
+    return api("/api/auth/customer/register/verify-otp", {
+      method: "POST",
+      body: JSON.stringify({ userId, otp }),
+    }, "customer")
+  }
+
+  const resendSignupOtp = async (userId) => {
+    return api("/api/auth/customer/register/resend-otp", {
+      method: "POST",
+      body: JSON.stringify({ userId }),
+    }, "customer")
+  }
+
+  const resetPassword = async ({ phoneOrEmail, otp, password }) => {
+    const isEmail = phoneOrEmail.includes("@")
+    const body = isEmail 
+      ? { email: phoneOrEmail, otp, password } 
+      : { phone: phoneOrEmail, otp, password }
     return api("/api/auth/customer/forgot-password/reset", {
       method: "POST",
-      body: JSON.stringify({ email, otp, password }),
+      body: JSON.stringify(body),
     }, "customer")
   }
 
@@ -255,9 +293,13 @@ export function AuthProvider({ children }) {
       verifyKitchenLoginOtp,
       registerKitchen,
       verifyKitchenRegisterOtp,
+      sendKitchenForgotPasswordOtp,
+      resetKitchenPassword,
       loginAdmin,
       registerCustomer,
       signupCustomer,
+      verifySignupOtp,
+      resendSignupOtp,
       loginCustomer,
       verifyLoginOtp,
       sendForgotPasswordOtp,

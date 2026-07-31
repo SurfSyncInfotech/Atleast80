@@ -1,0 +1,196 @@
+import { useState } from "react"
+import { Link, useNavigate } from "react-router-dom"
+import { motion, AnimatePresence } from "framer-motion"
+import { ArrowLeft, Phone, Lock, ArrowRight } from "lucide-react"
+import Button from "../../components/ui/Button"
+import PasswordInput from "../../components/ui/PasswordInput"
+import { useAuth } from "../../context/AuthContext"
+
+export default function KitchenForgotPasswordPage() {
+  const navigate = useNavigate()
+  const { sendKitchenForgotPasswordOtp, resetKitchenPassword } = useAuth()
+  const [step, setStep] = useState("phone")
+  const [phone, setPhone] = useState("")
+  const [userId, setUserId] = useState(null)
+  const [otp, setOtp] = useState(["", "", "", ""])
+  const [password, setPassword] = useState("")
+  const [hint, setHint] = useState("")
+  const [error, setError] = useState("")
+  const [success, setSuccess] = useState("")
+  const [loading, setLoading] = useState(false)
+
+  const otpValue = otp.join("")
+
+  const handleSendOtp = async (e) => {
+    e.preventDefault()
+    if (!/^[6-9]\d{9}$/.test(phone)) {
+      setError("Enter a valid 10-digit Indian mobile number")
+      return
+    }
+    setError("")
+    setLoading(true)
+    try {
+      const data = await sendKitchenForgotPasswordOtp(phone)
+      setUserId(data.userId)
+      setHint(data.phoneHint)
+      setStep("otp")
+    } catch (err) {
+      setError(err.message || "Failed to send OTP")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleReset = async (e) => {
+    e.preventDefault()
+    if (otp.some((d) => !d) || password.length < 6) {
+      setError("Please complete OTP and enter a password (min 6 chars)")
+      return
+    }
+    setError("")
+    setLoading(true)
+    try {
+      await resetKitchenPassword({ userId, otp: otpValue, password })
+      setSuccess("Password updated! Redirecting to login...")
+      setTimeout(() => navigate("/kitchen/login"), 2000)
+    } catch (err) {
+      setError(err.message || "Failed to reset password")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleOtpChange = (index, value) => {
+    if (!/^\d?$/.test(value)) return
+    const next = [...otp]
+    next[index] = value
+    setOtp(next)
+    if (value && index < 3) document.getElementById(`kfp-otp-${index + 1}`)?.focus()
+  }
+
+  return (
+    <div className="min-h-screen bg-cream flex items-center justify-center px-4 py-10">
+      <div className="w-full max-w-md bg-white/95 border border-gray-100 shadow-2xl rounded-[2rem] p-8 md:p-10">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="inline-flex items-center gap-2 rounded-full bg-secondary/10 text-secondary text-xs font-semibold uppercase tracking-[0.25em] px-3 py-1">
+              Password help
+            </p>
+            <h1 className="font-poppins font-bold text-3xl text-dark mt-5">Reset password</h1>
+            <p className="font-nunito text-gray text-sm mt-3 leading-6">
+              {step === "phone"
+                ? "Enter your registered phone number and we'll send an OTP to verify your identity."
+                : `OTP sent to ${hint || "your phone"}. Enter the code and set a new password.`}
+            </p>
+          </div>
+
+          <button
+            onClick={() => (step === "otp" ? setStep("phone") : navigate("/kitchen/login"))}
+            className="w-11 h-11 rounded-2xl bg-white border border-gray-light flex items-center justify-center text-dark shadow-sm hover:shadow-md transition-shadow duration-200"
+            aria-label="Go back"
+          >
+            <ArrowLeft size={18} />
+          </button>
+        </div>
+
+        {error && (
+          <div className="mt-6 rounded-3xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 font-nunito animate-shake">
+            {error}
+          </div>
+        )}
+        {success && (
+          <div className="mt-6 rounded-3xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700 font-nunito">
+            {success}
+          </div>
+        )}
+
+        <AnimatePresence mode="wait">
+          {step === "phone" ? (
+            <motion.form
+              key="phone"
+              onSubmit={handleSendOtp}
+              className="mt-8 space-y-5"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -16 }}
+            >
+              <div>
+                <label className="font-poppins font-medium text-sm text-dark block mb-2">Phone Number</label>
+                <div className="relative">
+                  <Phone size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray" />
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                    placeholder="Enter 10-digit number"
+                    maxLength={10}
+                    className="w-full pl-12 pr-4 py-4 bg-white rounded-[1.5rem] border border-gray-200 font-nunito text-sm text-dark focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 shadow-sm"
+                    required
+                  />
+                </div>
+              </div>
+
+              <Button type="submit" size="lg" className="w-full" disabled={loading}>
+                {loading ? "Sending..." : "Send OTP"}
+                <ArrowRight size={18} />
+              </Button>
+            </motion.form>
+          ) : (
+            <motion.form
+              key="reset"
+              onSubmit={handleReset}
+              className="mt-8 space-y-5"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -16 }}
+            >
+              <div className="grid grid-cols-4 gap-3 justify-center">
+                {otp.map((digit, i) => (
+                  <input
+                    key={i}
+                    id={`kfp-otp-${i}`}
+                    type="tel"
+                    maxLength={1}
+                    value={digit}
+                    onChange={(e) => handleOtpChange(i, e.target.value)}
+                    className="w-full h-14 bg-white rounded-3xl border border-gray-200 text-center text-2xl font-poppins font-bold focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 shadow-sm"
+                  />
+                ))}
+              </div>
+
+              <div>
+                <label className="font-poppins font-medium text-sm text-dark block mb-2">New password</label>
+                <div className="relative">
+                  <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray z-10" />
+                  <PasswordInput
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="At least 6 characters"
+                    className="pl-12"
+                    required
+                    minLength={6}
+                  />
+                </div>
+              </div>
+
+              <Button
+                type="submit"
+                size="lg"
+                className="w-full"
+                disabled={loading || otp.some((d) => !d) || password.length < 6}
+              >
+                {loading ? "Updating..." : "Reset password"}
+              </Button>
+            </motion.form>
+          )}
+        </AnimatePresence>
+
+        <p className="font-nunito text-sm text-gray mt-7 text-center">
+          <Link to="/kitchen/login" className="text-primary font-semibold hover:underline">
+            Back to sign in
+          </Link>
+        </p>
+      </div>
+    </div>
+  )
+}

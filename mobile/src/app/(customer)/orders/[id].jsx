@@ -108,22 +108,36 @@ export default function OrderTrackingScreen() {
   }, [order, loadOrder])
 
   const handleCancelOrder = async () => {
+    const isOutForDelivery = order.status === "out_for_delivery"
+    const title = isOutForDelivery ? "Cancel Out-For-Delivery Order" : "Cancel Order"
+    const message = isOutForDelivery 
+      ? `This order is already out for delivery. To cancel, you must pay the delivery fee of ₹${order.deliveryFee || 30} online immediately. Do you want to pay and cancel?`
+      : "Are you sure you want to cancel this order?"
+
     Alert.alert(
-      "Cancel Order",
-      "Are you sure you want to cancel this order?",
+      title,
+      message,
       [
         { text: "No", style: "cancel" },
         {
-          text: "Yes, Cancel",
+          text: isOutForDelivery ? "Pay & Cancel" : "Yes, Cancel",
           style: "destructive",
           onPress: async () => {
             setCancelling(true)
             try {
+              const body = isOutForDelivery ? { payOnline: true } : {}
               const data = await api(`/api/orders/${order.id}/cancel`, {
                 method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body)
               })
               setOrder(data.order)
-              Alert.alert("Success", "Order cancelled successfully")
+              Alert.alert(
+                "Success", 
+                isOutForDelivery 
+                  ? "Cancellation fee paid successfully. Order cancelled." 
+                  : "Order cancelled successfully"
+              )
             } catch (err) {
               Alert.alert("Error", err.message || "Failed to cancel order")
             } finally {
@@ -483,7 +497,7 @@ export default function OrderTrackingScreen() {
           ) : null}
         </View>
 
-        {["pending", "confirmed", "preparing"].includes(order.status) && (
+        {["pending", "confirmed", "preparing", "out_for_delivery"].includes(order.status) && (
           <TouchableOpacity
             onPress={handleCancelOrder}
             disabled={cancelling}

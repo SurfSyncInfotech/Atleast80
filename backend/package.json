@@ -31,6 +31,7 @@
     "migrate:v21": "node scripts/migrateV21.js",
     "migrate:v22": "node scripts/migrateV22.js",
     "migrate:v23": "node scripts/migrateV23.js",
+    "migrate:v24": "node scripts/migrateV24.js",
     "cleanup:kitchens": "node scripts/cleanupKitchens.js",
     "fix:http-urls": "node scripts/fixHttpMediaUrls.js"
   },

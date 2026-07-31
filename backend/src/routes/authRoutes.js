@@ -143,33 +143,101 @@ router.post("/customer/register", async (req, res) => {
     const token = signToken({ id: userId, role: "customer" })
     const user = { id: userId, name, email, phone, address: null, city: null, pincode: null, role: "customer" }
 
-    res.status(201).json({
-      message: "Account created successfully",
+    await createAndSendOtp(`register:${userId}`, phone)
+
+    const payload = {
+      message: "Registration successful. Verification OTP sent.",
+      requiresOtp: true,
+      userId,
       token,
       user,
-    })
+    }
+    const demoOtp = getDemoOtp()
+    if (demoOtp) payload.demoOtp = demoOtp
+
+    res.status(201).json(payload)
   } catch (error) {
     console.error("Customer register error:", error)
     res.status(500).json({ message: "Registration failed" })
   }
 })
 
-router.post("/customer/login", async (req, res) => {
-  const email = req.body.email?.toString().trim().toLowerCase()
-  const password = req.body.password?.toString() || ""
+router.post("/customer/register/verify-otp", async (req, res) => {
+  const { userId, otp } = req.body
 
-  if (!email || !password) {
-    return res.status(400).json({ message: "Email and password are required" })
+  if (!userId || !otp || otp.length !== 4) {
+    return res.status(400).json({ message: "User ID and 4-digit OTP are required" })
   }
 
   try {
+    const [users] = await pool.query("SELECT * FROM users WHERE id = ? AND role = 'customer'", [userId])
+    if (users.length === 0) {
+      return res.status(404).json({ message: "User not found" })
+    }
+
+    if (!checkOtp(`register:${userId}`, otp)) {
+      return res.status(401).json({ message: "Invalid or expired OTP" })
+    }
+
+    await pool.query("UPDATE users SET phone_verified = 1 WHERE id = ?", [userId])
+    consumeOtp(`register:${userId}`)
+
+    res.json({ message: "Phone number verified successfully" })
+  } catch (error) {
+    console.error("Customer register verify OTP error:", error)
+    res.status(500).json({ message: "Failed to verify OTP" })
+  }
+})
+
+router.post("/customer/register/resend-otp", async (req, res) => {
+  const { userId } = req.body
+  if (!userId) {
+    return res.status(400).json({ message: "User ID is required" })
+  }
+
+  try {
+    const [users] = await pool.query("SELECT id, phone FROM users WHERE id = ? AND role = 'customer'", [userId])
+    if (users.length === 0) {
+      return res.status(404).json({ message: "User not found" })
+    }
+
+    const phone = users[0].phone
+    await createAndSendOtp(`register:${userId}`, phone)
+
+    const payload = {
+      message: "OTP sent to your registered phone number",
+      phoneHint: `******${phone.slice(-4)}`,
+    }
+    const demoOtp = getDemoOtp()
+    if (demoOtp) payload.demoOtp = demoOtp
+
+    res.json(payload)
+  } catch (error) {
+    console.error("Customer register resend OTP error:", error)
+    res.status(500).json({ message: "Failed to resend OTP" })
+  }
+})
+
+router.post("/customer/login", async (req, res) => {
+  const identifier = req.body.email?.toString().trim() || req.body.phone?.toString().trim() || ""
+  const password = req.body.password?.toString() || ""
+
+  if (!identifier || !password) {
+    return res.status(400).json({ message: "Email/phone and password are required" })
+  }
+
+  const isPhone = /^[6-9]\d{9}$/.test(identifier)
+  const normalizedIdentifier = isPhone ? normalizeIndianPhone(identifier) : identifier.toLowerCase()
+
+  try {
+    const column = isPhone ? "phone" : "email"
     const [users] = await pool.query(
-      "SELECT * FROM users WHERE email = ? AND role = 'customer'",
-      [email]
+      `SELECT * FROM users WHERE ${column} = ? AND role = 'customer'`,
+      [normalizedIdentifier]
     )
 
     if (users.length === 0) {
-      return res.status(401).json({ message: "Invalid email or password" })
+      return res.status(401).json({ message: "Invalid credentials" })
     }
 
     const user = users[0]
@@ -185,7 +253,7 @@ router.post("/customer/login", async (req, res) => {
       return res.status(401).json({ message: "Invalid email or password" })
     }
 
-    if (!user.phone_verified) {
+    if (!user.account_verified) {
       const phone = user.phone
       const phoneError = phone ? validateIndianPhone(phone) : "No phone number on account"
       if (phoneError) {
@@ -206,7 +274,6 @@ router.post("/customer/login", async (req, res) => {
     }
 
     const token = signToken({ id: user.id, role: "customer" })
-
     res.json({
       message: "Login successful",
       token,
@@ -219,25 +286,29 @@ router.post("/customer/login", async (req, res) => {
 })
 
 router.post("/customer/login/verify-otp", async (req, res) => {
-  const email = req.body.email?.toString().trim().toLowerCase()
+  const identifier = req.body.email?.toString().trim() || req.body.phone?.toString().trim() || ""
   const password = req.body.password?.toString() || ""
   const otp = req.body.otp?.toString().trim()
 
-  if (!email || !password) {
-    return res.status(400).json({ message: "Email and password are required" })
+  if (!identifier || !password) {
+    return res.status(400).json({ message: "Email/phone and password are required" })
   }
   if (!otp || otp.length !== 4) {
     return res.status(400).json({ message: "Enter the 4-digit OTP" })
   }
 
+  const isPhone = /^[6-9]\d{9}$/.test(identifier)
+  const normalizedIdentifier = isPhone ? normalizeIndianPhone(identifier) : identifier.toLowerCase()
+
   try {
+    const column = isPhone ? "phone" : "email"
     const [users] = await pool.query(
-      "SELECT * FROM users WHERE email = ? AND role = 'customer'",
-      [email]
+      `SELECT * FROM users WHERE ${column} = ? AND role = 'customer'`,
+      [normalizedIdentifier]
     )
 
     if (users.length === 0) {
-      return res.status(401).json({ message: "Invalid email or password" })
+      return res.status(401).json({ message: "Invalid credentials" })
     }
 
     const user = users[0]
@@ -258,8 +329,8 @@ router.post("/customer/login/verify-otp", async (req, res) => {
     }
 
     consumeOtp(`login:${user.id}`)
-    await pool.query("UPDATE users SET phone_verified = 1 WHERE id = ?", [user.id])
-    user.phone_verified = 1
+    await pool.query("UPDATE users SET account_verified = 1 WHERE id = ?", [user.id])
+    user.account_verified = 1
 
     const token = signToken({ id: user.id, role: "customer" })
 
@@ -275,32 +346,41 @@ router.post("/customer/login/verify-otp", async (req, res) => {
 })
 
 router.post("/customer/forgot-password/send-otp", async (req, res) => {
+  const phone = req.body.phone?.toString().trim()
   const email = req.body.email?.toString().trim().toLowerCase()
 
-  if (!email) {
-    return res.status(400).json({ message: "Email is required" })
+  if (!phone && !email) {
+    return res.status(400).json({ message: "Phone number or email is required" })
   }
 
   try {
-    const [users] = await pool.query(
-      "SELECT id, phone FROM users WHERE email = ? AND role = 'customer'",
-      [email]
-    )
-
-    if (users.length === 0) {
-      return res.status(404).json({ message: "No customer account found with this email" })
+    let query = "SELECT id, phone FROM users WHERE role = 'customer'"
+    const params = []
+    if (phone) {
+      query += " AND phone = ?"
+      params.push(phone)
+    } else {
+      query += " AND email = ?"
+      params.push(email)
     }
 
-    const phone = users[0].phone
-    if (!phone) {
+    const [users] = await pool.query(query, params)
+
+    if (users.length === 0) {
+      return res.status(404).json({ message: phone ? "No customer account found with this phone number" : "No customer account found with this email" })
+    }
+
+    const userPhone = users[0].phone || phone
+    if (!userPhone) {
       return res.status(400).json({ message: "No phone number linked to this account" })
     }
 
-    await createAndSendOtp(`reset:${phone}`, phone)
+    await createAndSendOtp(`reset:${userPhone}`, userPhone)
 
     const payload = {
       message: "OTP sent to your registered phone number",
-      phoneHint: `******${phone.slice(-4)}`,
+      phoneHint: `******${userPhone.slice(-4)}`,
+      phoneOrEmail: phone || email,
     }
     const demoOtp = getDemoOtp()
     if (demoOtp) payload.demoOtp = demoOtp
@@ -313,35 +393,43 @@ router.post("/customer/forgot-password/send-otp", async (req, res) => {
 })
 
 router.post("/customer/forgot-password/reset", async (req, res) => {
+  const phone = req.body.phone?.toString().trim()
   const email = req.body.email?.toString().trim().toLowerCase()
   const otp = req.body.otp?.toString().trim()
   const password = req.body.password?.toString() || ""
 
-  if (!email || !otp || otp.length !== 4) {
-    return res.status(400).json({ message: "Email and 4-digit OTP are required" })
+  if ((!phone && !email) || !otp || otp.length !== 4) {
+    return res.status(400).json({ message: "Identifier and 4-digit OTP are required" })
   }
   if (password.length < 6) {
     return res.status(400).json({ message: "Password must be at least 6 characters" })
   }
 
   try {
-    const [users] = await pool.query(
-      "SELECT id, phone FROM users WHERE email = ? AND role = 'customer'",
-      [email]
-    )
+    let query = "SELECT id, phone FROM users WHERE role = 'customer'"
+    const params = []
+    if (phone) {
+      query += " AND phone = ?"
+      params.push(phone)
+    } else {
+      query += " AND email = ?"
+      params.push(email)
+    }
+
+    const [users] = await pool.query(query, params)
 
     if (users.length === 0) {
       return res.status(404).json({ message: "Account not found" })
     }
 
-    const phone = users[0].phone
-    if (!checkOtp(`reset:${phone}`, otp)) {
+    const userPhone = users[0].phone || phone
+    if (!checkOtp(`reset:${userPhone}`, otp)) {
       return res.status(401).json({ message: "Invalid or expired OTP" })
     }
 
     const hash = await bcrypt.hash(password, 10)
     await pool.query("UPDATE users SET password_hash = ? WHERE id = ?", [hash, users[0].id])
-    consumeOtp(`reset:${phone}`)
+    consumeOtp(`reset:${userPhone}`)
 
     res.json({ message: "Password updated successfully. You can log in now." })
   } catch (error) {
@@ -627,7 +715,7 @@ router.post("/kitchen/register/verify-otp", async (req, res) => {
 
     consumeOtp(cacheKey)
 
-    // Verify phone/email in db
+    // Verify phone/email in db (account_verified stays 0 so first login still requires OTP)
     await pool.query("UPDATE users SET phone_verified = 1 WHERE id = ?", [userId])
 
     res.json({
@@ -658,14 +746,13 @@ router.post("/kitchen/login", async (req, res) => {
     }
 
     const user = users[0]
-    if (user.status !== 'active') {
-      return res.status(403).json({ message: `Your account is ${user.status}. Please contact support.` })
-    }
+
     const valid = await bcrypt.compare(password, user.password_hash)
     if (!valid) {
       return res.status(401).json({ message: "Invalid credentials" })
     }
 
+    // First login: account_verified = 0 means OTP required (separate from signup phone_verified)
     if (!user.account_verified) {
       const payload = { requiresOtp: true }
 
@@ -687,6 +774,7 @@ router.post("/kitchen/login", async (req, res) => {
       return res.json(payload)
     }
 
+    // Subsequent logins: allowed regardless of status (pending kitchens can still login)
     const token = signToken({ id: user.id, role: "kitchen", kitchenId: user.kitchen_id })
 
     res.json({
@@ -724,9 +812,6 @@ router.post("/kitchen/login/verify-otp", async (req, res) => {
     }
 
     const user = users[0]
-    if (user.status !== 'active') {
-      return res.status(403).json({ message: `Your account is ${user.status}. Please contact support.` })
-    }
     const valid = await bcrypt.compare(password, user.password_hash)
     if (!valid) {
       return res.status(401).json({ message: "Invalid credentials" })
@@ -737,8 +822,8 @@ router.post("/kitchen/login/verify-otp", async (req, res) => {
     }
 
     consumeOtp(`login:${user.id}`)
+    // Mark first login as done
     await pool.query("UPDATE users SET account_verified = 1 WHERE id = ?", [user.id])
-    user.account_verified = 1
 
     const token = signToken({ id: user.id, role: "kitchen", kitchenId: user.kitchen_id })
 
@@ -870,29 +955,37 @@ router.post("/rider/register", (req, res) => {
     try {
       await connection.beginTransaction()
 
-      // Log details to local file
-      const fs = await import("fs")
-      const path = await import("path")
-      const logFilePath = path.join(process.cwd(), "rider_debug.log")
-      
-      const logMsg = `\n--- [${new Date().toISOString()}] ---\nRequest email: ${email}, phone: ${phone}\n`
-      fs.appendFileSync(logFilePath, logMsg)
-
       if (email) {
-        const [existingEmail] = await connection.query("SELECT id FROM users WHERE email = ?", [email])
-        fs.appendFileSync(logFilePath, `Email check for ${email}: ${JSON.stringify(existingEmail)}\n`)
+        const [existingEmail] = await connection.query(
+          "SELECT id, role, account_verified FROM users WHERE email = ?", [email]
+        )
         if (existingEmail.length > 0) {
-          await connection.rollback()
-          return res.status(409).json({ message: "This email address is already registered. Please log in instead." })
+          const existing = existingEmail[0]
+          if (existing.role === "rider" && !existing.account_verified) {
+            // Stale unverified signup — clean it up and allow re-registration
+            await connection.query("DELETE FROM riders WHERE user_id = ?", [existing.id])
+            await connection.query("DELETE FROM users WHERE id = ?", [existing.id])
+          } else {
+            await connection.rollback()
+            return res.status(409).json({ message: "This email address is already registered. Please log in instead." })
+          }
         }
       }
 
       if (phone) {
-        const [existingPhone] = await connection.query("SELECT id FROM users WHERE phone = ?", [phone])
-        fs.appendFileSync(logFilePath, `Phone check for ${phone}: ${JSON.stringify(existingPhone)}\n`)
+        const [existingPhone] = await connection.query(
+          "SELECT id, role, account_verified FROM users WHERE phone = ?", [phone]
+        )
         if (existingPhone.length > 0) {
-          await connection.rollback()
-          return res.status(409).json({ message: "This phone number is already registered. Please log in instead." })
+          const existing = existingPhone[0]
+          if (existing.role === "rider" && !existing.account_verified) {
+            // Stale unverified signup — clean it up and allow re-registration
+            await connection.query("DELETE FROM riders WHERE user_id = ?", [existing.id])
+            await connection.query("DELETE FROM users WHERE id = ?", [existing.id])
+          } else {
+            await connection.rollback()
+            return res.status(409).json({ message: "This phone number is already registered. Please log in instead." })
+          }
         }
       }
 
@@ -927,9 +1020,9 @@ router.post("/rider/register", (req, res) => {
 
       await connection.commit()
 
-      // Generate verification OTP
-      const otpCode = await createAndSendOtp(`register:${userId}`, phone || email)
-      const demoOtp = getDemoOtp(otpCode)
+      // Generate verification OTP — pass object so SMS/email is routed correctly
+      await createAndSendOtp(`register:${userId}`, phone ? { phone } : { email })
+      const demoOtp = getDemoOtp()
 
       res.status(201).json({
         message: "Rider registration successful. Verification OTP sent.",
@@ -947,7 +1040,7 @@ router.post("/rider/register", (req, res) => {
   })
 })
 
-// Rider verify OTP
+// Rider verify registration OTP
 router.post("/rider/register/verify-otp", async (req, res) => {
   const { userId, otp } = req.body
 
@@ -962,7 +1055,8 @@ router.post("/rider/register/verify-otp", async (req, res) => {
     }
 
     consumeOtp(`register:${userId}`)
-    await pool.query("UPDATE users SET account_verified = 1 WHERE id = ?", [userId])
+    // Mark phone/email as verified — first login will still require OTP
+    await pool.query("UPDATE users SET phone_verified = 1 WHERE id = ?", [userId])
 
     res.json({
       message: "OTP verified successfully. Your account is submitted for Admin review.",
@@ -986,7 +1080,7 @@ router.post("/rider/login", async (req, res) => {
       `SELECT u.*, r.id AS rider_id, r.status AS rider_status, r.is_online AS rider_online
        FROM users u
        JOIN riders r ON u.id = r.user_id
-       WHERE (u.email = ? OR u.phone = ?) AND u.role = 'rider'`,
+       WHERE (LOWER(u.email) = ? OR u.phone = ?) AND u.role = 'rider'`,
       [identifier.toLowerCase().trim(), identifier.trim()]
     )
 
@@ -995,27 +1089,35 @@ router.post("/rider/login", async (req, res) => {
     }
 
     const user = users[0]
-    if (user.status !== 'active') {
-      return res.status(403).json({ message: `Your account is ${user.status}. Please contact support.` })
-    }
 
     const valid = await bcrypt.compare(password, user.password_hash)
     if (!valid) {
       return res.status(401).json({ message: "Invalid credentials" })
     }
 
+    // First login: account_verified = 0 means OTP required (separate from signup phone_verified)
     if (!user.account_verified) {
-      // Send register verification OTP again
-      const otpCode = await createAndSendOtp(`register:${user.id}`, user.phone || user.email)
-      const demoOtp = getDemoOtp(otpCode)
-      return res.json({
-        requiresOtp: true,
-        userId: user.id,
-        demoOtp,
-        message: "Account not verified. Verification OTP sent.",
-      })
+      const payload = { requiresOtp: true, userId: user.id }
+
+      if (user.phone) {
+        await createAndSendOtp(`login:${user.id}`, { phone: user.phone })
+        payload.channel = "phone"
+        payload.message = "OTP sent to your registered phone number"
+        payload.phoneHint = `******${user.phone.slice(-4)}`
+      } else {
+        await createAndSendOtp(`login:${user.id}`, { email: user.email })
+        payload.channel = "email"
+        payload.message = "OTP sent to your registered email address"
+        payload.emailHint = user.email.replace(/^(.{2}).*(@.*)$/, "$1***$2")
+      }
+
+      const demoOtp = getDemoOtp()
+      if (demoOtp) payload.demoOtp = demoOtp
+
+      return res.json(payload)
     }
 
+    // Subsequent logins: allowed regardless of status (pending riders can still login)
     const token = signToken({ id: user.id, role: "rider", riderId: user.rider_id })
 
     res.json({
@@ -1027,6 +1129,96 @@ router.post("/rider/login", async (req, res) => {
   } catch (error) {
     console.error("Rider login error:", error)
     res.status(500).json({ message: "Login failed" })
+  }
+})
+
+// Rider login verify OTP (first login)
+router.post("/rider/login/verify-otp", async (req, res) => {
+  const { identifier, password, otp } = req.body
+
+  if (!identifier || !password) {
+    return res.status(400).json({ message: "Email/Phone and password are required" })
+  }
+  if (!otp || otp.length !== 4) {
+    return res.status(400).json({ message: "Enter the 4-digit OTP" })
+  }
+
+  try {
+    const [users] = await pool.query(
+      `SELECT u.*, r.id AS rider_id, r.status AS rider_status, r.is_online AS rider_online
+       FROM users u
+       JOIN riders r ON u.id = r.user_id
+       WHERE (LOWER(u.email) = ? OR u.phone = ?) AND u.role = 'rider'`,
+      [identifier.toLowerCase().trim(), identifier.trim()]
+    )
+
+    if (users.length === 0) {
+      return res.status(401).json({ message: "Invalid credentials" })
+    }
+
+    const user = users[0]
+
+    const valid = await bcrypt.compare(password, user.password_hash)
+    if (!valid) {
+      return res.status(401).json({ message: "Invalid credentials" })
+    }
+
+    if (!checkOtp(`login:${user.id}`, otp)) {
+      return res.status(401).json({ message: "Invalid or expired OTP" })
+    }
+
+    consumeOtp(`login:${user.id}`)
+    // Mark first login as done
+    await pool.query("UPDATE users SET account_verified = 1 WHERE id = ?", [user.id])
+
+    const token = signToken({ id: user.id, role: "rider", riderId: user.rider_id })
+
+    res.json({
+      message: "Login successful",
+      token,
+      user: { id: user.id, name: user.name, email: user.email, phone: user.phone, role: "rider" },
+      rider: { id: user.rider_id, status: user.rider_status, is_online: user.rider_online },
+    })
+  } catch (error) {
+    console.error("Rider login verify OTP error:", error)
+    res.status(500).json({ message: "Login failed" })
+  }
+})
+
+// Update user's current delivery location in the database
+router.patch("/location", authRequired, async (req, res) => {
+  const { city, address, pincode } = req.body
+  try {
+    const updates = []
+    const params = []
+
+    if (city !== undefined) {
+      updates.push("city = ?")
+      params.push(city ? city.toString().trim() : null)
+    }
+    if (address !== undefined) {
+      updates.push("address = ?")
+      params.push(address ? address.toString().trim() : null)
+    }
+    if (pincode !== undefined) {
+      updates.push("pincode = ?")
+      params.push(pincode ? pincode.toString().replace(/\D/g, "") : null)
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ message: "No location fields provided" })
+    }
+
+    params.push(req.user.id)
+    await pool.query(
+      `UPDATE users SET ${updates.join(", ")} WHERE id = ?`,
+      params
+    )
+
+    res.json({ message: "Delivery location updated successfully" })
+  } catch (error) {
+    console.error("Update user location error:", error)
+    res.status(500).json({ message: "Failed to update delivery location" })
   }
 })
 
@@ -1046,6 +1238,152 @@ router.post("/push-token", authRequired, async (req, res) => {
   } catch (error) {
     console.error("Update push token error:", error)
     res.status(500).json({ message: "Failed to update push token" })
+  }
+})
+
+// Rider Forgot Password - Send OTP
+router.post("/rider/forgot-password/send-otp", async (req, res) => {
+  const phone = req.body.phone?.toString().trim()
+  const identifier = req.body.identifier?.toString().trim() || phone
+
+  if (!identifier) {
+    return res.status(400).json({ message: "Phone number or email is required" })
+  }
+
+  try {
+    const isPhone = /^[6-9]\d{9}$/.test(identifier)
+    const column = isPhone ? "phone" : "email"
+    const [users] = await pool.query(
+      `SELECT id, phone, email FROM users WHERE ${column} = ? AND role = 'rider'`,
+      [identifier]
+    )
+
+    if (users.length === 0) {
+      return res.status(404).json({ message: "No rider account found with this phone number" })
+    }
+
+    const user = users[0]
+    const key = `reset:${user.id}`
+    await createAndSendOtp(key, user.phone ? { phone: user.phone } : { email: user.email })
+
+    const payload = {
+      message: "OTP sent to your registered phone number",
+      userId: user.id,
+      phoneHint: user.phone ? `******${user.phone.slice(-4)}` : undefined,
+    }
+    const demoOtp = getDemoOtp()
+    if (demoOtp) payload.demoOtp = demoOtp
+
+    res.json(payload)
+  } catch (error) {
+    console.error("Rider forgot password send OTP error:", error)
+    res.status(500).json({ message: "Failed to send OTP" })
+  }
+})
+
+// Rider Forgot Password - Reset
+router.post("/rider/forgot-password/reset", async (req, res) => {
+  const { userId, otp, password } = req.body
+
+  if (!userId || !otp || otp.length !== 4) {
+    return res.status(400).json({ message: "User ID and 4-digit OTP are required" })
+  }
+  if (!password || password.length < 6) {
+    return res.status(400).json({ message: "Password must be at least 6 characters" })
+  }
+
+  try {
+    const [users] = await pool.query("SELECT id, phone FROM users WHERE id = ? AND role = 'rider'", [userId])
+    if (users.length === 0) {
+      return res.status(404).json({ message: "Rider account not found" })
+    }
+
+    const user = users[0]
+    if (!checkOtp(`reset:${user.id}`, otp)) {
+      return res.status(401).json({ message: "Invalid or expired OTP" })
+    }
+
+    const hash = await bcrypt.hash(password, 10)
+    await pool.query("UPDATE users SET password_hash = ? WHERE id = ?", [hash, user.id])
+    consumeOtp(`reset:${user.id}`)
+
+    res.json({ message: "Password updated successfully. Please log in now." })
+  } catch (error) {
+    console.error("Rider reset password error:", error)
+    res.status(500).json({ message: "Failed to reset password" })
+  }
+})
+
+// Kitchen Forgot Password - Send OTP
+router.post("/kitchen/forgot-password/send-otp", async (req, res) => {
+  const phone = req.body.phone?.toString().trim()
+  const identifier = req.body.identifier?.toString().trim() || phone
+
+  if (!identifier) {
+    return res.status(400).json({ message: "Phone number or email is required" })
+  }
+
+  try {
+    const isPhone = /^[6-9]\d{9}$/.test(identifier)
+    const column = isPhone ? "phone" : "email"
+    const [users] = await pool.query(
+      `SELECT id, phone, email FROM users WHERE ${column} = ? AND role = 'kitchen'`,
+      [identifier]
+    )
+
+    if (users.length === 0) {
+      return res.status(404).json({ message: "No kitchen account found with this phone number" })
+    }
+
+    const user = users[0]
+    const key = `reset:${user.id}`
+    await createAndSendOtp(key, user.phone ? { phone: user.phone } : { email: user.email })
+
+    const payload = {
+      message: "OTP sent to your registered phone number",
+      userId: user.id,
+      phoneHint: user.phone ? `******${user.phone.slice(-4)}` : undefined,
+    }
+    const demoOtp = getDemoOtp()
+    if (demoOtp) payload.demoOtp = demoOtp
+
+    res.json(payload)
+  } catch (error) {
+    console.error("Kitchen forgot password send OTP error:", error)
+    res.status(500).json({ message: "Failed to send OTP" })
+  }
+})
+
+// Kitchen Forgot Password - Reset
+router.post("/kitchen/forgot-password/reset", async (req, res) => {
+  const { userId, otp, password } = req.body
+
+  if (!userId || !otp || otp.length !== 4) {
+    return res.status(400).json({ message: "User ID and 4-digit OTP are required" })
+  }
+  if (!password || password.length < 6) {
+    return res.status(400).json({ message: "Password must be at least 6 characters" })
+  }
+
+  try {
+    const [users] = await pool.query("SELECT id, phone FROM users WHERE id = ? AND role = 'kitchen'", [userId])
+    if (users.length === 0) {
+      return res.status(404).json({ message: "Kitchen account not found" })
+    }
+
+    const user = users[0]
+    if (!checkOtp(`reset:${user.id}`, otp)) {
+      return res.status(401).json({ message: "Invalid or expired OTP" })
+    }
+
+    const hash = await bcrypt.hash(password, 10)
+    await pool.query("UPDATE users SET password_hash = ? WHERE id = ?", [hash, user.id])
+    consumeOtp(`reset:${user.id}`)
+
+    res.json({ message: "Password updated successfully. Please log in now." })
+  } catch (error) {
+    console.error("Kitchen reset password error:", error)
+    res.status(500).json({ message: "Failed to reset password" })
   }
 })
 

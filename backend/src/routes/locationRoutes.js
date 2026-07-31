@@ -51,8 +51,8 @@ const ISO_STATE_MAP = Object.entries(STATE_ISO_MAP).reduce((acc, [name, code]) =
 
 const router = Router()
 
-const CSC_BASE = process.env.CSC_API_BASE || "https://api.countrystatecity.in/v1"
-const COUNTRY = "IN"
+const SURFSYNC_BASE = process.env.SURFSYNC_API_BASE || "http://backend.surfsyncinfotech.in/api/surfsync/v1"
+const SURFSYNC_API_KEY = process.env.SURFSYNC_API_KEY || "ssx_d779b565a8501493d86b83534b3f9e81cb71f9aab8b122f8"
 const STATES_CACHE_TTL_MS = 24 * 60 * 60 * 1000
 
 let statesCache = null
@@ -63,20 +63,14 @@ function getFallback(pathStr) {
     const raw = fs.readFileSync(citiesFilePath, "utf8")
     const localData = JSON.parse(raw)
 
-    const cityMatch = pathStr.match(/\/countries\/[A-Z]{2}\/states\/([A-Za-z0-9-]+)\/cities/)
+    const cityMatch = pathStr.match(/\/cities/)
     if (cityMatch) {
-      const stateCode = cityMatch[1].toUpperCase()
-      const stateName = ISO_STATE_MAP[stateCode]
-      if (!stateName) return []
-
-      return localData
-        .filter((c) => c.state?.toLowerCase() === stateName.toLowerCase() || (stateCode === "HP" && c.state?.toLowerCase() === "himachal praddesh"))
-        .map((c, idx) => ({
-          id: c.id || `${stateCode}-${idx}`,
-          name: c.name,
-          stateCode: stateCode,
-          stateName: stateName
-        }))
+      return localData.map((c, idx) => ({
+        id: c.id || `fallback-${idx}`,
+        name: c.name,
+        stateCode: STATE_ISO_MAP[c.state] || "MH",
+        stateName: c.state
+      }))
     }
 
     if (pathStr.includes("/states")) {
@@ -113,43 +107,61 @@ function normalizeStateName(name) {
 
 const FALLBACK_STATES = getFallback("/states")
 
-async function cscRequest(path) {
-  const apiKey = process.env.CSC_API_KEY
+async function surfSyncRequest(path, queryParams = {}) {
+  const apiKey = SURFSYNC_API_KEY
 
-  // Fallback if API key is not set or invalid placeholder
   if (!apiKey || apiKey === "undefined" || apiKey === "null" || apiKey.trim() === "") {
     return getFallback(path)
   }
 
   try {
-    const res = await fetch(`${CSC_BASE}${path}`, {
-      headers: { "X-CSCAPI-KEY": apiKey },
+    const url = new URL(`${SURFSYNC_BASE}${path}`)
+    Object.entries(queryParams).forEach(([key, val]) => {
+      url.searchParams.append(key, val)
     })
-    const json = await res.json().catch(() => null)
+
+    const res = await fetch(url.toString(), {
+      headers: { "X-API-Key": apiKey },
+    })
 
     if (!res.ok) {
-      console.warn(`Location API error: ${res.status}. Falling back to local data.`)
+      console.warn(`SurfSync Location API error: ${res.status}. Falling back to local data.`)
       return getFallback(path)
     }
 
-    if (Array.isArray(json)) return json
-    return json?.data || json?.states || json?.cities || []
+    const json = await res.json().catch(() => null)
+    if (!json) return getFallback(path)
+
+    if (json.data && Array.isArray(json.data)) {
+      if (path.includes("/states")) {
+        return json.data.map((s) => ({
+          id: s.id,
+          name: s.name,
+          iso2: s.stateCode
+        }))
+      } else {
+        return json.data.map((c) => ({
+          id: c.id,
+          name: c.name,
+          stateCode: c.stateCode,
+          stateName: c.stateName
+        }))
+      }
+    }
+
+    return getFallback(path)
   } catch (error) {
-    console.warn("Location API request failed. Falling back to local data:", error.message)
+    console.warn("SurfSync Location API request failed. Falling back to local data:", error.message)
     return getFallback(path)
   }
 }
 
 async function getStates() {
-  const apiKey = process.env.CSC_API_KEY
-  if (!apiKey || apiKey === "undefined" || apiKey === "null" || apiKey.trim() === "") {
-    return getFallback("/states")
-  }
   if (statesCache && Date.now() - statesCacheAt < STATES_CACHE_TTL_MS) {
     return statesCache
   }
   try {
-    const states = await cscRequest(`/countries/${COUNTRY}/states`)
+    const states = await surfSyncRequest("/states")
     statesCache = states
     statesCacheAt = Date.now()
     return states
@@ -196,7 +208,7 @@ router.get("/cities", async (req, res) => {
 
   try {
     const q = req.query.q?.trim().toLowerCase()
-    const cities = await cscRequest(`/countries/${COUNTRY}/states/${stateCode}/cities`)
+    const cities = await surfSyncRequest("/cities", { state: stateCode })
 
     const seen = new Set()
     const list = []
@@ -208,8 +220,8 @@ router.get("/cities", async (req, res) => {
       list.push({
         id: city.id,
         name,
-        stateCode: city.state_code || stateCode,
-        stateName: city.state_name || null,
+        stateCode: city.stateCode || stateCode,
+        stateName: city.stateName || null,
       })
     }
 
@@ -247,7 +259,7 @@ router.get("/detect", async (req, res) => {
 
     let city = rawCity
     if (stateMatch?.iso2 && rawCity) {
-      const cities = await cscRequest(`/countries/${COUNTRY}/states/${stateMatch.iso2}/cities`)
+      const cities = await surfSyncRequest("/cities", { state: stateMatch.iso2 })
       const cityMatch =
         cities.find((c) => c.name?.toLowerCase() === rawCity.toLowerCase()) ||
         cities.find((c) => c.name?.toLowerCase().includes(rawCity.toLowerCase())) ||

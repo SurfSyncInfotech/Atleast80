@@ -29,7 +29,7 @@ import {
   X,
 
   Truck,
-
+  Wallet,
 } from "lucide-react"
 
 import { useAuth } from "../../context/AuthContext"
@@ -50,11 +50,13 @@ const links = [
 
   { to: "/admin/orders", label: "Orders", icon: ShoppingBag },
 
+  { to: "/admin/payments", label: "Payments", icon: Wallet },
+
   { to: "/admin/featured", label: "Featured", icon: Star },
 
   { to: "/admin/alerts", label: "Alerts", icon: Bell },
 
-  { to: "/admin/customers", label: "Customers", icon: Users },
+  { to: "/admin/users", label: "Users", icon: Users },
 
   { to: "/admin/riders", label: "Riders", icon: Truck },
 

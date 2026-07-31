@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { ArrowLeft, Mail, Lock, ArrowRight } from "lucide-react"
+import { ArrowLeft, Phone, Lock, ArrowRight } from "lucide-react"
 import Button from "../components/ui/Button"
 import PasswordInput from "../components/ui/PasswordInput"
 import { useAuth } from "../context/AuthContext"
@@ -9,12 +9,11 @@ import { useAuth } from "../context/AuthContext"
 export default function ForgotPasswordPage() {
   const navigate = useNavigate()
   const { sendForgotPasswordOtp, resetPassword } = useAuth()
-  const [step, setStep] = useState("email")
-  const [email, setEmail] = useState("")
+  const [step, setStep] = useState("phone")
+  const [phone, setPhone] = useState("")
   const [otp, setOtp] = useState(["", "", "", ""])
   const [password, setPassword] = useState("")
   const [phoneHint, setPhoneHint] = useState("")
-  const [demoOtp, setDemoOtp] = useState(null)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
   const [loading, setLoading] = useState(false)
@@ -23,13 +22,15 @@ export default function ForgotPasswordPage() {
 
   const handleSendOtp = async (e) => {
     e.preventDefault()
+    if (!phone || phone.trim().length < 10) {
+      setError("Please enter your 10-digit phone number")
+      return
+    }
     setError("")
     setLoading(true)
     try {
-      const data = await sendForgotPasswordOtp(email)
-      setPhoneHint(data.phoneHint || "")
-      if (data.demoOtp) setDemoOtp(data.demoOtp)
-      else setDemoOtp(null)
+      const data = await sendForgotPasswordOtp(phone.trim())
+      setPhoneHint(data.phoneHint || `******${phone.trim().slice(-4)}`)
       setStep("otp")
     } catch (err) {
       setError(err.message || "Failed to send OTP")
@@ -40,10 +41,14 @@ export default function ForgotPasswordPage() {
 
   const handleReset = async (e) => {
     e.preventDefault()
+    if (otp.some((d) => !d) || password.length < 6) {
+      setError("Please complete OTP and enter a password (min 6 chars)")
+      return
+    }
     setError("")
     setLoading(true)
     try {
-      await resetPassword({ email, otp: otpValue, password })
+      await resetPassword({ phoneOrEmail: phone.trim(), otp: otpValue, password })
       setSuccess("Password updated! Redirecting to login...")
       setTimeout(() => navigate("/login"), 2000)
     } catch (err) {
@@ -62,56 +67,67 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <div className="min-h-screen bg-cream flex flex-col">
-      <div className="px-6 md:px-10 pt-8 max-w-lg mx-auto w-full">
-        <button
-          onClick={() => (step === "otp" ? setStep("email") : navigate("/login"))}
-          className="w-10 h-10 rounded-xl bg-white border border-gray-light flex items-center justify-center cursor-pointer"
-        >
-          <ArrowLeft size={18} />
-        </button>
+    <div className="min-h-screen bg-cream flex items-center justify-center px-4 py-10">
+      <div className="w-full max-w-md bg-white/95 border border-gray-100 shadow-2xl rounded-[2rem] p-8 md:p-10">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="inline-flex items-center gap-2 rounded-full bg-secondary/10 text-secondary text-xs font-semibold uppercase tracking-[0.25em] px-3 py-1">
+              Password help
+            </p>
+            <h1 className="font-poppins font-bold text-3xl text-dark mt-5">Reset password</h1>
+            <p className="font-nunito text-gray text-sm mt-3 leading-6">
+              {step === "phone"
+                ? "Enter your phone number and we’ll send an OTP to verify your identity."
+                : `OTP sent to ${phoneHint || "your phone"}. Enter the code and set a new password.`}
+            </p>
+          </div>
 
-        <h1 className="font-poppins font-bold text-2xl text-dark mt-6">Reset password</h1>
-        <p className="font-nunito text-gray text-sm mt-2">
-          {step === "email"
-            ? "Enter your email — we'll send an OTP to your registered phone"
-            : `OTP sent to ${phoneHint || "your phone"}`}
-        </p>
+          <button
+            onClick={() => (step === "otp" ? setStep("phone") : navigate("/login"))}
+            className="w-11 h-11 rounded-2xl bg-white border border-gray-light flex items-center justify-center text-dark shadow-sm hover:shadow-md transition-shadow duration-200"
+            aria-label="Go back"
+          >
+            <ArrowLeft size={18} />
+          </button>
+        </div>
 
         {error && (
-          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 font-nunito">
+          <div className="mt-6 rounded-3xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 font-nunito animate-shake">
             {error}
           </div>
         )}
         {success && (
-          <div className="mt-4 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700 font-nunito">
+          <div className="mt-6 rounded-3xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700 font-nunito">
             {success}
           </div>
         )}
 
         <AnimatePresence mode="wait">
-          {step === "email" ? (
+          {step === "phone" ? (
             <motion.form
-              key="email"
+              key="phone"
               onSubmit={handleSendOtp}
               className="mt-8 space-y-5"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -16 }}
             >
               <div>
-                <label className="font-poppins font-medium text-sm text-dark block mb-2">Email</label>
+                <label className="font-poppins font-medium text-sm text-dark block mb-2">Phone Number</label>
                 <div className="relative">
-                  <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray" />
+                  <Phone size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray" />
                   <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full pl-12 pr-4 py-4 bg-white rounded-2xl border-2 border-gray-light font-nunito focus:outline-none focus:border-primary"
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="Enter 10-digit number"
+                    maxLength={10}
+                    className="w-full pl-12 pr-4 py-4 bg-white rounded-[1.5rem] border border-gray-200 font-nunito text-sm text-dark focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 shadow-sm"
                     required
                   />
                 </div>
               </div>
+
               <Button type="submit" size="lg" className="w-full" disabled={loading}>
                 {loading ? "Sending..." : "Send OTP"}
                 <ArrowRight size={18} />
@@ -122,19 +138,11 @@ export default function ForgotPasswordPage() {
               key="reset"
               onSubmit={handleReset}
               className="mt-8 space-y-5"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -16 }}
             >
-              {demoOtp && (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-                  <p className="font-nunito text-xs text-amber-900">
-                    Demo OTP: <span className="font-poppins font-bold tracking-widest">{demoOtp}</span>
-                  </p>
-                </div>
-              )}
-
-              <div className="flex gap-3 justify-center">
+              <div className="grid grid-cols-4 gap-3 justify-center">
                 {otp.map((digit, i) => (
                   <input
                     key={i}
@@ -143,7 +151,7 @@ export default function ForgotPasswordPage() {
                     maxLength={1}
                     value={digit}
                     onChange={(e) => handleOtpChange(i, e.target.value)}
-                    className="w-14 h-14 bg-white rounded-2xl border-2 border-gray-light text-center text-2xl font-poppins font-bold focus:outline-none focus:border-primary"
+                    className="w-full h-14 bg-white rounded-3xl border border-gray-200 text-center text-2xl font-poppins font-bold focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 shadow-sm"
                   />
                 ))}
               </div>
@@ -175,8 +183,10 @@ export default function ForgotPasswordPage() {
           )}
         </AnimatePresence>
 
-        <p className="font-nunito text-sm text-gray mt-6 text-center">
-          <Link to="/login" className="text-primary font-semibold hover:underline">Back to sign in</Link>
+        <p className="font-nunito text-sm text-gray mt-7 text-center">
+          <Link to="/login" className="text-primary font-semibold hover:underline">
+            Back to sign in
+          </Link>
         </p>
       </div>
     </div>

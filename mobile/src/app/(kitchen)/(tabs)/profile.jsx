@@ -26,8 +26,10 @@ import {
   ArrowRight,
   ShieldAlert,
   Phone,
-  FileText
+  FileText,
+  LocateFixed
 } from "lucide-react-native"
+import * as Location from "expo-location"
 import * as DocumentPicker from "expo-document-picker"
 import Button from "../../../components/ui/Button"
 import { useAuth } from "../../../context/AuthContext"
@@ -112,6 +114,52 @@ export default function KitchenProfileScreen() {
   const [uploadingLogo, setUploadingLogo] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
+  const [detectingLocation, setDetectingLocation] = useState(false)
+
+  const handleDetectLocation = async () => {
+    setDetectingLocation(true)
+    setError("")
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync()
+      if (status !== "granted") {
+        setError("Location permission denied")
+        return
+      }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+      const { latitude, longitude } = loc.coords
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`, {
+        headers: { "User-Agent": "Atleast80App/1.0" }
+      })
+      const data = await res.json()
+      if (data?.address) {
+        const addr = data.address
+        const rawState = addr.state || ""
+        const rawCity = addr.city || addr.town || addr.village || addr.county || ""
+        const state = rawState ? rawState.charAt(0).toUpperCase() + rawState.slice(1) : ""
+        const city = rawCity ? rawCity.charAt(0).toUpperCase() + rawCity.slice(1) : ""
+        const road = addr.road || addr.suburb || addr.neighbourhood || ""
+        const houseNumber = addr.house_number || ""
+        const postcode = addr.postcode || ""
+
+        let streetAddress = [houseNumber, road].filter(Boolean).join(", ")
+        if (!streetAddress && data.display_name) {
+          streetAddress = data.display_name.split(",").slice(0, 2).map((s) => s.trim()).join(", ")
+        }
+
+        setForm((prev) => ({
+          ...prev,
+          address: streetAddress || prev.address,
+          state: state || prev.state,
+          city: city || prev.city,
+          pincode: postcode || prev.pincode,
+        }))
+      }
+    } catch (err) {
+      setError("Failed to detect location: " + err.message)
+    } finally {
+      setDetectingLocation(false)
+    }
+  }
 
   useEffect(() => {
     refreshKitchen().catch(() => {})
@@ -539,6 +587,32 @@ export default function KitchenProfileScreen() {
 
           {step === 3 ? (
             <View className="bg-white rounded-2xl border border-gray-light/40 p-4 gap-4 mb-6">
+              <TouchableOpacity
+                onPress={handleDetectLocation}
+                disabled={detectingLocation}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  backgroundColor: "#EAF7EE",
+                  borderWidth: 1,
+                  borderColor: "#0B6B3A",
+                  borderRadius: 12,
+                  paddingVertical: 11,
+                  paddingHorizontal: 14,
+                }}
+              >
+                {detectingLocation ? (
+                  <ActivityIndicator size="small" color="#0B6B3A" />
+                ) : (
+                  <LocateFixed size={16} color="#0B6B3A" />
+                )}
+                <Text style={{ fontFamily: "Poppins", fontWeight: "bold", fontSize: 12, color: "#0B6B3A" }}>
+                  {detectingLocation ? "Detecting Location..." : "Auto-Detect Current Location"}
+                </Text>
+              </TouchableOpacity>
+
               <View>
                 <Text className="font-poppins text-xs font-bold text-dark-light mb-1.5">
                   Full Address <Text className="text-accent">*</Text>

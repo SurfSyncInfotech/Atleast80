@@ -246,13 +246,6 @@ export default function KitchenLoginPage() {
                 </View>
               ) : (
                 <View className="gap-4">
-                  {demoOtp ? (
-                    <View className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-                      <Text className="font-nunito text-sm text-amber-900">
-                        Demo OTP: <Text className="font-poppins font-bold tracking-widest">{demoOtp}</Text>
-                      </Text>
-                    </View>
-                  ) : null}
 
                   {/* 4 Digit OTP Inputs */}
                   <View style={{ flexDirection: "row", gap: 12, justifyContent: "center", paddingVertical: 8 }}>

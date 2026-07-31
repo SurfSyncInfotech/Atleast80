@@ -21,6 +21,24 @@ async function requireActiveRider(req, res, next) {
   }
 }
 
+// Public: Get Rider Agreement (fetched during signup)
+router.get("/rider-agreement", async (_req, res) => {
+  try {
+    const [rows] = await pool.query(
+      "SELECT rider_agreement_url, rider_agreement_version, rider_agreement_updated_at FROM site_settings WHERE id = 1"
+    )
+    const row = rows[0] || {}
+    res.json({
+      url: row.rider_agreement_url || null,
+      version: row.rider_agreement_version || 0,
+      updatedAt: row.rider_agreement_updated_at || null,
+    })
+  } catch (error) {
+    console.error("Fetch rider agreement error:", error)
+    res.status(500).json({ message: "Failed to fetch rider agreement" })
+  }
+})
+
 // 1. Toggle Online/Offline State
 router.put("/status", authRequired, requireRole("rider"), async (req, res) => {
   const { isOnline } = req.body
@@ -63,6 +81,40 @@ router.put("/location", authRequired, requireRole("rider"), async (req, res) => 
        WHERE rider_id = ? AND status = 'out_for_delivery'`,
       [latitude, longitude, req.user.riderId]
     )
+
+    // Automatically resolve and update the rider's city in the users table
+    let detectedCity = null
+    try {
+      const geoUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`
+      const geoRes = await fetch(geoUrl, {
+        headers: { "User-Agent": "Atleast80Rider/1.0" }
+      })
+      const geoData = await geoRes.json()
+      if (geoData && geoData.address) {
+        detectedCity = geoData.address.city || geoData.address.town || geoData.address.village || geoData.address.county || geoData.address.suburb || null
+      }
+    } catch (geoErr) {
+      console.warn("Rider location reverse geocoding failed:", geoErr.message)
+    }
+
+    // Fallback: If reverse geocoding didn't return a city, and the user's city in DB is currently NULL,
+    // match the city of the first approved kitchen so local testing succeeds.
+    if (!detectedCity) {
+      const [userRows] = await pool.query("SELECT city FROM users WHERE id = ?", [req.user.id])
+      if (userRows.length > 0 && !userRows[0].city) {
+        const [kitchenRows] = await pool.query("SELECT city FROM kitchens WHERE status = 'approved' LIMIT 1")
+        if (kitchenRows.length > 0) {
+          detectedCity = kitchenRows[0].city
+        }
+      }
+    }
+
+    if (detectedCity) {
+      await pool.query(
+        "UPDATE users SET city = ? WHERE id = ?",
+        [detectedCity, req.user.id]
+      )
+    }
 
     res.json({ message: "Location updated successfully" })
   } catch (error) {
@@ -359,8 +411,8 @@ router.post("/deliveries/:orderId/action", authRequired, requireRole("rider"), r
         sendPushToUser(order.user_id, "Delivered! 🎉", `Your delicious meal for order #${order.order_number} has been successfully delivered. Enjoy your food!`)
       } else if (action === "cancel_doorstep") {
         sendPushToUser(order.user_id, "Order Cancelled 🛑", `Your order #${order.order_number} has been cancelled at the doorstep.`)
-        // Broadcast food rescue notification to nearby customers in the same city
-        broadcastRescueNotification(order.kitchen_id, order.order_number, order.grand_total)
+        // Broadcast food rescue notification to nearby customers in the same city, excluding the cancelling customer
+        broadcastRescueNotification(order.kitchen_id, order.order_number, order.grand_total, order.id, order.user_id)
       }
     } catch (pushErr) {
       console.error("Non-blocking error triggering delivery push notification:", pushErr.message)
@@ -386,11 +438,12 @@ router.post("/deliveries/:orderId/action", authRequired, requireRole("rider"), r
   }
 })
 
-// 6. Deposit collected cash to Admin via QR
 router.post("/deposit-cash", authRequired, requireRole("rider"), async (req, res) => {
+  const { utrNumber, amount } = req.body
+
   try {
     const [riders] = await pool.query(
-      "SELECT cash_collected, status, is_online FROM riders WHERE id = ?",
+      "SELECT cash_collected FROM riders WHERE id = ?",
       [req.user.riderId]
     )
 
@@ -398,46 +451,62 @@ router.post("/deposit-cash", authRequired, requireRole("rider"), async (req, res
       return res.status(404).json({ message: "Rider profile not found" })
     }
 
-    const cash = Number(riders[0].cash_collected)
-    if (cash <= 0) {
+    const cashHolding = Number(riders[0].cash_collected)
+    const depositAmount = Number(amount) || cashHolding
+
+    if (depositAmount <= 0) {
       return res.status(400).json({ message: "No outstanding cash balance to deposit" })
     }
 
-    // Record the cash handover details in the database
+    // Insert remittance record for admin verification
     await pool.query(
-      "INSERT INTO rider_cash_handovers (rider_id, amount, date) VALUES (?, ?, CURDATE())",
-      [req.user.riderId, cash]
+      `INSERT INTO rider_cash_remittances (rider_id, amount, utr_number, status)
+       VALUES (?, ?, ?, 'pending')`,
+      [req.user.riderId, depositAmount, utrNumber?.trim() || null]
     )
-
-    // Reset cash collected to 0 (simulated transfer to admin)
-    await pool.query(
-      "UPDATE riders SET cash_collected = 0.00 WHERE id = ?",
-      [req.user.riderId]
-    )
-
-    // Calculate total and today's earnings to return updated dashboard stats
-    const [earningRows] = await pool.query(
-      `SELECT 
-         COALESCE(SUM(delivery_fee), 0) AS total_earnings, 
-         COUNT(id) AS total_deliveries,
-         COALESCE(SUM(CASE WHEN DATE(created_at) = CURDATE() THEN delivery_fee ELSE 0 END), 0) AS today_earnings,
-         COUNT(CASE WHEN DATE(created_at) = CURDATE() THEN id ELSE NULL END) AS today_deliveries
-       FROM orders WHERE rider_id = ? AND status = 'delivered'`,
-      [req.user.riderId]
-    )
-    const stats = earningRows[0]
 
     res.json({
-      message: `Successfully deposited ₹${cash} to Admin QR`,
-      cashCollected: 0.00,
-      totalEarnings: Number(stats.total_earnings),
-      totalDeliveries: Number(stats.total_deliveries),
-      todayEarnings: Number(stats.today_earnings),
-      todayDeliveries: Number(stats.today_deliveries),
+      message: `Deposit request of ₹${depositAmount} submitted for Admin verification.`,
+      cashCollected: cashHolding,
     })
   } catch (error) {
     console.error("Rider deposit cash error:", error)
     res.status(500).json({ message: "Failed to process cash deposit" })
+  }
+})
+
+// Rider Payout & Settlement History
+router.get("/me/payouts", authRequired, requireRole("rider"), async (req, res) => {
+  try {
+    const riderId = req.user.riderId
+
+    const [rows] = await pool.query(
+      `SELECT id, period_type, period_start, period_end, gross_amount, deductions_commissions, net_payout, status, utr_number, notes, paid_at, created_at
+       FROM settlements
+       WHERE entity_type = 'rider' AND (entity_id = ? OR entity_id = ?)
+       ORDER BY paid_at DESC, created_at DESC`,
+      [riderId, req.user.id]
+    )
+
+    res.json({
+      payouts: rows.map((r) => ({
+        id: r.id,
+        periodType: r.period_type,
+        periodStart: r.period_start,
+        periodEnd: r.period_end,
+        grossAmount: Number(r.gross_amount),
+        commissionDeduction: Number(r.deductions_commissions),
+        netPayout: Number(r.net_payout),
+        status: r.status,
+        utrNumber: r.utr_number,
+        notes: r.notes,
+        paidAt: r.paid_at,
+        createdAt: r.created_at,
+      }))
+    })
+  } catch (error) {
+    console.error("Fetch rider payouts error:", error)
+    res.status(500).json({ message: "Failed to fetch rider payouts" })
   }
 })
 

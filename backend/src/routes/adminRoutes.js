@@ -1059,6 +1059,70 @@ router.delete("/settings/training-video", async (_req, res) => {
   }
 })
 
+// Rider Agreement Routes
+router.get("/settings/rider-agreement", async (_req, res) => {
+  try {
+    const [rows] = await pool.query(
+      "SELECT rider_agreement_url, rider_agreement_version, rider_agreement_updated_at FROM site_settings WHERE id = 1"
+    )
+    const row = rows[0] || {}
+    res.json({
+      url: row.rider_agreement_url || null,
+      version: row.rider_agreement_version || 0,
+      updatedAt: row.rider_agreement_updated_at || null,
+    })
+  } catch (error) {
+    console.error("Fetch rider agreement error:", error)
+    res.status(500).json({ message: "Failed to fetch rider agreement" })
+  }
+})
+
+router.post("/settings/rider-agreement", (req, res) => {
+  agreementUpload.single("agreement")(req, res, async (uploadErr) => {
+    if (uploadErr) {
+      return res.status(400).json({ message: uploadErr.message || "Agreement upload failed" })
+    }
+    if (!req.file) {
+      return res.status(400).json({ message: "PDF file is required" })
+    }
+    try {
+      const url = getAgreementFileUrl(req, req.file.filename)
+      await pool.query(
+        `UPDATE site_settings
+         SET rider_agreement_url = ?, rider_agreement_version = rider_agreement_version + 1, rider_agreement_updated_at = NOW()
+         WHERE id = 1`,
+        [url]
+      )
+      const [rows] = await pool.query(
+        "SELECT rider_agreement_url, rider_agreement_version, rider_agreement_updated_at FROM site_settings WHERE id = 1"
+      )
+      res.json({
+        message: "Rider Agreement updated",
+        url: rows[0].rider_agreement_url,
+        version: rows[0].rider_agreement_version,
+        updatedAt: rows[0].rider_agreement_updated_at,
+      })
+    } catch (error) {
+      console.error("Upload rider agreement error:", error)
+      res.status(500).json({ message: "Failed to upload Rider Agreement" })
+    }
+  })
+})
+
+router.delete("/settings/rider-agreement", async (_req, res) => {
+  try {
+    await pool.query(
+      `UPDATE site_settings
+       SET rider_agreement_url = NULL, rider_agreement_version = 0, rider_agreement_updated_at = NOW()
+       WHERE id = 1`
+    )
+    res.json({ message: "Rider Agreement deleted successfully", url: null, version: 0, updatedAt: null })
+  } catch (error) {
+    console.error("Delete rider agreement error:", error)
+    res.status(500).json({ message: "Failed to delete Rider Agreement" })
+  }
+})
+
 // Admin Get Riders list
 router.get("/riders", async (req, res) => {
   const page = Math.max(1, parseInt(req.query.page) || 1)
@@ -1257,6 +1321,445 @@ router.delete("/users/:id", async (req, res) => {
   } catch (error) {
     console.error("Admin delete user error:", error)
     res.status(500).json({ message: "Failed to delete user" })
+  }
+})
+
+// ==========================================
+// ADMIN PAYMENTS & SETTLEMENT MANAGEMENT
+// ==========================================
+
+// 1. Payments Summary Overview Stats
+router.get("/payments/summary", async (_req, res) => {
+  try {
+    const [rev] = await pool.query(`
+      SELECT 
+        COALESCE(SUM(grand_total), 0) AS totalRevenue,
+        COALESCE(SUM(CASE WHEN payment_method = 'online' THEN grand_total ELSE 0 END), 0) AS onlineTotal,
+        COALESCE(SUM(CASE WHEN payment_method = 'cod' THEN grand_total ELSE 0 END), 0) AS codTotal
+      FROM orders
+      WHERE status != 'cancelled'
+    `)
+
+    const [riderHolding] = await pool.query(`
+      SELECT COALESCE(SUM(cash_collected), 0) AS totalRiderCashHolding FROM riders
+    `)
+
+    const [remittances] = await pool.query(`
+      SELECT COUNT(*) AS pendingRemittances FROM rider_cash_remittances WHERE status = 'pending'
+    `)
+
+    const [settlementStats] = await pool.query(`
+      SELECT 
+        COALESCE(SUM(CASE WHEN status = 'pending' THEN net_payout ELSE 0 END), 0) AS pendingPayoutsTotal,
+        COALESCE(SUM(CASE WHEN status = 'paid' THEN net_payout ELSE 0 END), 0) AS paidPayoutsTotal
+      FROM settlements
+    `)
+
+    const [settings] = await pool.query(`
+      SELECT kitchen_payout_frequency, rider_payout_frequency FROM site_settings LIMIT 1
+    `)
+
+    res.json({
+      summary: {
+        totalRevenue: Number(rev[0]?.totalRevenue || 0),
+        onlineTotal: Number(rev[0]?.onlineTotal || 0),
+        codTotal: Number(rev[0]?.codTotal || 0),
+        riderCashHolding: Number(riderHolding[0]?.totalRiderCashHolding || 0),
+        pendingRemittancesCount: Number(remittances[0]?.pendingRemittances || 0),
+        pendingPayoutsTotal: Number(settlementStats[0]?.pendingPayoutsTotal || 0),
+        paidPayoutsTotal: Number(settlementStats[0]?.paidPayoutsTotal || 0),
+        kitchenPayoutFrequency: settings[0]?.kitchen_payout_frequency || "weekly",
+        riderPayoutFrequency: settings[0]?.rider_payout_frequency || "weekly",
+      }
+    })
+  } catch (error) {
+    console.error("Payment summary error:", error)
+    res.status(500).json({ message: "Failed to fetch payment summary" })
+  }
+})
+
+// 2. Order Payments Transactions Audit Log
+router.get("/payments/transactions", async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1)
+    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit) || 20))
+    const offset = (page - 1) * limit
+    const search = req.query.search?.trim() || ""
+    const method = req.query.method || "all"
+
+    let whereClause = "WHERE 1=1"
+    const params = []
+
+    if (method !== "all") {
+      whereClause += " AND o.payment_method = ?"
+      params.push(method)
+    }
+
+    if (search) {
+      whereClause += " AND (o.order_number LIKE ? OR k.name LIKE ? OR u.name LIKE ?)"
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`)
+    }
+
+    const [countRows] = await pool.query(
+      `SELECT COUNT(*) AS total
+       FROM orders o
+       LEFT JOIN kitchens k ON k.id = o.kitchen_id
+       LEFT JOIN users u ON u.id = o.user_id
+       ${whereClause}`,
+      params
+    )
+
+    const total = countRows[0]?.total || 0
+
+    const [rows] = await pool.query(
+      `SELECT o.id, o.order_number, o.status, o.payment_method, o.grand_total, o.item_total, o.delivery_fee, o.created_at,
+              k.name AS kitchen_name,
+              u.name AS customer_name, u.phone AS customer_phone,
+              ru.name AS rider_name, ru.phone AS rider_phone
+       FROM orders o
+       LEFT JOIN kitchens k ON k.id = o.kitchen_id
+       LEFT JOIN users u ON u.id = o.user_id
+       LEFT JOIN riders r ON r.id = o.rider_id
+       LEFT JOIN users ru ON ru.id = r.user_id
+       ${whereClause}
+       ORDER BY o.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
+    )
+
+    res.json({
+      transactions: rows.map((r) => ({
+        id: r.id,
+        orderNumber: r.order_number,
+        status: r.status,
+        paymentMethod: r.payment_method,
+        grandTotal: Number(r.grand_total),
+        itemTotal: Number(r.item_total),
+        deliveryFee: Number(r.delivery_fee),
+        kitchenName: r.kitchen_name || "N/A",
+        customerName: r.customer_name || "N/A",
+        customerPhone: r.customer_phone || "",
+        riderName: r.rider_name || "Unassigned",
+        riderPhone: r.rider_phone || "",
+        createdAt: r.created_at,
+      })),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      }
+    })
+  } catch (error) {
+    console.error("Fetch payment transactions error:", error)
+    res.status(500).json({ message: "Failed to fetch payment transactions" })
+  }
+})
+
+// 3. Rider EOD Cash Remittances List
+router.get("/payments/remittances", async (_req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT rem.*,
+             u.name AS rider_name, u.phone AS rider_phone,
+             r.cash_collected AS current_holding
+      FROM rider_cash_remittances rem
+      JOIN riders r ON r.id = rem.rider_id
+      JOIN users u ON u.id = r.user_id
+      ORDER BY rem.created_at DESC
+    `)
+
+    res.json({
+      remittances: rows.map((r) => ({
+        id: r.id,
+        riderId: r.rider_id,
+        riderName: r.rider_name,
+        riderPhone: r.rider_phone,
+        amount: Number(r.amount),
+        currentHolding: Number(r.current_holding),
+        utrNumber: r.utr_number,
+        status: r.status,
+        rejectionReason: r.rejection_reason,
+        createdAt: r.created_at,
+        verifiedAt: r.verified_at,
+      }))
+    })
+  } catch (error) {
+    console.error("Fetch remittances error:", error)
+    res.status(500).json({ message: "Failed to fetch rider remittances" })
+  }
+})
+
+// 4. Verify Rider Cash Remittance (Approve / Reject)
+router.post("/payments/remittances/:id/verify", async (req, res) => {
+  const remittanceId = req.params.id
+  const { status, rejectionReason } = req.body
+
+  if (!["approved", "rejected"].includes(status)) {
+    return res.status(400).json({ message: "Invalid status value" })
+  }
+
+  try {
+    const [remRows] = await pool.query(
+      "SELECT id, rider_id, amount, status FROM rider_cash_remittances WHERE id = ?",
+      [remittanceId]
+    )
+
+    if (remRows.length === 0) {
+      return res.status(404).json({ message: "Remittance record not found" })
+    }
+
+    const rem = remRows[0]
+    if (rem.status !== "pending") {
+      return res.status(400).json({ message: `Remittance is already ${rem.status}` })
+    }
+
+    if (status === "approved") {
+      await pool.query(
+        `UPDATE rider_cash_remittances SET status = 'approved', verified_at = NOW() WHERE id = ?`,
+        [remittanceId]
+      )
+      // Deduct deposited amount from rider's cash holding
+      await pool.query(
+        `UPDATE riders SET cash_collected = GREATEST(0, cash_collected - ?) WHERE id = ?`,
+        [rem.amount, rem.rider_id]
+      )
+      res.json({ message: "Rider cash deposit approved and cash holding cleared" })
+    } else {
+      await pool.query(
+        `UPDATE rider_cash_remittances SET status = 'rejected', rejection_reason = ?, verified_at = NOW() WHERE id = ?`,
+        [rejectionReason || "Verification failed", remittanceId]
+      )
+      res.json({ message: "Rider cash deposit rejected" })
+    }
+  } catch (error) {
+    console.error("Verify remittance error:", error)
+    res.status(500).json({ message: "Failed to verify remittance" })
+  }
+})
+
+// Direct Admin Cash Holding Clear Endpoint
+router.post("/payments/riders/:id/clear-cash", async (req, res) => {
+  const riderId = req.params.id
+  try {
+    const [riders] = await pool.query("SELECT cash_collected FROM riders WHERE id = ?", [riderId])
+    if (riders.length === 0) {
+      return res.status(404).json({ message: "Rider not found" })
+    }
+
+    const currentCash = Number(riders[0].cash_collected)
+    await pool.query("UPDATE riders SET cash_collected = 0 WHERE id = ?", [riderId])
+
+    // Approve any pending remittances for this rider
+    await pool.query(
+      "UPDATE rider_cash_remittances SET status = 'approved', verified_at = NOW() WHERE rider_id = ? AND status = 'pending'",
+      [riderId]
+    )
+
+    res.json({ message: `Successfully cleared ₹${currentCash} cash holding for rider.`, cashCollected: 0 })
+  } catch (error) {
+    console.error("Clear rider cash error:", error)
+    res.status(500).json({ message: "Failed to clear rider cash holding" })
+  }
+})
+
+// 5. Get Kitchen & Rider Settlement Payout Lists
+router.get("/payments/settlements", async (_req, res) => {
+  try {
+    // 5a. Kitchen Payouts (Grouped by Kitchen) - deducting already settled gross sales
+    const [kitchenRows] = await pool.query(`
+      SELECT k.id AS kitchen_id, k.name AS kitchen_name, k.city, u.name AS owner_name, u.phone AS owner_phone,
+             COALESCE(SUM(o.grand_total), 0) AS total_gross_sales,
+             COALESCE(SUM(o.delivery_fee), 0) AS total_rider_fees,
+             COALESCE((
+               SELECT SUM(s.gross_amount)
+               FROM settlements s
+               WHERE s.entity_type = 'kitchen' AND (s.entity_id = k.id OR s.entity_id = k.user_id) AND s.status = 'paid'
+             ), 0) AS settled_gross_sales,
+             COUNT(o.id) AS order_count
+      FROM kitchens k
+      JOIN users u ON u.id = k.user_id
+      LEFT JOIN orders o ON o.kitchen_id = k.id AND o.status = 'delivered'
+      WHERE k.status = 'approved'
+      GROUP BY k.id
+    `)
+
+    // 5b. Rider Payouts (Grouped by Rider) - deducting already settled rider payouts
+    const [riderRows] = await pool.query(`
+      SELECT r.id AS rider_id, u.name AS rider_name, u.phone AS rider_phone, r.cash_collected,
+             COALESCE(SUM(o.delivery_fee), 0) AS total_delivery_fee,
+             COALESCE((
+               SELECT SUM(s.gross_amount)
+               FROM settlements s
+               WHERE s.entity_type = 'rider' AND (s.entity_id = r.id OR s.entity_id = r.user_id) AND s.status = 'paid'
+             ), 0) AS settled_delivery_fee,
+             COUNT(o.id) AS completed_deliveries
+      FROM riders r
+      JOIN users u ON u.id = r.user_id
+      LEFT JOIN orders o ON o.rider_id = r.id AND o.status = 'delivered'
+      WHERE r.status = 'active'
+      GROUP BY r.id
+    `)
+
+    // 5c. Recorded Settlements History
+    const [historyRows] = await pool.query(`
+      SELECT s.*, 
+             CASE WHEN s.entity_type = 'kitchen' THEN k.name ELSE u.name END AS entity_name
+      FROM settlements s
+      LEFT JOIN kitchens k ON s.entity_type = 'kitchen' AND (k.id = s.entity_id OR k.user_id = s.entity_id)
+      LEFT JOIN riders r ON s.entity_type = 'rider' AND (r.id = s.entity_id OR r.user_id = s.entity_id)
+      LEFT JOIN users u ON r.user_id = u.id
+      ORDER BY s.created_at DESC
+    `)
+
+    res.json({
+      kitchenPayouts: kitchenRows.map((k) => {
+        const totalGross = Number(k.total_gross_sales)
+        const totalRiderFees = Number(k.total_rider_fees)
+        const settledGross = Number(k.settled_gross_sales)
+        const unsettledGross = Math.max(0, totalGross - settledGross)
+
+        // Proportionate rider fees for remaining unsettled orders
+        const unsettledRiderFees = totalGross > 0 ? Math.round((unsettledGross / totalGross) * totalRiderFees) : 0
+        const commission = Math.round(unsettledGross * 0.10) // 10% platform fee
+        const net = Math.max(0, unsettledGross - commission - unsettledRiderFees)
+
+        return {
+          kitchenId: k.kitchen_id,
+          kitchenName: k.kitchen_name,
+          city: k.city,
+          ownerName: k.owner_name,
+          ownerPhone: k.owner_phone,
+          grossSales: unsettledGross,
+          totalSalesEver: totalGross,
+          settledSalesEver: settledGross,
+          orderCount: k.order_count,
+          commissionDeduction: commission,
+          riderFeeDeduction: unsettledRiderFees,
+          totalDeductions: commission + unsettledRiderFees,
+          netPayout: net,
+        }
+      }),
+      riderPayouts: riderRows.map((r) => {
+        const totalDeliveryFees = Number(r.total_delivery_fee)
+        const settledFees = Number(r.settled_delivery_fee)
+        const unsettledFees = Math.max(0, totalDeliveryFees - settledFees)
+        const cashHolding = Number(r.cash_collected)
+        return {
+          riderId: r.rider_id,
+          riderName: r.rider_name,
+          riderPhone: r.rider_phone,
+          completedDeliveries: r.completed_deliveries,
+          totalDeliveryFees: unsettledFees,
+          cashHolding: cashHolding,
+          netPayout: unsettledFees,
+        }
+      }),
+      settlementsHistory: historyRows.map((h) => ({
+        id: h.id,
+        entityType: h.entity_type,
+        entityId: h.entity_id,
+        entityName: h.entity_name || "N/A",
+        periodType: h.period_type,
+        grossAmount: Number(h.gross_amount),
+        commissionDeductions: Number(h.deductions_commissions),
+        netPayout: Number(h.net_payout),
+        status: h.status,
+        utrNumber: h.utr_number,
+        notes: h.notes,
+        paidAt: h.paid_at,
+        createdAt: h.created_at,
+      }))
+    })
+  } catch (error) {
+    console.error("Fetch settlements error:", error)
+    res.status(500).json({ message: "Failed to fetch settlements" })
+  }
+})
+
+// 6. Record Settlement Payout (Mark as Paid)
+router.post("/payments/settlements/pay", async (req, res) => {
+  const { entityType, entityId, periodType, grossAmount, commissionDeductions, netPayout, utrNumber, notes } = req.body
+
+  if (!["kitchen", "rider"].includes(entityType) || !entityId) {
+    return res.status(400).json({ message: "Invalid entity information" })
+  }
+  if (!utrNumber || !utrNumber.trim()) {
+    return res.status(400).json({ message: "Transaction UTR / Reference number is required" })
+  }
+
+  try {
+    const today = new Date().toISOString().slice(0, 10)
+    await pool.query(
+      `INSERT INTO settlements (
+        entity_type, entity_id, period_type, period_start, period_end,
+        gross_amount, deductions_commissions, net_payout, status, utr_number, notes, paid_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'paid', ?, ?, NOW())`,
+      [
+        entityType,
+        entityId,
+        periodType || "weekly",
+        today,
+        today,
+        Number(grossAmount) || 0,
+        Number(commissionDeductions) || 0,
+        Number(netPayout) || 0,
+        utrNumber.trim(),
+        notes?.trim() || null,
+      ]
+    )
+
+    res.json({ message: "Settlement payout recorded successfully" })
+  } catch (error) {
+    console.error("Record settlement error:", error)
+    res.status(500).json({ message: "Failed to record settlement" })
+  }
+})
+
+// 7. Get / Update Flexible Settlement Frequency Settings
+router.get("/payments/settings", async (_req, res) => {
+  try {
+    const [rows] = await pool.query(
+      "SELECT kitchen_payout_frequency, rider_payout_frequency FROM site_settings LIMIT 1"
+    )
+    res.json({
+      kitchenPayoutFrequency: rows[0]?.kitchen_payout_frequency || "weekly",
+      riderPayoutFrequency: rows[0]?.rider_payout_frequency || "weekly",
+    })
+  } catch (error) {
+    console.error("Get settlement settings error:", error)
+    res.status(500).json({ message: "Failed to fetch settlement settings" })
+  }
+})
+
+router.put("/payments/settings", async (req, res) => {
+  const { kitchenPayoutFrequency, riderPayoutFrequency } = req.body
+
+  const valid = ["daily", "weekly", "monthly"]
+  if (
+    (kitchenPayoutFrequency && !valid.includes(kitchenPayoutFrequency)) ||
+    (riderPayoutFrequency && !valid.includes(riderPayoutFrequency))
+  ) {
+    return res.status(400).json({ message: "Invalid frequency option. Must be daily, weekly, or monthly." })
+  }
+
+  try {
+    const [settings] = await pool.query("SELECT id FROM site_settings LIMIT 1")
+    if (settings.length === 0) {
+      await pool.query(
+        "INSERT INTO site_settings (kitchen_payout_frequency, rider_payout_frequency) VALUES (?, ?)",
+        [kitchenPayoutFrequency || "weekly", riderPayoutFrequency || "weekly"]
+      )
+    } else {
+      await pool.query(
+        "UPDATE site_settings SET kitchen_payout_frequency = ?, rider_payout_frequency = ? WHERE id = ?",
+        [kitchenPayoutFrequency || "weekly", riderPayoutFrequency || "weekly", settings[0].id]
+      )
+    }
+    res.json({ message: "Settlement frequency settings updated successfully" })
+  } catch (error) {
+    console.error("Update settlement settings error:", error)
+    res.status(500).json({ message: "Failed to update settlement settings" })
   }
 })
 

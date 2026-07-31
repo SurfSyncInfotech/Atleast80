@@ -130,6 +130,59 @@ export default function ProfilePage() {
   const [saveError, setSaveError] = useState("")
   const [saving, setSaving] = useState(false)
   const [alerts, setAlerts] = useState([])
+  const [detectingLocation, setDetectingLocation] = useState(false)
+
+  const handleAutoDetectLocation = () => {
+    if (!navigator.geolocation) {
+      alert("Geolocation is not supported by your browser.")
+      return
+    }
+
+    setDetectingLocation(true)
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude, longitude } = position.coords
+        try {
+          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`, {
+            headers: {
+              "User-Agent": "Atleast80Web/1.0"
+            }
+          })
+          const data = await res.json()
+          if (data && data.address) {
+            const addr = data.address
+            const road = addr.road || addr.suburb || addr.neighbourhood || ""
+            const houseNumber = addr.house_number || ""
+            const city = addr.city || addr.town || addr.village || addr.county || ""
+            const postcode = addr.postcode || ""
+
+            let streetAddress = [houseNumber, road].filter(Boolean).join(", ")
+            if (!streetAddress && data.display_name) {
+              streetAddress = data.display_name.split(",").slice(0, 2).map(s => s.trim()).join(", ")
+            }
+
+            setForm(prev => ({
+              ...prev,
+              address: streetAddress || prev.address,
+              city: city || prev.city,
+              pincode: postcode || prev.pincode
+            }))
+          } else {
+            alert("Could not resolve address details. Please fill manually.")
+          }
+        } catch (err) {
+          alert("Failed to auto-detect location: " + err.message)
+        } finally {
+          setDetectingLocation(false)
+        }
+      },
+      (err) => {
+        alert("Failed to get location: " + err.message)
+        setDetectingLocation(false)
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+    )
+  }
 
   const hasAddress = Boolean(user?.address || user?.city || user?.pincode)
   const pastOrders = orders.filter((o) => !currentOrder || o.id !== currentOrder.id)
@@ -419,7 +472,20 @@ export default function ProfilePage() {
                   ["pincode", "Pincode", "tel"],
                 ].map(([key, label, type]) => (
                   <div key={key}>
-                    <label className="text-xs font-poppins font-semibold text-dark">{label}</label>
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-poppins font-semibold text-dark">{label}</label>
+                      {key === "address" && (
+                        <button
+                          type="button"
+                          onClick={handleAutoDetectLocation}
+                          disabled={detectingLocation}
+                          className="flex items-center gap-1 text-[11px] font-poppins font-bold text-primary hover:text-primary-dark cursor-pointer disabled:opacity-50"
+                        >
+                          <MapPin size={12} />
+                          {detectingLocation ? "Detecting..." : "Auto Detect"}
+                        </button>
+                      )}
+                    </div>
                     <input
                       type={type}
                       value={form[key]}

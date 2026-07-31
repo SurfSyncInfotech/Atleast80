@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react"
 import { useNavigate } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { MessageCircle, X, Send, FileText, IndianRupee, Loader2, Trash2, ArrowLeft } from "lucide-react"
+import { MessageCircle, X, Send, FileText, IndianRupee, Loader2, Trash2, ArrowLeft, RotateCw } from "lucide-react"
 import { useAuth } from "../../context/AuthContext"
 import { useCart } from "../../context/CartContext"
 import { api } from "../../lib/api"
@@ -59,6 +59,19 @@ export default function BulkOrderChatbot({ kitchenId, kitchenName, cartVisible =
       })
     return () => { cancelled = true }
   }, [open, customerUser, kitchenId])
+
+  const handleRefreshEnquiry = async () => {
+    if (!customerUser || !kitchenId) return
+    setLoadingEnquiry(true)
+    try {
+      const data = await api(`/api/bulk-enquiries/kitchen/${kitchenId}`, {}, "customer")
+      setEnquiry(data.enquiry)
+    } catch {
+      setEnquiry(null)
+    } finally {
+      setLoadingEnquiry(false)
+    }
+  }
 
   // In-app chat polling
   useEffect(() => {
@@ -229,17 +242,34 @@ export default function BulkOrderChatbot({ kitchenId, kitchenName, cartVisible =
                   <p className="font-nunito text-white/70 text-[11px] truncate">{kitchenName}</p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setOpen(false)
-                  setShowChat(false)
-                }}
-                className="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center text-white hover:bg-white/25 cursor-pointer"
-                aria-label="Close chat"
-              >
-                <X size={16} />
-              </button>
+              <div className="flex items-center gap-2">
+                {hasActiveEnquiry && !showChat && (
+                  <button
+                    type="button"
+                    onClick={handleRefreshEnquiry}
+                    disabled={loadingEnquiry}
+                    className="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center text-white hover:bg-white/25 cursor-pointer disabled:opacity-50"
+                    aria-label="Refresh enquiry"
+                  >
+                    {loadingEnquiry ? (
+                      <Loader2 size={14} className="animate-spin text-white" />
+                    ) : (
+                      <RotateCw size={14} className="text-white" />
+                    )}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false)
+                    setShowChat(false)
+                  }}
+                  className="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center text-white hover:bg-white/25 cursor-pointer"
+                  aria-label="Close chat"
+                >
+                  <X size={16} />
+                </button>
+              </div>
             </div>
 
             <div className="p-4 max-h-[min(65vh,480px)] overflow-y-auto space-y-3">

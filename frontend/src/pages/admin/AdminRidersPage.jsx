@@ -181,8 +181,10 @@ export default function AdminRidersPage() {
                   <tr className="border-b border-[#f0f0f0] bg-[#fdfdfd] text-[#696969] text-xs font-poppins font-bold">
                     <th className="p-4">Name</th>
                     <th className="p-4">Phone</th>
-                    <th className="p-4">Vehicle Type</th>
-                    <th className="p-4">Vehicle Number</th>
+                    <th className="p-4">Today's Orders</th>
+                    <th className="p-4">Today's Cash</th>
+                    <th className="p-4">Today's Handover</th>
+                    <th className="p-4">Dues (Cash)</th>
                     <th className="p-4">Status</th>
                     <th className="p-4 text-right">Actions</th>
                   </tr>
@@ -190,22 +192,33 @@ export default function AdminRidersPage() {
                 <tbody className="divide-y divide-[#f0f0f0] font-nunito text-sm text-[#1c1c1c]">
                   {riders.map((r) => (
                     <tr key={r.id} className="hover:bg-[#fafafa]">
-                      <td className="p-4 font-poppins font-semibold">{r.name}</td>
+                      <td className="p-4 font-poppins font-semibold">
+                        <div>
+                          <div className="font-bold">{r.name}</div>
+                          <div className="text-[10px] text-[#999] capitalize">{r.vehicle_type} ({r.vehicle_number || "—"})</div>
+                        </div>
+                      </td>
                       <td className="p-4">{r.phone || "—"}</td>
-                      <td className="p-4 capitalize">{r.vehicle_type}</td>
-                      <td className="p-4 uppercase">{r.vehicle_number || "—"}</td>
+                      <td className="p-4">
+                        <div className="font-poppins font-bold">{r.today_orders_count || 0}</div>
+                        <div className="text-[10px] text-emerald-600">₹{r.today_earnings || 0} earn</div>
+                      </td>
+                      <td className="p-4 font-bold text-amber-700">₹{r.today_cash_collected || 0}</td>
+                      <td className="p-4 font-bold text-emerald-700">₹{r.today_cash_handover || 0}</td>
+                      <td className="p-4 font-bold text-red-600">₹{r.cash_collected || 0}</td>
                       <td className="p-4">
                         <StatusBadge status={r.status} />
                       </td>
-                      <td className="p-4 text-right flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => setSelectedRider(r)}
-                          className="p-1.5 rounded hover:bg-gray-100 text-gray cursor-pointer"
-                          title="View KYC & Info"
-                        >
-                          <Eye size={16} />
-                        </button>
-                        {r.status !== "active" ? (
+                      <td className="p-4 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => setSelectedRider(r)}
+                            className="p-1.5 rounded hover:bg-gray-100 text-gray cursor-pointer"
+                            title="View KYC & Info"
+                          >
+                            <Eye size={16} />
+                          </button>
+                          {r.status !== "active" ? (
                           <button
                             disabled={actionId === r.id}
                             onClick={() => handleApprove(r.id)}
@@ -224,7 +237,8 @@ export default function AdminRidersPage() {
                             <XCircle size={16} />
                           </button>
                         )}
-                      </td>
+                      </div>
+                    </td>
                     </tr>
                   ))}
                 </tbody>
@@ -301,6 +315,49 @@ export default function AdminRidersPage() {
                   <div className="flex items-center gap-2 bg-[#fdfdfd] border border-[#f0f0f0] rounded-lg p-3">
                     <Mail size={14} className="text-gray" />
                     <span className="font-nunito text-sm text-[#1c1c1c] truncate">{selectedRider.email || "No Email"}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Daily & Lifetime Performance Stats */}
+              <div className="space-y-4">
+                <h5 className="font-poppins font-bold text-xs text-[#999] uppercase tracking-wider">Earnings & Cash Activity</h5>
+                
+                {/* Daily Metrics */}
+                <div className="bg-[#f0f9ff] border border-[#bae6fd] rounded-xl p-4 space-y-3">
+                  <div className="text-xs font-poppins font-bold text-[#0369a1] uppercase tracking-wider">Today's Activity</div>
+                  <div className="flex justify-between text-sm">
+                    <span className="font-nunito text-[#0369a1]">Completed Orders:</span>
+                    <span className="font-poppins font-bold text-[#0369a1]">{selectedRider.today_orders_count || 0}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="font-nunito text-[#0369a1]">Earnings (Fee):</span>
+                    <span className="font-poppins font-bold text-[#0369a1]">₹{selectedRider.today_earnings || 0}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="font-nunito text-[#0369a1]">COD Cash Collected:</span>
+                    <span className="font-poppins font-bold text-[#0369a1]">₹{selectedRider.today_cash_collected || 0}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="font-nunito text-[#0369a1]">EOD Cash Handed Over:</span>
+                    <span className="font-poppins font-bold text-emerald-700">₹{selectedRider.today_cash_handover || 0}</span>
+                  </div>
+                </div>
+
+                {/* Lifetime Metrics */}
+                <div className="bg-gray-50 border border-[#e8e8e8] rounded-xl p-4 space-y-3">
+                  <div className="text-xs font-poppins font-bold text-[#666] uppercase tracking-wider">Lifetime Stats</div>
+                  <div className="flex justify-between text-sm">
+                    <span className="font-nunito text-[#696969]">Total Deliveries:</span>
+                    <span className="font-poppins font-bold text-[#1c1c1c]">{selectedRider.total_orders_count || 0}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="font-nunito text-[#696969]">Total Earnings:</span>
+                    <span className="font-poppins font-bold text-[#1c1c1c]">₹{selectedRider.total_earnings || 0}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="font-nunito text-[#696969]">Pending Cash Balance:</span>
+                    <span className="font-poppins font-bold text-amber-700">₹{selectedRider.cash_collected || 0}</span>
                   </div>
                 </div>
               </div>

@@ -7,6 +7,8 @@ import {
   uploadTrainingVideo,
   deletePartnerAgreementPdf,
   deleteTrainingVideo,
+  uploadRiderAgreementPdf,
+  deleteRiderAgreementPdf,
 } from "../../lib/api"
 
 function formatDate(value) {
@@ -22,23 +24,29 @@ function formatDate(value) {
 
 export default function AdminSettingsPage() {
   const [agreement, setAgreement] = useState(null)
+  const [riderAgreement, setRiderAgreement] = useState(null)
   const [trainingVideo, setTrainingVideo] = useState(null)
   const [loading, setLoading] = useState(true)
   const [file, setFile] = useState(null)
+  const [riderFile, setRiderFile] = useState(null)
   const [videoFile, setVideoFile] = useState(null)
   const [uploading, setUploading] = useState(false)
+  const [riderUploading, setRiderUploading] = useState(false)
   const [videoUploading, setVideoUploading] = useState(false)
   const [message, setMessage] = useState("")
+  const [riderMessage, setRiderMessage] = useState("")
   const [videoMessage, setVideoMessage] = useState("")
 
   const load = useCallback(() => {
     setLoading(true)
     Promise.all([
       api("/api/admin/settings/partner-agreement", {}, "admin").catch(() => null),
+      api("/api/admin/settings/rider-agreement", {}, "admin").catch(() => null),
       api("/api/admin/settings/training-video", {}, "admin").catch(() => null),
     ])
-      .then(([agreementData, videoData]) => {
+      .then(([agreementData, riderAgreementData, videoData]) => {
         setAgreement(agreementData)
+        setRiderAgreement(riderAgreementData)
         setTrainingVideo(videoData)
       })
       .finally(() => setLoading(false))
@@ -109,6 +117,38 @@ export default function AdminSettingsPage() {
       setVideoMessage(err.message || "Failed to delete training video")
     } finally {
       setVideoUploading(false)
+    }
+  }
+
+  const handleRiderAgreementUpload = async (e) => {
+    e.preventDefault()
+    if (!riderFile) return
+    setRiderUploading(true)
+    setRiderMessage("")
+    try {
+      const data = await uploadRiderAgreementPdf(riderFile)
+      setRiderAgreement({ url: data.url, version: data.version, updatedAt: data.updatedAt })
+      setRiderFile(null)
+      setRiderMessage("Rider Agreement updated successfully")
+    } catch (err) {
+      setRiderMessage(err.message || "Failed to upload Rider Agreement")
+    } finally {
+      setRiderUploading(false)
+    }
+  }
+
+  const handleDeleteRiderAgreement = async () => {
+    if (!window.confirm("Are you sure you want to delete the Rider Agreement? Riders won't be able to complete registration.")) return
+    setRiderUploading(true)
+    setRiderMessage("")
+    try {
+      await deleteRiderAgreementPdf()
+      setRiderAgreement(null)
+      setRiderMessage("Rider Agreement deleted successfully")
+    } catch (err) {
+      setRiderMessage(err.message || "Failed to delete Rider Agreement")
+    } finally {
+      setRiderUploading(false)
     }
   }
 
@@ -275,6 +315,85 @@ export default function AdminSettingsPage() {
               >
                 <Upload size={14} />
                 {videoUploading ? "Uploading..." : "Upload new Video"}
+              </button>
+            </form>
+          </div>
+
+          {/* Card 3: Rider Agreement */}
+          <div className="w-full bg-white rounded-xl border border-[#e8e8e8] p-5 sm:p-6 space-y-5 flex flex-col justify-between">
+            <div className="space-y-4">
+              <div>
+                <h2 className="font-poppins font-semibold text-[#1c1c1c] text-lg">Rider Agreement &amp; Terms</h2>
+                <p className="font-nunito text-sm text-gray mt-1">
+                  Riders must read and accept this PDF during onboarding. Uploading a new file replaces the version shown to new sign-ups.
+                </p>
+              </div>
+
+              {loading ? (
+                <div className="h-28 rounded-lg bg-[#f8f8f8] animate-pulse" />
+              ) : riderAgreement?.url ? (
+                <div className="rounded-lg border border-[#e8e8e8] p-4 flex items-center justify-between gap-3 bg-gray-50/50">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <FileText size={20} className="text-primary flex-shrink-0" />
+                    <div className="min-w-0">
+                      <a
+                        href={riderAgreement.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-poppins text-sm font-medium text-primary hover:underline truncate block max-w-[200px] sm:max-w-xs"
+                      >
+                        View current rider agreement
+                      </a>
+                      <p className="font-nunito text-xs text-gray mt-0.5">
+                        Version {riderAgreement.version}
+                        {riderAgreement.updatedAt ? ` · Updated ${formatDate(riderAgreement.updatedAt)}` : ""}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleDeleteRiderAgreement}
+                    disabled={riderUploading}
+                    className="inline-flex items-center justify-center p-2 rounded-lg text-red-500 hover:bg-red-50 border border-transparent hover:border-red-200 transition-colors cursor-pointer"
+                    title="Delete Rider Agreement"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-[#e8e8e8] p-4 text-sm font-nunito text-gray bg-gray-50/50">
+                  No Rider Agreement uploaded yet. Riders won&apos;t be able to complete registration until one is added.
+                </div>
+              )}
+            </div>
+
+            <form onSubmit={handleRiderAgreementUpload} className="space-y-3 mt-4">
+              <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-gray-200 rounded-xl p-5 cursor-pointer hover:border-primary/40 hover:bg-primary/5 transition-colors">
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  className="hidden"
+                  onChange={(e) => setRiderFile(e.target.files?.[0] || null)}
+                />
+                <Upload size={20} className="text-gray" />
+                <span className="font-nunito text-sm text-gray text-center max-w-[250px] truncate">
+                  {riderFile ? riderFile.name : "Choose a PDF to upload"}
+                </span>
+              </label>
+
+              {riderMessage && (
+                <p className={`text-xs font-nunito ${riderMessage.includes("success") ? "text-primary" : "text-red-600"}`}>
+                  {riderMessage}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={!riderFile || riderUploading}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-white font-poppins font-semibold text-sm hover:bg-primary-dark cursor-pointer disabled:opacity-50"
+              >
+                <Upload size={14} />
+                {riderUploading ? "Uploading..." : "Upload new PDF"}
               </button>
             </form>
           </div>

@@ -83,7 +83,7 @@ export async function sendPushToToken(token, title, body, data = {}) {
 /**
  * Broadcasts a rescue notification to all customers in the same city.
  */
-export async function broadcastRescueNotification(kitchenId, orderNumber, grandTotal) {
+export async function broadcastRescueNotification(kitchenId, orderNumber, grandTotal, orderId, excludingUserId = null) {
   try {
     // 1. Get kitchen city
     const [kitchens] = await pool.query(
@@ -100,14 +100,18 @@ export async function broadcastRescueNotification(kitchenId, orderNumber, grandT
       return
     }
 
-    // 2. Fetch all customers in that city with active FCM tokens
-    const [customers] = await pool.query(
-      "SELECT id, fcm_token FROM users WHERE role = 'customer' AND city = ? AND fcm_token IS NOT NULL",
-      [city]
-    )
+    // 2. Fetch all customers in that city with active FCM tokens, excluding the user who cancelled
+    let query = "SELECT id, fcm_token FROM users WHERE role = 'customer' AND TRIM(LOWER(city)) = TRIM(LOWER(?)) AND fcm_token IS NOT NULL"
+    const params = [city]
+    if (excludingUserId) {
+      query += " AND id != ?"
+      params.push(excludingUserId)
+    }
+
+    const [customers] = await pool.query(query, params)
 
     if (customers.length === 0) {
-      console.log(`[Push Broadcast] No customers found in city "${city}" with FCM tokens.`)
+      console.log(`[Push Broadcast] No other customers found in city "${city}" with FCM tokens.`)
       return
     }
 
@@ -127,6 +131,7 @@ export async function broadcastRescueNotification(kitchenId, orderNumber, grandT
       data: {
         type: "rescue",
         orderNumber: String(orderNumber),
+        orderId: String(orderId),
       },
       tokens: tokens,
     }
@@ -151,7 +156,7 @@ export async function broadcastNewOrderToRiders(kitchenCity, orderNumber, orderI
        FROM users u
        JOIN riders r ON r.user_id = u.id
        WHERE u.role = 'rider' 
-         AND u.city = ? 
+         AND TRIM(LOWER(u.city)) = TRIM(LOWER(?)) 
          AND u.fcm_token IS NOT NULL 
          AND r.is_online = 1 
          AND r.status = 'active'`,

@@ -1,7 +1,7 @@
 import { useState, useRef } from "react"
 import { View, Text, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, TextInput } from "react-native"
 import { useRouter } from "expo-router"
-import { ArrowLeft, Mail, Lock, ArrowRight } from "lucide-react-native"
+import { ArrowLeft, Phone, Lock, ArrowRight } from "lucide-react-native"
 import Button from "../../components/ui/Button"
 import Input from "../../components/ui/Input"
 import PasswordInput from "../../components/ui/PasswordInput"
@@ -10,12 +10,11 @@ import { useAuth } from "../../context/AuthContext"
 export default function ForgotPasswordPage() {
   const router = useRouter()
   const { sendForgotPasswordOtp, resetPassword } = useAuth()
-  const [step, setStep] = useState("email")
-  const [email, setEmail] = useState("")
+  const [step, setStep] = useState("phone")
+  const [phone, setPhone] = useState("")
   const [otp, setOtp] = useState(["", "", "", ""])
   const [password, setPassword] = useState("")
   const [phoneHint, setPhoneHint] = useState("")
-  const [demoOtp, setDemoOtp] = useState("1234")
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
   const [loading, setLoading] = useState(false)
@@ -24,16 +23,15 @@ export default function ForgotPasswordPage() {
   const otpValue = otp.join("")
 
   const handleSendOtp = async () => {
-    if (!email) {
-      setError("Please enter your email")
+    if (!phone || phone.trim().length < 10) {
+      setError("Please enter your 10-digit phone number")
       return
     }
     setError("")
     setLoading(true)
     try {
-      const data = await sendForgotPasswordOtp(email)
-      setPhoneHint(data.phoneHint || "")
-      if (data.demoOtp) setDemoOtp(data.demoOtp)
+      const data = await sendForgotPasswordOtp(phone.trim())
+      setPhoneHint(data.phoneHint || `******${phone.trim().slice(-4)}`)
       setStep("otp")
     } catch (err) {
       setError(err.message || "Failed to send OTP")
@@ -50,12 +48,12 @@ export default function ForgotPasswordPage() {
     setError("")
     setLoading(true)
     try {
-      await resetPassword({ email, otp: otpValue, password })
+      await resetPassword({ phoneOrEmail: phone.trim(), otp: otpValue, password })
       setSuccess("Password updated! Redirecting to login...")
       setTimeout(() => {
         router.replace({
           pathname: "/(auth)/login",
-          params: { email },
+          params: { phone },
         })
       }, 2000)
     } catch (err) {
@@ -93,7 +91,7 @@ export default function ForgotPasswordPage() {
         {/* Header */}
         <View className="px-6 pt-12">
           <TouchableOpacity
-            onPress={() => (step === "otp" ? setStep("email") : router.replace("/(auth)/login"))}
+            onPress={() => (step === "otp" ? setStep("phone") : router.replace("/(auth)/login"))}
             className="w-10 h-10 rounded-xl bg-white border border-gray-light flex items-center justify-center"
           >
             <ArrowLeft size={18} color="#1F1F1F" />
@@ -101,8 +99,8 @@ export default function ForgotPasswordPage() {
 
           <Text className="font-poppins font-bold text-3xl text-dark mt-6">Reset password</Text>
           <Text className="font-nunito text-gray text-base mt-2">
-            {step === "email"
-              ? "Enter your email — we'll send an OTP to your registered phone"
+            {step === "phone"
+              ? "Enter your phone number — we'll send an OTP to verify your identity"
               : `OTP sent to ${phoneHint || "your phone"}`}
           </Text>
         </View>
@@ -121,16 +119,17 @@ export default function ForgotPasswordPage() {
             </View>
           ) : null}
 
-          {step === "email" ? (
+          {step === "phone" ? (
             <View className="space-y-4">
               <View>
-                <Text className="font-poppins font-medium text-sm text-dark mb-2">Email Address</Text>
+                <Text className="font-poppins font-medium text-sm text-dark mb-2">Phone Number</Text>
                 <Input
-                  value={email}
-                  onChangeText={setEmail}
-                  placeholder="you@example.com"
-                  icon={Mail}
-                  keyboardType="email-address"
+                  value={phone}
+                  onChangeText={setPhone}
+                  placeholder="Enter 10-digit number"
+                  icon={Phone}
+                  keyboardType="phone-pad"
+                  maxLength={10}
                 />
               </View>
 
@@ -145,13 +144,6 @@ export default function ForgotPasswordPage() {
             </View>
           ) : (
             <View className="space-y-6">
-              {/* Demo OTP Banner */}
-              <View className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-                <Text className="font-nunito text-sm text-amber-900">
-                  Demo OTP: <Text className="font-poppins font-bold tracking-widest">{demoOtp}</Text>
-                </Text>
-              </View>
-
               {/* 4 Digit OTP Inputs */}
               <View className="flex-row gap-3 justify-center py-2">
                 {otp.map((digit, i) => (

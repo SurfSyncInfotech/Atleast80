@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Store, User, MapPin, Mail, Clock, Save, CheckCircle, Camera,
-  ArrowLeft, ArrowRight, FileText, Upload,
+  ArrowLeft, ArrowRight, FileText, Upload, LocateFixed, Loader2
 } from "lucide-react"
 import KitchenLayout from "../../components/layout/KitchenLayout"
 import KitchenAvatar from "../../components/common/KitchenAvatar"
@@ -87,6 +87,63 @@ export default function KitchenProfilePage() {
   const [uploadingFssai, setUploadingFssai] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
+  const [detectingLocation, setDetectingLocation] = useState(false)
+
+  const handleDetectLocation = () => {
+    if (!navigator.geolocation) {
+      setError("Geolocation is not supported by your browser.")
+      return
+    }
+    setDetectingLocation(true)
+    setError("")
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const { latitude, longitude } = pos.coords
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`,
+            {
+              headers: { "User-Agent": "Atleast80App/1.0" },
+            }
+          )
+          const data = await res.json()
+          if (data?.address) {
+            const addr = data.address
+            const rawState = addr.state || ""
+            const rawCity = addr.city || addr.town || addr.village || addr.county || ""
+            const state = rawState ? rawState.charAt(0).toUpperCase() + rawState.slice(1) : ""
+            const city = rawCity ? rawCity.charAt(0).toUpperCase() + rawCity.slice(1) : ""
+            const road = addr.road || addr.suburb || addr.neighbourhood || ""
+            const houseNumber = addr.house_number || ""
+            const postcode = addr.postcode || ""
+
+            let streetAddress = [houseNumber, road].filter(Boolean).join(", ")
+            if (!streetAddress && data.display_name) {
+              streetAddress = data.display_name.split(",").slice(0, 2).map((s) => s.trim()).join(", ")
+            }
+
+            setForm((f) => ({
+              ...f,
+              address: streetAddress || f.address,
+              state: state || f.state,
+              city: city || f.city,
+              pincode: postcode || f.pincode,
+            }))
+          } else {
+            setError("Could not resolve address details. Please fill manually.")
+          }
+        } catch {
+          setError("Failed to detect location. Please fill manually.")
+        } finally {
+          setDetectingLocation(false)
+        }
+      },
+      () => {
+        setError("Location permission denied. Please allow access or fill manually.")
+        setDetectingLocation(false)
+      }
+    )
+  }
 
   useEffect(() => {
     refreshKitchen().catch(() => {})
@@ -511,7 +568,22 @@ export default function KitchenProfilePage() {
                     transition={{ duration: 0.2 }}
                     className="space-y-4"
                   >
-                    <StepTitle title="Location & hours" subtitle="Where customers can find you" />
+                    <div className="flex items-center justify-between gap-2">
+                      <StepTitle title="Location & hours" subtitle="Where customers can find you" />
+                      <button
+                        type="button"
+                        onClick={handleDetectLocation}
+                        disabled={detectingLocation}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-poppins font-semibold border border-emerald-200 hover:bg-emerald-100 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+                      >
+                        {detectingLocation ? (
+                          <Loader2 size={13} className="animate-spin" />
+                        ) : (
+                          <LocateFixed size={13} />
+                        )}
+                        {detectingLocation ? "Detecting..." : "Auto-detect location"}
+                      </button>
+                    </div>
 
                     <Field label="Full Address" required>
                       <textarea className={cn(inputClass, "min-h-[80px] resize-y")} value={form.address} onChange={update("address")} />

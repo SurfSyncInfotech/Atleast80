@@ -198,7 +198,12 @@ export default function KitchenLoginPage() {
                   </div>
 
                   <div>
-                    <label className="font-poppins text-sm font-medium text-dark-light block mb-2">Password</label>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="font-poppins text-sm font-medium text-dark-light">Password</label>
+                      <Link to="/kitchen/forgot-password" className="text-sm text-primary font-medium hover:underline">
+                        Forgot password?
+                      </Link>
+                    </div>
                     <PasswordInput
                       icon={Lock}
                       value={password}

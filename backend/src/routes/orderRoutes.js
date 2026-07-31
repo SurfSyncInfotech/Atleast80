@@ -174,6 +174,12 @@ router.get("/kitchen/stats", authRequired, requireRole("kitchen"), requireApprov
        WHERE kitchen_id = ? AND DATE(created_at) = CURDATE() AND status != 'cancelled'`,
       [req.kitchenId]
     )
+    const [totalRows] = await pool.query(
+      `SELECT COUNT(*) AS count, COALESCE(SUM(grand_total), 0) AS revenue
+       FROM orders
+       WHERE kitchen_id = ? AND status != 'cancelled'`,
+      [req.kitchenId]
+    )
     const [pendingRows] = await pool.query(
       `SELECT COUNT(*) AS count FROM orders
        WHERE kitchen_id = ? AND (status IN ('pending', 'confirmed', 'preparing', 'out_for_delivery') OR (status = 'delivered' AND delivery_status = 'handover_pending'))`,
@@ -183,6 +189,8 @@ router.get("/kitchen/stats", authRequired, requireRole("kitchen"), requireApprov
     res.json({
       todayOrders: Number(todayRows[0].count),
       todayRevenue: Number(todayRows[0].revenue),
+      totalRevenue: Number(totalRows[0].revenue),
+      totalOrders: Number(totalRows[0].count),
       activeOrders: Number(pendingRows[0].count),
     })
   } catch (error) {
@@ -758,6 +766,32 @@ router.get("/rescue/available", authRequired, requireRole("customer"), async (re
   } catch (error) {
     console.error("Fetch available rescue orders error:", error)
     res.status(500).json({ message: "Failed to load rescue orders" })
+  }
+})
+
+router.get("/rescue/:id", authRequired, requireRole("customer"), async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT o.*, ${KITCHEN_ORDER_FIELDS}
+       FROM orders o
+       JOIN kitchens k ON k.id = o.kitchen_id
+       WHERE o.id = ? AND o.status = 'cancelled' AND o.delivery_status = 'rescue_active'`,
+      [req.params.id]
+    )
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "Rescue order is no longer available or has already been claimed" })
+    }
+
+    const order = {
+      ...mapOrder(rows[0]),
+      items: await fetchOrderItems(rows[0].id),
+    }
+
+    res.json({ order })
+  } catch (error) {
+    console.error("Get rescue order error:", error)
+    res.status(500).json({ message: "Failed to load rescue order" })
   }
 })
 

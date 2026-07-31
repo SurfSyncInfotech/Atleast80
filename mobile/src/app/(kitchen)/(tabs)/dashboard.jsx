@@ -92,6 +92,24 @@ export default function KitchenDashboardScreen() {
   const [alertsModalVisible, setAlertsModalVisible] = useState(false)
   const [alertsLoading, setAlertsLoading] = useState(false)
 
+  // Payouts states
+  const [payoutsModalVisible, setPayoutsModalVisible] = useState(false)
+  const [payoutsList, setPayoutsList] = useState([])
+  const [payoutsLoading, setPayoutsLoading] = useState(false)
+
+  const handleOpenPayoutsModal = async () => {
+    setPayoutsModalVisible(true)
+    setPayoutsLoading(true)
+    try {
+      const data = await api("/api/kitchens/me/payouts")
+      setPayoutsList(data.payouts || [])
+    } catch (err) {
+      console.log("Failed to load payouts:", err)
+    } finally {
+      setPayoutsLoading(false)
+    }
+  }
+
   const loadAlerts = async (showLoader = false) => {
     try {
       if (showLoader) {
@@ -592,17 +610,24 @@ export default function KitchenDashboardScreen() {
             {[
               {
                 label: "Today's Orders",
-                value: String(orderStats.todayOrders),
+                value: String(orderStats.todayOrders || 0),
                 icon: ShoppingBag,
                 color: "#2563EB",
                 iconBg: "bg-blue-50",
               },
               {
-                label: "Revenue",
-                value: `₹${orderStats.todayRevenue}`,
-                icon: Sparkles,
+                label: "Today's Revenue",
+                value: `₹${orderStats.todayRevenue || 0}`,
+                icon: IndianRupee,
                 color: "#10B981",
                 iconBg: "bg-emerald-50",
+              },
+              {
+                label: "Total Revenue",
+                value: `₹${orderStats.totalRevenue || 0}`,
+                icon: Sparkles,
+                color: "#7C3AED",
+                iconBg: "bg-purple-50",
               },
               {
                 label: "Rating",
@@ -839,9 +864,9 @@ export default function KitchenDashboardScreen() {
                 {
                   label: "Payouts",
                   icon: IndianRupee,
-                  color: "#475569",
-                  iconBg: "bg-slate-50 border-slate-100",
-                  disabled: true,
+                  color: "#059669",
+                  iconBg: "bg-emerald-50 border-emerald-100",
+                  action: handleOpenPayoutsModal,
                 },
               ].map((item, i) => {
                 const IconComp = item.icon
@@ -1244,6 +1269,82 @@ export default function KitchenDashboardScreen() {
             )}
           </View>
         </View>
+      </Modal>
+
+      {/* Payouts History Modal */}
+      <Modal
+        visible={payoutsModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setPayoutsModalVisible(false)}
+      >
+        <Pressable
+          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}
+          onPress={() => setPayoutsModalVisible(false)}
+        >
+          <Pressable
+            style={{ backgroundColor: "#FFFFFF", borderTopLeftRadius: 28, borderTopRightRadius: 28, height: "75%", width: "100%" }}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", justifyBetween: "space-between", paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: "#F1F1EF" }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 16, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F" }}>
+                  Payout & Settlement History
+                </Text>
+                <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#7A7A7A", marginTop: 2 }}>
+                  Bank transfers & settlements credited by Admin
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setPayoutsModalVisible(false)} style={{ padding: 4 }}>
+                <X size={20} color="#7A7A7A" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView contentContainerStyle={{ padding: 20, gap: 12 }}>
+              {payoutsLoading ? (
+                <View style={{ paddingVertical: 40, alignItems: "center" }}>
+                  <ActivityIndicator size="large" color="#0B6B3A" />
+                </View>
+              ) : payoutsList.length === 0 ? (
+                <View style={{ paddingVertical: 40, alignItems: "center" }}>
+                  <IndianRupee size={36} color="#CCCCCC" />
+                  <Text style={{ fontSize: 13, fontFamily: "Nunito", color: "#7A7A7A", textAlign: "center", marginTop: 8 }}>
+                    No payout settlements recorded yet.
+                  </Text>
+                  <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#9CA3AF", textAlign: "center", marginTop: 4 }}>
+                    Admin payouts will appear here with Date and UTR Reference number once processed.
+                  </Text>
+                </View>
+              ) : (
+                payoutsList.map((p) => (
+                  <View key={p.id} style={{ backgroundColor: "#F9FAFB", borderRadius: 16, padding: 14, borderWidth: 1, borderColor: "#E5E7EB" }}>
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                      <Text style={{ fontSize: 16, fontWeight: "bold", fontFamily: "Poppins", color: "#059669" }}>
+                        ₹{p.netPayout}
+                      </Text>
+                      <View style={{ backgroundColor: "#D1FAE5", paddingHorizontal: 10, paddingVertical: 2, borderRadius: 12 }}>
+                        <Text style={{ fontSize: 10, fontWeight: "bold", fontFamily: "Poppins", color: "#065F46" }}>
+                          PAID ✅
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={{ gap: 4 }}>
+                      <Text style={{ fontSize: 12, fontFamily: "Nunito", color: "#4B5563" }}>
+                        Gross Sales: ₹{p.grossAmount} | Comm (10%): -₹{p.commissionDeduction}
+                      </Text>
+                      <Text style={{ fontSize: 12, fontWeight: "bold", fontFamily: "monospace", color: "#1F2937" }}>
+                        UTR Ref: {p.utrNumber || "—"}
+                      </Text>
+                      <Text style={{ fontSize: 10, fontFamily: "Nunito", color: "#9CA3AF", marginTop: 2 }}>
+                        Paid on: {p.paidAt ? new Date(p.paidAt).toLocaleString("en-IN") : "—"}
+                      </Text>
+                    </View>
+                  </View>
+                ))
+              )}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
       </Modal>
     </SafeAreaView>
   )

@@ -124,6 +124,11 @@ export default function KitchenEnquiriesScreen() {
     setChatModalVisible(true)
   }
 
+  const handleCloseChat = () => {
+    setChatModalVisible(false)
+    loadEnquiries()
+  }
+
   const loadEnquiries = useCallback(async () => {
     setError("")
     try {
@@ -407,7 +412,7 @@ export default function KitchenEnquiriesScreen() {
               ) : enquiry.status === "completed" ? (
                 <View className="w-full py-2.5 bg-emerald-550/10 border border-emerald-200 rounded-xl items-center justify-center flex-row gap-1.5 bg-emerald-50">
                   <CheckCircle size={14} color="#0F5132" />
-                  <Text className="font-poppins font-bold text-xs text-emerald-800">Order Confirmed (Paid)</Text>
+                  <Text className="font-poppins font-bold text-xs text-emerald-800">Order Confirmed</Text>
                 </View>
               ) : (
                 <View className="flex-row gap-2 w-full">
@@ -440,13 +445,50 @@ export default function KitchenEnquiriesScreen() {
                 </View>
               )}
 
+              {/* Last Chat Message Preview */}
+              {enquiry.messageCount > 0 && enquiry.lastMessage && (
+                <View className={cn(
+                  "p-3 rounded-xl border mt-3.5",
+                  enquiry.lastMessageSenderId === enquiry.customerId 
+                    ? "bg-green-50 border-green-200" 
+                    : "bg-gray-50 border-gray-150"
+                )}>
+                  <View className="flex-row justify-between items-center mb-1">
+                    <Text className={cn(
+                      "font-poppins font-bold text-[9px] uppercase",
+                      enquiry.lastMessageSenderId === enquiry.customerId ? "text-green-800" : "text-gray-500"
+                    )}>
+                      {enquiry.lastMessageSenderId === enquiry.customerId ? "New message from Customer" : "Your last reply"}
+                    </Text>
+                  </View>
+                  <Text className="font-nunito text-xs text-gray-800" numberOfLines={2}>
+                    "{enquiry.lastMessage}"
+                  </Text>
+                </View>
+              )}
+
               {/* In-App Chat Option */}
               <TouchableOpacity
                 onPress={() => handleOpenChat(enquiry)}
-                className="w-full py-2 bg-cream-dark/15 border border-primary/20 rounded-xl items-center justify-center flex-row gap-1.5 mt-2"
+                className={cn(
+                  "w-full py-2.5 border rounded-xl items-center justify-center flex-row gap-1.5 mt-2",
+                  (enquiry.messageCount > 0 && enquiry.lastMessageSenderId === enquiry.customerId)
+                    ? "bg-green-600 border-green-600" 
+                    : "bg-cream-dark/15 border-primary/20"
+                )}
               >
-                <MessageSquare size={13} color="#0B6B3A" />
-                <Text className="font-poppins font-semibold text-xs text-primary">Chat with Customer</Text>
+                <MessageSquare 
+                  size={13} 
+                  color={(enquiry.messageCount > 0 && enquiry.lastMessageSenderId === enquiry.customerId) ? "#FFFFFF" : "#0B6B3A"} 
+                />
+                <Text className={cn(
+                  "font-poppins font-semibold text-xs",
+                  (enquiry.messageCount > 0 && enquiry.lastMessageSenderId === enquiry.customerId) ? "text-white" : "text-primary"
+                )}>
+                  { (enquiry.messageCount > 0 && enquiry.lastMessageSenderId === enquiry.customerId) 
+                      ? "Chat with Customer (New Message)" 
+                      : "Chat with Customer" }
+                </Text>
               </TouchableOpacity>
             </View>
           ))}
@@ -635,11 +677,11 @@ export default function KitchenEnquiriesScreen() {
         visible={chatModalVisible}
         transparent
         animationType="slide"
-        onRequestClose={() => setChatModalVisible(false)}
+        onRequestClose={handleCloseChat}
       >
         <Pressable 
           style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}
-          onPress={() => setChatModalVisible(false)}
+          onPress={handleCloseChat}
         >
           <Pressable 
             style={{ 
@@ -674,7 +716,7 @@ export default function KitchenEnquiriesScreen() {
                   </Text>
                 </View>
               </View>
-              <TouchableOpacity onPress={() => setChatModalVisible(false)} style={{ padding: 4 }}>
+              <TouchableOpacity onPress={handleCloseChat} style={{ padding: 4 }}>
                 <X size={20} color="#7A7A7A" />
               </TouchableOpacity>
             </View>

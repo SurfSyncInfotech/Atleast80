@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useRef } from "react"
 import { View, Text, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, TextInput, ActivityIndicator } from "react-native"
 import { useRouter } from "expo-router"
 import { ArrowLeft, Mail, Lock, User, Phone, ArrowRight, Eye, EyeOff } from "lucide-react-native"
@@ -87,69 +87,56 @@ function CustomInput({
 }) {
   const [isFocused, setIsFocused] = useState(false)
 
-  const innerContent = (
-    <View style={{
-      backgroundColor: "#FAF9F6",
-      borderRadius: 23,
-      flexDirection: "row",
-      alignItems: "center",
-      paddingHorizontal: 16,
-      height: 52,
-    }}>
-      {Icon && <Icon size={18} color="#7A7A7A" style={{ marginRight: 12 }} />}
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor="#9A9A9A"
-        keyboardType={keyboardType}
-        secureTextEntry={secureTextEntry}
-        autoCapitalize={autoCapitalize}
-        onFocus={() => setIsFocused(true)}
-        onBlur={() => setIsFocused(false)}
-        style={{
-          flex: 1,
-          height: "100%",
-          fontSize: 14,
-          fontFamily: "Nunito",
-          color: "#1F1F1F",
-          ...Platform.select({
-            web: {
-              outlineStyle: "none",
-              outlineWidth: 0,
-              outlineColor: "transparent",
-            },
-          }),
-        }}
-      />
-      {showToggle && onTogglePress && (
-        <TouchableOpacity onPress={onTogglePress} style={{ padding: 4 }}>
-          {isToggled ? <EyeOff size={18} color="#7A7A7A" /> : <Eye size={18} color="#7A7A7A" />}
-        </TouchableOpacity>
-      )}
-    </View>
-  )
-
-  if (isGradientBorder || isFocused) {
-    return (
-      <LinearGradient
-        colors={isFocused ? ["#0B6B3A", "#0B6B3A"] : ["#0C4240", "#C5A85A"]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={{ borderRadius: 24, padding: 1.5 }}
-      >
-        {innerContent}
-      </LinearGradient>
-    )
-  }
-
   return (
-    <View style={{
-      borderRadius: 24,
-      padding: 1.5,
-      backgroundColor: "#E3DFD5",
-    }}>
-      {innerContent}
+    <View
+      style={{
+        borderRadius: 24,
+        padding: 1.5,
+        backgroundColor: isFocused ? "#0B6B3A" : "#E3DFD5",
+      }}
+    >
+      <View
+        style={{
+          backgroundColor: "#FAF9F6",
+          borderRadius: 23,
+          flexDirection: "row",
+          alignItems: "center",
+          paddingHorizontal: 16,
+          height: 52,
+        }}
+      >
+        {Icon && <Icon size={18} color={isFocused ? "#0B6B3A" : "#7A7A7A"} style={{ marginRight: 12 }} />}
+        <TextInput
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor="#9A9A9A"
+          keyboardType={keyboardType}
+          secureTextEntry={secureTextEntry}
+          autoCapitalize={autoCapitalize}
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => setIsFocused(false)}
+          style={{
+            flex: 1,
+            height: "100%",
+            fontSize: 14,
+            fontFamily: "Nunito",
+            color: "#1F1F1F",
+            ...Platform.select({
+              web: {
+                outlineStyle: "none",
+                outlineWidth: 0,
+                outlineColor: "transparent",
+              },
+            }),
+          }}
+        />
+        {showToggle && onTogglePress && (
+          <TouchableOpacity onPress={onTogglePress} style={{ padding: 4 }}>
+            {isToggled ? <EyeOff size={18} color="#7A7A7A" /> : <Eye size={18} color="#7A7A7A" />}
+          </TouchableOpacity>
+        )}
+      </View>
     </View>
   )
 }
@@ -203,7 +190,9 @@ function PremiumButton({ onPress, label, loading }) {
 
 export default function SignupPage() {
   const router = useRouter()
-  const { signupCustomer } = useAuth()
+  const { signupCustomer, verifySignupOtp, resendSignupOtp, loginCustomer } = useAuth()
+  
+  const [step, setStep] = useState("signup") // "signup" or "otp"
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
   const [phone, setPhone] = useState("")
@@ -211,6 +200,12 @@ export default function SignupPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
+
+  // OTP state variables
+  const [userId, setUserId] = useState(null)
+  const [otp, setOtp] = useState(["", "", "", ""])
+  const [phoneHint, setPhoneHint] = useState("")
+  const otpRefs = [useRef(null), useRef(null), useRef(null), useRef(null)]
 
   const handleSubmit = async () => {
     if (!name || !email || !phone || !password) {
@@ -230,23 +225,78 @@ export default function SignupPage() {
     setLoading(true)
     try {
       await checkPhoneAvailability(phone, email)
-      await signupCustomer({
+      const res = await signupCustomer({
         name,
         email,
         phone,
         password,
       })
-      router.replace({
-        pathname: "/(auth)/login",
-        params: {
-          message: "Account created! Please sign in to continue.",
-          email: email.trim().toLowerCase(),
-        },
-      })
+      if (res.requiresOtp) {
+        setUserId(res.userId)
+        setPhoneHint(`******${phone.slice(-4)}`)
+        setStep("otp")
+      } else {
+        // Fallback login directly
+        await loginCustomer(email, password)
+      }
     } catch (err) {
       setError(err.message || "Signup failed")
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleVerifyOtp = async () => {
+    const otpValue = otp.join("")
+    if (otpValue.length !== 4) {
+      setError("Please enter the 4-digit OTP")
+      return
+    }
+    setError("")
+    setLoading(true)
+    try {
+      await verifySignupOtp(userId, otpValue)
+      router.replace({
+        pathname: "/(auth)/login",
+        params: {
+          message: "Account created and verified! Please sign in to continue.",
+          email: email.trim().toLowerCase(),
+        },
+      })
+    } catch (err) {
+      setError(err.message || "Failed to verify OTP")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleResendOtp = async () => {
+    setError("")
+    try {
+      await resendSignupOtp(userId)
+      setOtp(["", "", "", ""])
+      if (otpRefs[0]?.current) otpRefs[0].current.focus()
+    } catch (err) {
+      setError(err.message || "Failed to resend OTP")
+    }
+  }
+
+  const handleOtpChange = (index, value) => {
+    if (!/^\d?$/.test(value)) return
+    const next = [...otp]
+    next[index] = value
+    setOtp(next)
+
+    // Focus next input if value is filled
+    if (value && index < 3) {
+      otpRefs[index + 1].current.focus()
+    }
+  }
+
+  const handleOtpKeyPress = (index, key) => {
+    // Focus previous input on backspace if current is empty
+    if (key === "Backspace" && !otp[index] && index > 0) {
+      otpRefs[index - 1].current.focus()
     }
   }
 
@@ -270,8 +320,12 @@ export default function SignupPage() {
         >
           {/* Top Greetings */}
           <View style={{ paddingHorizontal: 24, paddingTop: Platform.OS === "ios" ? 64 : 44, paddingBottom: 16 }}>
-            <Text className="font-poppins font-bold text-3xl text-dark">Create account</Text>
-            <Text className="font-nunito text-gray text-sm mt-1">Sign up to buy homemade food</Text>
+            <Text className="font-poppins font-bold text-3xl text-dark">
+              {step === "signup" ? "Create account" : "Verify your phone"}
+            </Text>
+            <Text className="font-nunito text-gray text-sm mt-1">
+              {step === "signup" ? "Sign up to buy homemade food" : `One-time verification sent to ${phoneHint}`}
+            </Text>
           </View>
 
           {/* White Card Container */}
@@ -294,7 +348,7 @@ export default function SignupPage() {
           >
             {/* Back Button */}
             <TouchableOpacity
-              onPress={() => router.canGoBack() ? router.back() : router.replace("/(customer)/home")}
+              onPress={() => (step === "otp" ? setStep("signup") : router.canGoBack() ? router.back() : router.replace("/(customer)/home"))}
               style={{
                 width: 40,
                 height: 40,
@@ -314,66 +368,109 @@ export default function SignupPage() {
               </View>
             ) : null}
 
-            <View style={{ gap: 16 }}>
-              <View>
-                <Text className="font-poppins font-semibold text-[13px] text-dark mb-2">Full Name</Text>
-                <CustomInput
-                  value={name}
-                  onChangeText={setName}
-                  placeholder="Your full name"
-                  icon={User}
-                  autoCapitalize="words"
-                  isGradientBorder={false}
-                />
-              </View>
+            {step === "signup" ? (
+              <View style={{ gap: 16 }}>
+                <View>
+                  <Text className="font-poppins font-semibold text-[13px] text-dark mb-2">Full Name</Text>
+                  <CustomInput
+                    value={name}
+                    onChangeText={setName}
+                    placeholder="Your full name"
+                    icon={User}
+                    autoCapitalize="words"
+                    isGradientBorder={false}
+                  />
+                </View>
 
-              <View>
-                <Text className="font-poppins font-semibold text-[13px] text-dark mb-2">Email Address</Text>
-                <CustomInput
-                  value={email}
-                  onChangeText={setEmail}
-                  placeholder="you@example.com"
-                  icon={Mail}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  isGradientBorder={true}
-                />
-              </View>
+                <View>
+                  <Text className="font-poppins font-semibold text-[13px] text-dark mb-2">Email Address</Text>
+                  <CustomInput
+                    value={email}
+                    onChangeText={setEmail}
+                    placeholder="you@example.com"
+                    icon={Mail}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    isGradientBorder={true}
+                  />
+                </View>
 
-              <View>
-                <Text className="font-poppins font-semibold text-[13px] text-dark mb-2">Phone Number</Text>
-                <CustomInput
-                  value={phone}
-                  onChangeText={(val) => setPhone(val.replace(/\D/g, "").slice(0, 10))}
-                  placeholder="10-digit mobile number"
-                  icon={Phone}
-                  keyboardType="phone-pad"
-                  isGradientBorder={false}
-                />
-              </View>
+                <View>
+                  <Text className="font-poppins font-semibold text-[13px] text-dark mb-2">Phone Number</Text>
+                  <CustomInput
+                    value={phone}
+                    onChangeText={(val) => setPhone(val.replace(/\D/g, "").slice(0, 10))}
+                    placeholder="10-digit mobile number"
+                    icon={Phone}
+                    keyboardType="phone-pad"
+                    isGradientBorder={false}
+                  />
+                </View>
 
-              <View>
-                <Text className="font-poppins font-semibold text-[13px] text-dark mb-2">Password</Text>
-                <CustomInput
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder="At least 6 characters"
-                  icon={Lock}
-                  secureTextEntry={!showPassword}
-                  showToggle={true}
-                  isToggled={showPassword}
-                  onTogglePress={() => setShowPassword(!showPassword)}
-                />
-              </View>
+                <View>
+                  <Text className="font-poppins font-semibold text-[13px] text-dark mb-2">Password</Text>
+                  <CustomInput
+                    value={password}
+                    onChangeText={setPassword}
+                    placeholder="At least 6 characters"
+                    icon={Lock}
+                    secureTextEntry={!showPassword}
+                    showToggle={true}
+                    isToggled={showPassword}
+                    onTogglePress={() => setShowPassword(!showPassword)}
+                  />
+                </View>
 
-              <View style={{ paddingTop: 16 }}>
-                <PremiumButton 
-                  onPress={handleSubmit} 
-                  label="Sign up" 
-                  loading={loading} 
-                />
+                <View style={{ paddingTop: 16 }}>
+                  <PremiumButton 
+                    onPress={handleSubmit} 
+                    label="Sign up" 
+                    loading={loading} 
+                  />
+                </View>
               </View>
-            </View>
+            ) : (
+              <View style={{ gap: 20 }}>
+                {/* 4 Digit OTP Inputs */}
+                <View style={{ flexDirection: "row", gap: 12, justifyContent: "center", paddingVertical: 8 }}>
+                  {otp.map((digit, i) => (
+                    <TextInput
+                      key={i}
+                      ref={otpRefs[i]}
+                      keyboardType="number-pad"
+                      maxLength={1}
+                      value={digit}
+                      onChangeText={(val) => handleOtpChange(i, val)}
+                      onKeyPress={({ nativeEvent }) => handleOtpKeyPress(i, nativeEvent.key)}
+                      style={{
+                        width: 56,
+                        height: 56,
+                        backgroundColor: "white",
+                        borderRadius: 12,
+                        borderWidth: 2,
+                        borderColor: "#E8E8E8",
+                        textAlign: "center",
+                        fontSize: 24,
+                        fontWeight: "bold",
+                        color: "#1F1F1F"
+                      }}
+                    />
+                  ))}
+                </View>
+
+                <View style={{ paddingTop: 16 }}>
+                  <PremiumButton 
+                    onPress={handleVerifyOtp} 
+                    label="Verify & sign in" 
+                    loading={loading} 
+                  />
+                </View>
+
+                <TouchableOpacity onPress={handleResendOtp} disabled={loading} style={{ alignSelf: "center", marginTop: 8 }}>
+                  <Text style={{ color: "#0B6B3A", fontWeight: "bold", fontSize: 14 }}>Resend OTP</Text>
+                </TouchableOpacity>
+              </View>
+            )}
 
             <View className="flex-row justify-center mt-6">
               <Text className="font-nunito text-sm text-gray">Already have an account? </Text>

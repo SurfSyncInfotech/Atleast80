@@ -7,6 +7,7 @@ export default function VideoHero() {
     if (playerInstance) {
       playerInstance.loop = true
       playerInstance.muted = true
+      playerInstance.showNowPlayingNotification = false
       playerInstance.play()
     }
   })
@@ -14,8 +15,8 @@ export default function VideoHero() {
   return (
     <VideoView
       player={player}
-      style={{ position: "absolute", left: 0, right: 0, top: 0, bottom: 0 }}
-      resizeMode="cover"
+      style={{ position: "absolute", left: 0, right: 0, top: 0, bottom: 0, width: "100%", height: "100%" }}
+      contentFit="cover"
       allowsFullscreen={false}
       nativeControls={false}
     />

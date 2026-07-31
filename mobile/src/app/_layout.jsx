@@ -1,11 +1,28 @@
-import { Stack } from "expo-router"
+import { Stack, useRouter } from "expo-router"
 import { Platform } from "react-native"
-import React from "react"
+import React, { useEffect } from "react"
+import * as Notifications from "expo-notifications"
 import { AuthProvider } from "../context/AuthContext"
 import { CartProvider } from "../context/CartContext"
 import "../global.css"
 
 export default function RootLayout() {
+  const router = useRouter()
+
+  useEffect(() => {
+    const subscription = Notifications.addNotificationResponseReceivedListener(response => {
+      const data = response.notification.request.content.data
+      console.log("Notification clicked with data:", data)
+      if (data && data.type === "rescue" && data.orderId) {
+        router.push(`/(customer)/rescue/${data.orderId}`)
+      }
+    })
+
+    return () => {
+      subscription.remove()
+    }
+  }, [])
+
   return (
     <AuthProvider>
       <CartProvider>

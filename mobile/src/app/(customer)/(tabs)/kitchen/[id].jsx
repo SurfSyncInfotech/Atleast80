@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react"
 import { View, Text, ScrollView, Image, TouchableOpacity, ActivityIndicator, Platform, Linking, Modal, TextInput, Pressable, Alert, KeyboardAvoidingView } from "react-native"
 import { useLocalSearchParams, useRouter } from "expo-router"
 import { SafeAreaView } from "react-native-safe-area-context"
-import { ArrowLeft, Star, ShieldCheck, Clock, Share2, MapPin, Phone, UtensilsCrossed, ShoppingBag, Sparkles, X, ChefHat, ArrowRight, ClipboardList, CheckCircle, MessageSquare, Send } from "lucide-react-native"
+import { ArrowLeft, Star, ShieldCheck, Clock, Share2, MapPin, Phone, UtensilsCrossed, ShoppingBag, Sparkles, X, ChefHat, ArrowRight, ClipboardList, CheckCircle, MessageSquare, Send, RotateCw } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import MenuListItem from "../../../../components/common/MenuListItem"
 import MenuItemDetailModal from "../../../../components/common/MenuItemDetailModal"
@@ -46,6 +46,7 @@ export default function KitchenDetailScreen() {
   const [enquirySubmitting, setEnquirySubmitting] = useState(false)
   const [enquiryError, setEnquiryError] = useState("")
   const [activeEnquiry, setActiveEnquiry] = useState(null)
+  const [refreshingEnquiry, setRefreshingEnquiry] = useState(false)
   const [successModalVisible, setSuccessModalVisible] = useState(false)
   const [chatModalVisible, setChatModalVisible] = useState(false)
   const [chatMessages, setChatMessages] = useState([])
@@ -136,7 +137,7 @@ export default function KitchenDetailScreen() {
         } else if (hasCombo) {
           setActiveTab("combo")
         } else {
-          setActiveTab("offers")
+          setActiveTab("food")
         }
       } catch (err) {
         console.log("Failed to load kitchen details from API", err)
@@ -150,6 +151,23 @@ export default function KitchenDetailScreen() {
       cancelled = true
     }
   }, [id, authLoading, user])
+
+  const handleRefreshEnquiry = async () => {
+    if (!id || authLoading || !user) return
+    setRefreshingEnquiry(true)
+    try {
+      const enquiryRes = await api(`/api/bulk-enquiries/kitchen/${id}`).catch(() => null)
+      if (enquiryRes && enquiryRes.enquiry) {
+        setActiveEnquiry(enquiryRes.enquiry)
+      } else {
+        setActiveEnquiry(null)
+      }
+    } catch (e) {
+      console.warn("Failed to refresh enquiry:", e)
+    } finally {
+      setRefreshingEnquiry(false)
+    }
+  }
 
   const submitEnquiry = async () => {
     const val = Number(enquiryValue)
@@ -625,11 +643,20 @@ export default function KitchenDetailScreen() {
                 }}
               />
 
-              <View className="flex-row items-center gap-3 mb-2.5">
-                <View className="w-8 h-8 rounded-full bg-white/10 items-center justify-center">
-                  <ChefHat size={16} color="#F4C400" />
+              <View className="flex-row items-center justify-between mb-2.5">
+                <View className="flex-row items-center gap-3">
+                  <View className="w-8 h-8 rounded-full bg-white/10 items-center justify-center">
+                    <ChefHat size={16} color="#F4C400" />
+                  </View>
+                  <Text className="font-poppins font-extrabold text-white text-base">Bulk Order Enquiry</Text>
                 </View>
-                <Text className="font-poppins font-extrabold text-white text-base">Bulk Order Enquiry</Text>
+                <TouchableOpacity onPress={handleRefreshEnquiry} disabled={refreshingEnquiry} style={{ padding: 6 }}>
+                  {refreshingEnquiry ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <RotateCw size={16} color="#FFFFFF" />
+                  )}
+                </TouchableOpacity>
               </View>
 
               <View className="bg-white/10 rounded-2xl p-3.5 border border-white/10 mb-4">
@@ -775,13 +802,7 @@ export default function KitchenDetailScreen() {
                   <Text className={cn("text-xs font-poppins font-bold mt-0.5", active ? "text-white" : "text-gray")}>
                     {tab.label}
                   </Text>
-                  {tab.id === "offers" && offerCount > 0 ? (
-                    <View className={cn("w-4 h-4 rounded-full items-center justify-center ml-1", active ? "bg-white/20" : "bg-accent/15")}>
-                      <Text className={cn("text-[9px] font-bold", active ? "text-white" : "text-accent")}>
-                        {offerCount}
-                      </Text>
-                    </View>
-                  ) : null}
+
                 </TouchableOpacity>
               )
             })}
@@ -900,9 +921,20 @@ export default function KitchenDetailScreen() {
                   {kitchen.name}
                 </Text>
               </View>
-              <TouchableOpacity onPress={() => setEnquiryModalVisible(false)} style={{ padding: 4 }}>
-                <X size={20} color="#1F1F1F" />
-              </TouchableOpacity>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                {hasActiveEnquiry && (
+                  <TouchableOpacity onPress={handleRefreshEnquiry} disabled={refreshingEnquiry} style={{ padding: 4 }}>
+                    {refreshingEnquiry ? (
+                      <ActivityIndicator size="small" color="#0B6B3A" />
+                    ) : (
+                      <RotateCw size={18} color="#0B6B3A" />
+                    )}
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity onPress={() => setEnquiryModalVisible(false)} style={{ padding: 4 }}>
+                  <X size={20} color="#1F1F1F" />
+                </TouchableOpacity>
+              </View>
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled={true}>

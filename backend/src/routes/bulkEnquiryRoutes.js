@@ -272,6 +272,53 @@ router.delete(
   }
 )
 
+router.patch(
+  "/:id/quotation-price",
+  authRequired,
+  requireRole("kitchen"),
+  requireApprovedKitchen,
+  async (req, res) => {
+    const enquiryId = Number(req.params.id)
+    const quotationAmount = Number(req.body.quotationAmount)
+    const quotationNotes = req.body.quotationNotes?.toString().trim() || null
+
+    if (!enquiryId) {
+      return res.status(400).json({ message: "Invalid enquiry" })
+    }
+    if (!quotationAmount || Number.isNaN(quotationAmount) || quotationAmount <= 0) {
+      return res.status(400).json({ message: "Enter a valid quotation amount" })
+    }
+
+    try {
+      const [rows] = await pool.query(
+        "SELECT id, kitchen_id FROM bulk_order_enquiries WHERE id = ?",
+        [enquiryId]
+      )
+      if (rows.length === 0) {
+        return res.status(404).json({ message: "Enquiry not found" })
+      }
+      if (rows[0].kitchen_id !== req.kitchenId) {
+        return res.status(403).json({ message: "Not your enquiry" })
+      }
+
+      await pool.query(
+        `UPDATE bulk_order_enquiries
+         SET status = 'quoted',
+             quotation_amount = ?,
+             quotation_notes = COALESCE(?, quotation_notes),
+             quoted_at = NOW()
+         WHERE id = ?`,
+        [quotationAmount, quotationNotes, enquiryId]
+      )
+
+      res.json({ message: "Quotation price updated successfully." })
+    } catch (error) {
+      console.error("Update quotation price error:", error)
+      res.status(500).json({ message: "Failed to update quotation price" })
+    }
+  }
+)
+
 router.post("/:id/accept", authRequired, requireRole("customer"), async (req, res) => {
   const enquiryId = Number(req.params.id)
   if (!enquiryId) {

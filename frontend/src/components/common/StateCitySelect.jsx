@@ -4,11 +4,11 @@ import { cn } from "../../lib/utils"
 
 const selectVariants = {
   default:
-    "w-full px-4 py-3 bg-[#f4f4f5] border border-gray-200 font-nunito text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:opacity-60 disabled:cursor-not-allowed",
+    "w-full pl-4 pr-10 py-3 bg-[#f4f4f5] border border-gray-200 font-nunito text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:opacity-60 disabled:cursor-not-allowed",
   light:
-    "w-full px-3 py-2.5 bg-white border border-gray-200 font-nunito text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:opacity-60 disabled:cursor-not-allowed",
+    "w-full pl-3 pr-8 py-2.5 bg-white border border-gray-200 font-nunito text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:opacity-60 disabled:cursor-not-allowed",
   hero:
-    "w-full px-4 py-3 bg-white border border-gray-200 rounded-xl font-nunito text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:opacity-60 disabled:cursor-not-allowed shadow-sm",
+    "w-full pl-4 pr-10 py-3 bg-white border border-gray-200 rounded-xl font-nunito text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:opacity-60 disabled:cursor-not-allowed shadow-sm",
 }
 
 export default function StateCitySelect({
@@ -122,11 +122,15 @@ export default function StateCitySelect({
                 ? "Loading cities..."
                 : "Select city"}
             </option>
-            {cities.map((c) => (
-              <option key={c.id || c.name} value={c.name}>
-                {c.name}
-              </option>
-            ))}
+            {(() => {
+              const hasActiveCity = !city || cities.some((c) => c.name?.toLowerCase() === city.toLowerCase())
+              const list = hasActiveCity ? cities : [{ id: "detected", name: city }, ...cities]
+              return list.map((c) => (
+                <option key={c.id || c.name} value={c.name}>
+                  {c.name}
+                </option>
+              ))
+            })()}
           </select>
         </div>
       </div>

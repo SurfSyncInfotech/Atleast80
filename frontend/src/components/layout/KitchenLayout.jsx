@@ -32,6 +32,7 @@ import {
 
   MapPin,
   MessageSquare,
+  IndianRupee,
 } from "lucide-react"
 
 import { useAuth } from "../../context/AuthContext"
@@ -96,8 +97,37 @@ export default function KitchenLayout({ children, fullBleed = false, fullWidth =
   const [storyViewerOpen, setStoryViewerOpen] = useState(false)
   const [alertsOpen, setAlertsOpen] = useState(false)
   const [alertCount, setAlertCount] = useState(0)
+  const [unreadEnquiryCount, setUnreadEnquiryCount] = useState(0)
 
   const isApproved = kitchen?.status === "approved"
+
+  useEffect(() => {
+    refreshKitchen().catch(() => {})
+  }, [refreshKitchen])
+
+  useEffect(() => {
+    if (!isApproved) return
+
+    const checkEnquiryMessages = async () => {
+      try {
+        const data = await api("/api/bulk-enquiries/partner", {}, "kitchen")
+        const enquiries = data.enquiries || []
+        let unread = 0
+        enquiries.forEach((e) => {
+          if (e.lastMessage && e.lastMessageSenderId && e.lastMessageSenderId !== user?.id) {
+            unread += 1
+          }
+        })
+        setUnreadEnquiryCount(unread)
+      } catch (e) {
+        // silent
+      }
+    }
+
+    checkEnquiryMessages()
+    const interval = setInterval(checkEnquiryMessages, 4000)
+    return () => clearInterval(interval)
+  }, [isApproved, user?.id])
 
   useEffect(() => {
     api("/api/alerts", {}, "kitchen")
@@ -159,6 +189,8 @@ export default function KitchenLayout({ children, fullBleed = false, fullWidth =
     { to: "/kitchen/orders", label: "Orders", icon: ShoppingBag, requiresApproval: true },
 
     { to: "/kitchen/enquiries", label: "Enquiries", icon: MessageSquare, requiresApproval: true },
+
+    { to: "/kitchen/payouts", label: "Payouts", icon: IndianRupee, requiresApproval: true },
 
     { to: "/kitchen/profile", label: "Profile", icon: User },
 
@@ -267,6 +299,12 @@ export default function KitchenLayout({ children, fullBleed = false, fullWidth =
         <Icon size={18} />
 
         {item.label}
+
+        {item.label === "Enquiries" && unreadEnquiryCount > 0 && (
+          <span className="ml-auto bg-red-500 text-white font-bold text-[10px] px-2 py-0.5 rounded-full animate-pulse shadow-sm">
+            {unreadEnquiryCount} New
+          </span>
+        )}
 
         {item.disabled && (
 

@@ -9,8 +9,27 @@ import {
   TextInput,
   Platform,
   Linking,
-  Modal
+  Modal,
+  Image,
+  Pressable
 } from "react-native"
+
+import * as Location from "expo-location"
+
+const FALLBACK_LOCATIONS = {
+  states: [
+    { name: "Maharashtra", iso2: "MH" },
+    { name: "Delhi", iso2: "DL" },
+    { name: "Uttar Pradesh", iso2: "UP" },
+    { name: "Karnataka", iso2: "KA" },
+  ],
+  cities: {
+    MH: ["Kolad", "Roha", "Mangaon", "Mumbai", "Pune"],
+    DL: ["New Delhi", "Dwarka", "Rohini"],
+    UP: ["Lucknow", "Kanpur", "Noida"],
+    KA: ["Bengaluru", "Mysuru"],
+  }
+}
 
 // Custom Alert wrapper to support React Native Web / Browser environment
 const Alert = {
@@ -50,10 +69,14 @@ import {
   AlertTriangle,
   Phone,
   Zap,
-  Wallet
+  Wallet,
+  ChevronDown,
+  ChevronRight,
+  X
 } from "lucide-react-native"
 import { useAuth } from "../../../context/AuthContext"
 import {
+  api,
   getRiderDashboard,
   toggleRiderStatus,
   updateRiderLocation,
@@ -157,6 +180,171 @@ export default function RiderDashboardScreen() {
   const [actionLoading, setActionLoading] = useState(false)
   const [otpInput, setOtpInput] = useState("")
   const [alertConfig, setAlertConfig] = useState(null)
+  const [qrModalConfig, setQrModalConfig] = useState(null)
+  const [depositUtrInput, setDepositUtrInput] = useState("")
+
+  // Rider Payouts Modal States
+  const [riderPayoutsModalVisible, setRiderPayoutsModalVisible] = useState(false)
+  const [riderPayoutsList, setRiderPayoutsList] = useState([])
+  const [riderPayoutsLoading, setRiderPayoutsLoading] = useState(false)
+
+  const handleOpenRiderPayoutsModal = async () => {
+    setRiderPayoutsModalVisible(true)
+    setRiderPayoutsLoading(true)
+    try {
+      const data = await api("/api/rider/me/payouts")
+      setRiderPayoutsList(data.payouts || [])
+    } catch (err) {
+      console.log("Failed to load rider payouts:", err)
+    } finally {
+      setRiderPayoutsLoading(false)
+    }
+  }
+
+  // Rider Location Filter/Selection States
+  const [locationModalVisible, setLocationModalVisible] = useState(false)
+  const [statesList, setStatesList] = useState([])
+  const [citiesList, setCitiesList] = useState([])
+  const [statesLoading, setStatesLoading] = useState(false)
+  const [citiesLoading, setCitiesLoading] = useState(false)
+  const [statePickerVisible, setStatePickerVisible] = useState(false)
+  const [cityPickerVisible, setCityPickerVisible] = useState(false)
+
+  const [tempState, setTempState] = useState(user?.state || "")
+  const [tempStateIso, setTempStateIso] = useState("")
+  const [tempCity, setTempCity] = useState(user?.city || "")
+  const [detectingLocation, setDetectingLocation] = useState(false)
+
+  const handleAutoDetectLocation = async () => {
+    setDetectingLocation(true)
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync()
+      if (status !== "granted") {
+        Alert.alert("Permission Denied", "Please allow location access to auto-detect your location.")
+        setDetectingLocation(false)
+        return
+      }
+
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+      const { latitude, longitude } = loc.coords
+
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`, {
+        headers: {
+          "User-Agent": "Atleast80Rider/1.0"
+        }
+      })
+      const data = await res.json()
+      if (data && data.address) {
+        const displayState = data.address.state || ""
+        const displayCity = data.address.city || data.address.town || data.address.village || data.address.county || data.address.suburb || ""
+        let stateIso = ""
+        const matchedState = FALLBACK_LOCATIONS.states.find(s => s.name.toLowerCase() === displayState.toLowerCase())
+        if (matchedState) stateIso = matchedState.iso2
+
+        if (displayState && displayCity) {
+          setTempState(displayState)
+          setTempStateIso(stateIso)
+          setTempCity(displayCity)
+        } else {
+          Alert.alert("Location Error", "Could not resolve state or city from GPS coordinates.")
+        }
+      } else {
+        Alert.alert("Location Error", "Could not reverse-geocode your coordinates.")
+      }
+    } catch (err) {
+      console.warn("Auto-detect failed:", err)
+      Alert.alert("Detection Failed", "Something went wrong while detecting your location.")
+    } finally {
+      setDetectingLocation(false)
+    }
+  }
+
+  // Load States list
+  const loadStates = async () => {
+    if (statesList.length > 0) return
+    setStatesLoading(true)
+    try {
+      const data = await api("/api/locations/states")
+      setStatesList(data.states || [])
+    } catch (err) {
+      console.warn("Failed to load states from API, using fallback locations:", err)
+      setStatesList(FALLBACK_LOCATIONS.states)
+    } finally {
+      setStatesLoading(false)
+    }
+  }
+
+  const handleSelectState = async (stateName, stateIso) => {
+    setTempState(stateName)
+    setTempStateIso(stateIso)
+    setTempCity("")
+    setStatePickerVisible(false)
+
+    setCitiesLoading(true)
+    try {
+      const data = await api(`/api/locations/cities?state=${stateIso}`)
+      setCitiesList(data.cities || [])
+    } catch (err) {
+      console.warn("Failed to load cities from API, using fallback locations:", err)
+      setCitiesList(FALLBACK_LOCATIONS.cities[stateIso] || [])
+    } finally {
+      setCitiesLoading(false)
+    }
+  }
+
+  const handleSelectCity = (cityName) => {
+    setTempCity(cityName)
+    setCityPickerVisible(false)
+  }
+
+  const handleSaveLocation = async () => {
+    try {
+      await api("/api/auth/location", {
+        method: "PATCH",
+        body: JSON.stringify({
+          state: tempState,
+          city: tempCity,
+          stateIso: tempStateIso,
+        }),
+      })
+      if (user) {
+        user.city = tempCity
+        user.state = tempState
+      }
+      setLocationModalVisible(false)
+      // Reload dashboard metrics
+      const data = await getRiderDashboard()
+      setMetrics(data)
+    } catch (err) {
+      Alert.alert("Error", "Failed to save delivery location")
+    }
+  }
+
+  const handleClearLocation = async () => {
+    try {
+      await api("/api/auth/location", {
+        method: "PATCH",
+        body: JSON.stringify({
+          state: "",
+          city: "",
+          stateIso: "",
+        }),
+      })
+      if (user) {
+        user.city = ""
+        user.state = ""
+      }
+      setTempState("")
+      setTempStateIso("")
+      setTempCity("")
+      setLocationModalVisible(false)
+      // Reload dashboard metrics
+      const data = await getRiderDashboard()
+      setMetrics(data)
+    } catch (err) {
+      Alert.alert("Error", "Failed to clear location")
+    }
+  }
 
   const Alert = {
     alert: (title, message, buttons) => {
@@ -176,17 +364,49 @@ export default function RiderDashboardScreen() {
   useEffect(() => {
     if (!metrics?.isOnline || metrics?.status !== "active") return
 
-    // Immediately push initial location
-    updateRiderLocation(26.8467, 80.9462).catch(console.warn)
+    let isMounted = true
+    let intervalId = null
 
-    const timer = setInterval(() => {
-      // Jitter location slightly for simulation
-      const lat = 26.8467 + (Math.random() - 0.5) * 0.002
-      const lng = 80.9462 + (Math.random() - 0.5) * 0.002
-      updateRiderLocation(lat, lng).catch(console.warn)
-    }, 20000)
+    const trackRiderLocation = async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync()
+        if (status !== "granted") {
+          console.warn("Rider location permission denied. Falling back to default.")
+          if (isMounted) {
+            updateRiderLocation(26.8467, 80.9462).catch(console.warn)
+          }
+          return
+        }
 
-    return () => clearInterval(timer)
+        // Get initial location
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+        if (isMounted) {
+          updateRiderLocation(loc.coords.latitude, loc.coords.longitude).catch(console.warn)
+        }
+
+        // Periodic tracking interval
+        intervalId = setInterval(async () => {
+          try {
+            const currentLoc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+            if (isMounted) {
+              updateRiderLocation(currentLoc.coords.latitude, currentLoc.coords.longitude).catch(console.warn)
+            }
+          } catch (err) {
+            console.warn("Rider periodic location update failed:", err.message)
+          }
+        }, 30000)
+
+      } catch (err) {
+        console.warn("Rider location tracking initialization error:", err.message)
+      }
+    }
+
+    trackRiderLocation()
+
+    return () => {
+      isMounted = false
+      if (intervalId) clearInterval(intervalId)
+    }
   }, [metrics?.isOnline, metrics?.status])
 
   // Periodic polling for metrics & broadcasts when online
@@ -197,7 +417,19 @@ export default function RiderDashboardScreen() {
       try {
         const data = await getRiderDashboard()
         if (!active) return
-        setMetrics(data)
+
+        // Show alert if order delivery status transitions to rescue_timeout
+        setMetrics((prevMetrics) => {
+          const prevStatus = prevMetrics?.activeOrder?.delivery_status
+          const newStatus = data.activeOrder?.delivery_status
+          if (prevStatus !== "rescue_timeout" && newStatus === "rescue_timeout") {
+            Alert.alert(
+              "Rescue Timeout ⚠️",
+              "No one claimed this order within 3 minutes. Please return the food back to the kitchen."
+            )
+          }
+          return data
+        })
         setLoading(false)
 
         if (data.isOnline && data.status === "active" && !data.activeOrder) {
@@ -263,6 +495,71 @@ export default function RiderDashboardScreen() {
     }
   }
 
+  const handleCompleteDeliveryPress = () => {
+    if (!otpInput || otpInput.trim().length !== 4) {
+      Alert.alert("Enter OTP", "Please enter the 4-digit customer delivery OTP first.")
+      return
+    }
+
+    if (metrics.activeOrder.payment_method !== "cod") {
+      // Prepaid completes directly
+      handleOrderAction(metrics.activeOrder.id, "deliver", { deliveryOtp: otpInput })
+      return
+    }
+
+    // COD asks for Cash or QR
+    Alert.alert(
+      "Select Payment Mode",
+      `How is the customer paying ₹${metrics.activeOrder.grand_total}?`,
+      [
+        {
+          text: "Cash",
+          onPress: () => {
+            handleOrderAction(metrics.activeOrder.id, "deliver", { deliveryOtp: otpInput })
+          }
+        },
+        {
+          text: "Online (QR)",
+          onPress: () => {
+            setQrModalConfig({
+              title: "Collect COD Payment (QR)",
+              amount: metrics.activeOrder.grand_total,
+              onConfirm: () => handleOrderAction(metrics.activeOrder.id, "deliver", { deliveryOtp: otpInput, paymentType: "qr" })
+            })
+          }
+        },
+        { text: "Cancel", style: "cancel" }
+      ]
+    )
+  }
+
+  const handleCancelDoorstepPress = () => {
+    const fee = metrics.activeOrder.delivery_fee || 30
+    Alert.alert(
+      "Collect Cancellation Fee",
+      `Please collect the delivery fee of ₹${fee} from the customer. How are they paying?`,
+      [
+        {
+          text: "Cash",
+          onPress: () => {
+            handleOrderAction(metrics.activeOrder.id, "cancel_doorstep")
+          }
+        },
+        {
+          text: "Online (QR)",
+          onPress: () => {
+            setQrModalConfig({
+              title: "Collect Doorstep Cancel Fee (QR)",
+              amount: fee,
+              onConfirm: () => handleOrderAction(metrics.activeOrder.id, "cancel_doorstep")
+            })
+          }
+        },
+        { text: "Go Back", style: "cancel" }
+      ]
+    )
+  }
+
   const handleCall = (phone) => {
     if (phone) {
       Linking.openURL(`tel:${phone}`).catch(() => {
@@ -302,11 +599,37 @@ export default function RiderDashboardScreen() {
           <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: "rgba(255,255,255,0.16)", alignItems: "center", justifyContent: "center", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.3)" }}>
             <Text style={{ color: "#FFFFFF", fontFamily: "Poppins", fontWeight: "bold", fontSize: 17 }}>{initial}</Text>
           </View>
-          <View>
+          <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 12.5, color: "rgba(255,255,255,0.72)", fontFamily: "Nunito" }}>{getGreeting()}</Text>
             <Text style={{ fontSize: 19, fontWeight: "bold", fontFamily: "Poppins", color: "#FFFFFF", marginTop: 1 }}>{user?.name || "Rider"}</Text>
           </View>
         </View>
+
+        {/* Rider Location Selector */}
+        <TouchableOpacity
+          onPress={() => {
+            setLocationModalVisible(true)
+            loadStates()
+          }}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 6,
+            backgroundColor: "rgba(255,255,255,0.12)",
+            paddingHorizontal: 12,
+            paddingVertical: 8,
+            borderRadius: 12,
+            marginTop: 14,
+            borderWidth: 1,
+            borderColor: "rgba(255,255,255,0.15)",
+          }}
+        >
+          <MapPin size={14} color="#FFFFFF" />
+          <Text style={{ color: "#FFFFFF", fontSize: 12, fontWeight: "bold", fontFamily: "Poppins", flex: 1 }} numberOfLines={1}>
+            {user?.city || metrics?.city || "Select Delivery City (Click to Set)"}
+          </Text>
+          <ChevronRight size={14} color="#FFFFFF" />
+        </TouchableOpacity>
 
         {status === "active" && (
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: "rgba(255,255,255,0.14)", borderRadius: 18, paddingHorizontal: 16, paddingVertical: 12, marginTop: 18, borderWidth: 1, borderColor: "rgba(255,255,255,0.16)" }}>
@@ -337,16 +660,25 @@ export default function RiderDashboardScreen() {
         <View style={{ backgroundColor: "#FFFFFF", borderRadius: 24, marginTop: 18, marginBottom: 16, shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.06, shadowRadius: 16, elevation: 3, overflow: "hidden" }}>
           <TouchableOpacity
             activeOpacity={0.85}
-            onPress={() => Alert.alert("Your Earnings", `You've earned ₹${metrics?.totalEarnings || 0} from ${metrics?.totalDeliveries || 0} completed ${metrics?.totalDeliveries === 1 ? "delivery" : "deliveries"} so far. Keep it up!`)}
-            style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", padding: 20 }}
+            onPress={handleOpenRiderPayoutsModal}
+            style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 20 }}
           >
-            <View>
-              <Text style={{ fontSize: 12, color: "#8A8A8A", fontFamily: "Nunito" }}>Total Earnings</Text>
-              <Text style={{ fontSize: 32, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F", marginTop: 4 }}>₹{metrics?.totalEarnings || 0}</Text>
-              <Text style={{ fontSize: 11, color: "#0B6B3A", fontFamily: "Nunito", fontWeight: "600", marginTop: 4 }}>Lifetime earnings on this account</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 11, color: "#8A8A8A", fontFamily: "Nunito" }}>Today's Earnings</Text>
+              <Text style={{ fontSize: 26, fontWeight: "bold", fontFamily: "Poppins", color: "#0B6B3A", marginTop: 2 }}>₹{metrics?.todayEarnings || 0}</Text>
+              <Text style={{ fontSize: 10, color: "#9E9E9E", fontFamily: "Nunito", marginTop: 2 }}>{metrics?.todayDeliveries || 0} deliveries today</Text>
             </View>
-            <View style={{ width: 48, height: 48, borderRadius: 16, backgroundColor: "#FFF1E6", alignItems: "center", justifyContent: "center" }}>
-              <Wallet size={22} color="#FF6B00" />
+
+            <View style={{ width: 1, height: 40, backgroundColor: "#F1F1EF", marginHorizontal: 16 }} />
+
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 11, color: "#8A8A8A", fontFamily: "Nunito" }}>Total Earnings</Text>
+              <Text style={{ fontSize: 26, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F", marginTop: 2 }}>₹{metrics?.totalEarnings || 0}</Text>
+              <Text style={{ fontSize: 10, color: "#9E9E9E", fontFamily: "Nunito", marginTop: 2 }}>Lifetime earnings</Text>
+            </View>
+
+            <View style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: "#FFF1E6", alignItems: "center", justifyContent: "center", marginLeft: 8 }}>
+              <Wallet size={18} color="#FF6B00" />
             </View>
           </TouchableOpacity>
 
@@ -365,14 +697,32 @@ export default function RiderDashboardScreen() {
 
             <TouchableOpacity
               activeOpacity={0.7}
-              onPress={() =>
-                Alert.alert(
-                  cashCollected > 0 ? "Cash Deposit Reminder" : "Cash in Hand",
-                  cashCollected > 0
-                    ? `You're holding ₹${cashCollected} in collected COD cash. Please deposit this with your kitchen partner(s) as soon as possible to keep your account in good standing.`
-                    : "You have no pending COD cash right now. Cash collected from customers will show up here until it's deposited."
-                )
-              }
+              onPress={() => {
+                if (cashCollected > 0) {
+                  setDepositUtrInput("")
+                  setQrModalConfig({
+                    title: "Deposit Cash to Admin (QR)",
+                    amount: cashCollected,
+                    requireUtr: true,
+                    onConfirm: async (utrVal) => {
+                      try {
+                        setActionLoading(true)
+                        const res = await api("/api/rider/deposit-cash", {
+                          method: "POST",
+                          body: JSON.stringify({ amount: cashCollected, utrNumber: utrVal }),
+                        })
+                        Alert.alert("Deposit Request Sent 🕒", `Your deposit request of ₹${cashCollected} has been submitted to Admin. Admin will verify your UTR and approve your deposit.`)
+                      } catch (err) {
+                        Alert.alert("Deposit Failed", err.message || "Failed to process cash deposit")
+                      } finally {
+                        setActionLoading(false)
+                      }
+                    }
+                  })
+                } else {
+                  Alert.alert("Cash in Hand", "You have no outstanding COD cash to deposit right now.")
+                }
+              }}
               style={{ flex: 1, paddingVertical: 16, alignItems: "center", gap: 4 }}
             >
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -385,6 +735,47 @@ export default function RiderDashboardScreen() {
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* Payouts & Settlement History Dedicated Card */}
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={handleOpenRiderPayoutsModal}
+          style={{
+            flexDirection: "row",
+            backgroundColor: "#FFFFFF",
+            borderRadius: 20,
+            padding: 16,
+            marginBottom: 16,
+            alignItems: "center",
+            justifyContent: "space-between",
+            borderWidth: 1.5,
+            borderColor: "#E5E7EB",
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.04,
+            shadowRadius: 10,
+            elevation: 2,
+          }}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12, flex: 1 }}>
+            <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: "#ECFDF5", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#A7F3D0" }}>
+              <Wallet size={22} color="#059669" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 14, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F" }}>
+                Payouts & Bank Settlements
+              </Text>
+              <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#6B7280", marginTop: 2 }}>
+                View all bank transfers & UTR receipts
+              </Text>
+            </View>
+          </View>
+          <View style={{ backgroundColor: "#059669", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 }}>
+            <Text style={{ fontSize: 11, fontWeight: "bold", fontFamily: "Poppins", color: "#FFFFFF" }}>
+              View History
+            </Text>
+          </View>
+        </TouchableOpacity>
 
         {/* Rider tip — keeps the page feeling alive without inventing fake metrics */}
         <View style={{ flexDirection: "row", backgroundColor: "#FFFFFF", borderRadius: 18, padding: 16, marginBottom: 20, gap: 12, alignItems: "center", shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.04, shadowRadius: 10, elevation: 1 }}>
@@ -539,17 +930,26 @@ export default function RiderDashboardScreen() {
               )}
 
               {metrics.activeOrder.delivery_status === "picked_up" && (
-                <TouchableOpacity
-                  onPress={() => handleOrderAction(metrics.activeOrder.id, "arrive_customer")}
-                  disabled={actionLoading}
-                  style={{ backgroundColor: "#0B6B3A", paddingVertical: 14, borderRadius: 12, alignItems: "center", opacity: actionLoading ? 0.7 : 1 }}
-                >
-                  {actionLoading ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins" }}>Arrived at Customer</Text>
-                  )}
-                </TouchableOpacity>
+                <View style={{ gap: 8 }}>
+                  <TouchableOpacity
+                    onPress={() => handleOrderAction(metrics.activeOrder.id, "arrive_customer")}
+                    disabled={actionLoading}
+                    style={{ backgroundColor: "#0B6B3A", paddingVertical: 14, borderRadius: 12, alignItems: "center", opacity: actionLoading ? 0.7 : 1 }}
+                  >
+                    {actionLoading ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins" }}>Arrived at Customer</Text>
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={handleCancelDoorstepPress}
+                    disabled={actionLoading}
+                    style={{ borderWidth: 1.5, borderColor: "#EF4444", paddingVertical: 12, borderRadius: 12, alignItems: "center", opacity: actionLoading ? 0.7 : 1 }}
+                  >
+                    <Text style={{ color: "#EF4444", fontWeight: "bold", fontFamily: "Poppins" }}>Cancel at Doorstep (QR / Cash)</Text>
+                  </TouchableOpacity>
+                </View>
               )}
 
               {metrics.activeOrder.delivery_status === "arrived_customer" && (
@@ -564,7 +964,7 @@ export default function RiderDashboardScreen() {
                     style={{ borderWidth: 1.5, borderColor: "#E8E8E8", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: actionLoading ? "#F5F5F5" : "#FFFFFF", fontFamily: "Nunito" }}
                   />
                   <TouchableOpacity
-                    onPress={() => handleOrderAction(metrics.activeOrder.id, "deliver", { deliveryOtp: otpInput })}
+                    onPress={handleCompleteDeliveryPress}
                     disabled={actionLoading}
                     style={{ backgroundColor: "#0B6B3A", paddingVertical: 14, borderRadius: 12, alignItems: "center", opacity: actionLoading ? 0.7 : 1 }}
                   >
@@ -574,6 +974,39 @@ export default function RiderDashboardScreen() {
                       <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins" }}>Verify & Complete Delivery</Text>
                     )}
                   </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={handleCancelDoorstepPress}
+                    disabled={actionLoading}
+                    style={{ borderWidth: 1.5, borderColor: "#EF4444", paddingVertical: 12, borderRadius: 12, alignItems: "center", opacity: actionLoading ? 0.7 : 1 }}
+                  >
+                    <Text style={{ color: "#EF4444", fontWeight: "bold", fontFamily: "Poppins" }}>Cancel at Doorstep (QR / Cash)</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {metrics.activeOrder.delivery_status === "rescue_active" && (
+                <View style={{ backgroundColor: "#FFF9E6", borderRadius: 12, padding: 16, gap: 10, alignItems: "center" }}>
+                  <ActivityIndicator size="small" color="#FF6B00" />
+                  <Text style={{ fontFamily: "Poppins", fontWeight: "bold", color: "#856404", fontSize: 13, textAlign: "center" }}>
+                    Order Cancelled - Searching for Nearby Customer 🔍
+                  </Text>
+                  <Text style={{ fontFamily: "Nunito", fontSize: 11, color: "#856404", textAlign: "center", lineHeight: 16 }}>
+                    This order was cancelled at the doorstep. The food is now broadcasted to nearby users with Free Delivery. Please wait 3 minutes for a claim.
+                  </Text>
+                </View>
+              )}
+
+              {metrics.activeOrder.delivery_status === "rescue_timeout" && (
+                <View style={{ backgroundColor: "#FEE2E2", borderRadius: 12, padding: 16, gap: 8 }}>
+                  <Text style={{ fontFamily: "Poppins", fontWeight: "bold", color: "#B91C1C", fontSize: 13 }}>
+                    Rescue Timeout - Return to Kitchen 🛑
+                  </Text>
+                  <Text style={{ fontFamily: "Nunito", fontSize: 11.5, color: "#991B1B", lineHeight: 17 }}>
+                    No nearby user claimed the food within 3 minutes. Please return the food to the kitchen partner ({metrics.activeOrder.kitchen_name}) and handover the items.
+                  </Text>
+                  <Text style={{ fontFamily: "Nunito", fontSize: 10.5, color: "#7F1D1D", fontStyle: "italic" }}>
+                    Once they confirm the return handover on their dashboard, this order will be cleared.
+                  </Text>
                 </View>
               )}
 
@@ -784,6 +1217,457 @@ export default function RiderDashboardScreen() {
             </View>
           </View>
         </View>
+      </Modal>
+      {/* UPI QR Payment Modal */}
+      <Modal
+        visible={qrModalConfig !== null}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setQrModalConfig(null)}
+      >
+        <View style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.6)", justifyContent: "center", alignItems: "center", padding: 24 }}>
+          <View style={{
+            backgroundColor: "#FFFFFF",
+            borderRadius: 24,
+            padding: 24,
+            width: "100%",
+            maxWidth: 340,
+            alignItems: "center",
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 10 },
+            shadowOpacity: 0.15,
+            shadowRadius: 20,
+            elevation: 10
+          }}>
+            <Text style={{ fontSize: 16, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins", textAlign: "center", marginBottom: 4 }}>
+              {qrModalConfig?.title || "Scan & Pay"}
+            </Text>
+            <Text style={{ fontSize: 11, color: "#7A7A7A", fontFamily: "Nunito", textAlign: "center", marginBottom: 16 }}>
+              Show this QR code to the customer to scan
+            </Text>
+
+            {/* QR Code Container */}
+            {qrModalConfig && (
+              <View style={{ borderWidth: 1.5, borderColor: "#E8E8E8", borderRadius: 16, padding: 12, backgroundColor: "#FFFFFF", marginBottom: 16 }}>
+                <Image
+                  source={{
+                    uri: `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(
+                      `upi://pay?pa=admin@atleast80&pn=Atleast80&am=${qrModalConfig.amount}&cu=INR&tn=Atleast80_Order_${metrics?.activeOrder?.order_number || ""}`
+                    )}`
+                  }}
+                  style={{ width: 200, height: 200, borderRadius: 8 }}
+                  resizeMode="contain"
+                />
+              </View>
+            )}
+
+            {/* Amount Label */}
+            <Text style={{ fontSize: 13, color: "#8A8A8A", fontFamily: "Nunito" }}>Total Amount to Collect</Text>
+            <Text style={{ fontSize: 32, fontWeight: "bold", fontFamily: "Poppins", color: "#0B6B3A", marginTop: 2, marginBottom: 24 }}>
+              ₹{qrModalConfig?.amount || 0}
+            </Text>
+
+            {qrModalConfig?.requireUtr && (
+              <View style={{ width: "100%", marginBottom: 16 }}>
+                <Text style={{ fontSize: 11, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F", marginBottom: 4 }}>
+                  Enter Payment UTR / Reference No.
+                </Text>
+                <TextInput
+                  value={depositUtrInput}
+                  onChangeText={setDepositUtrInput}
+                  placeholder="e.g. 981273918237"
+                  placeholderTextColor="#9CA3AF"
+                  style={{
+                    width: "100%",
+                    backgroundColor: "#F9FAFB",
+                    borderWidth: 1,
+                    borderColor: "#D1D5DB",
+                    borderRadius: 12,
+                    paddingHorizontal: 12,
+                    paddingVertical: 10,
+                    fontSize: 13,
+                    fontFamily: "monospace",
+                    color: "#111827",
+                  }}
+                />
+              </View>
+            )}
+
+            {/* Action Buttons */}
+            <View style={{ flexDirection: "row", gap: 10, width: "100%" }}>
+              <TouchableOpacity
+                onPress={() => setQrModalConfig(null)}
+                style={{
+                  flex: 1,
+                  backgroundColor: "#F5F5F5",
+                  paddingVertical: 12,
+                  borderRadius: 14,
+                  alignItems: "center",
+                  borderWidth: 1,
+                  borderColor: "#E8E8E8"
+                }}
+              >
+                <Text style={{ color: "#4A4A4A", fontWeight: "bold", fontSize: 13, fontFamily: "Poppins" }}>
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  const onConfirm = qrModalConfig?.onConfirm
+                  const utrVal = depositUtrInput
+                  setQrModalConfig(null)
+                  if (onConfirm) onConfirm(utrVal)
+                }}
+                style={{
+                  flex: 1,
+                  backgroundColor: "#0B6B3A",
+                  paddingVertical: 12,
+                  borderRadius: 14,
+                  alignItems: "center"
+                }}
+              >
+                <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontSize: 13, fontFamily: "Poppins" }}>
+                  Paid & Confirm
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Location Selector Modal */}
+      <Modal
+        visible={locationModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setLocationModalVisible(false)}
+      >
+        <Pressable 
+          style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.5)", justifyContent: "flex-end" }}
+          onPress={() => setLocationModalVisible(false)}
+        >
+          <Pressable 
+            style={{ 
+              backgroundColor: "#FFFFFF", 
+              borderTopLeftRadius: 32, 
+              borderTopRightRadius: 32, 
+              paddingHorizontal: 24, 
+              paddingTop: 24, 
+              paddingBottom: Platform.OS === "ios" ? 44 : 28, 
+              maxHeight: "80%" 
+            }}
+            onPress={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <Text style={{ fontSize: 18, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>Select Delivery City</Text>
+              <TouchableOpacity onPress={() => setLocationModalVisible(false)} style={{ padding: 4 }}>
+                <X size={20} color="#1F1F1F" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Auto Detect Button */}
+            <TouchableOpacity
+              onPress={handleAutoDetectLocation}
+              disabled={detectingLocation}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: "#EAF7EE",
+                borderRadius: 16,
+                paddingVertical: 12,
+                gap: 8,
+                marginBottom: 16,
+              }}
+            >
+              {detectingLocation ? (
+                <ActivityIndicator size="small" color="#0B6B3A" />
+              ) : (
+                <MapPin size={16} color="#0B6B3A" />
+              )}
+              <Text style={{ color: "#0B6B3A", fontWeight: "bold", fontFamily: "Poppins", fontSize: 14 }}>
+                {detectingLocation ? "Detecting location..." : "Auto-Detect Current Location"}
+              </Text>
+            </TouchableOpacity>
+
+            {/* State Picker Box */}
+            <View style={{ marginBottom: 16 }}>
+              <Text style={{ fontSize: 13, fontWeight: "600", color: "#1F1F1F", fontFamily: "Poppins", marginBottom: 8 }}>State</Text>
+              <TouchableOpacity
+                onPress={() => setStatePickerVisible(true)}
+                style={{
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  borderWidth: 2,
+                  borderColor: "#E8E8E8",
+                  borderRadius: 16,
+                  paddingHorizontal: 16,
+                  paddingVertical: 14,
+                  backgroundColor: "#FFFFFF",
+                }}
+              >
+                <Text style={{ fontSize: 14, color: "#1F1F1F", fontFamily: "Nunito" }}>
+                  {tempState || "Select State"}
+                </Text>
+                <ChevronDown size={16} color="#7A7A7A" />
+              </TouchableOpacity>
+            </View>
+ 
+            {/* City Picker Box */}
+            <View style={{ marginBottom: 24 }}>
+              <Text style={{ fontSize: 13, fontWeight: "600", color: "#1F1F1F", fontFamily: "Poppins", marginBottom: 8 }}>City</Text>
+              <TouchableOpacity
+                disabled={!tempState}
+                onPress={() => setCityPickerVisible(true)}
+                style={{
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  borderWidth: 2,
+                  borderColor: tempState ? "#E8E8E8" : "#F5F5F3",
+                  borderRadius: 16,
+                  paddingHorizontal: 16,
+                  paddingVertical: 14,
+                  backgroundColor: tempState ? "#FFFFFF" : "#F5F5F3",
+                }}
+              >
+                <Text style={{ fontSize: 14, color: tempState ? "#1F1F1F" : "#7A7A7A", fontFamily: "Nunito" }}>
+                  {tempCity || "Select City"}
+                </Text>
+                <ChevronDown size={16} color="#7A7A7A" />
+              </TouchableOpacity>
+            </View>
+ 
+            {/* Buttons Row */}
+            <View style={{ gap: 12 }}>
+              <TouchableOpacity
+                onPress={handleSaveLocation}
+                disabled={!tempState || !tempCity}
+                style={{
+                  backgroundColor: (!tempState || !tempCity) ? "#A3D3B8" : "#0B6B3A",
+                  borderRadius: 16,
+                  paddingVertical: 16,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins", fontSize: 15 }}>
+                  Confirm Location
+                </Text>
+              </TouchableOpacity>
+ 
+              {(metrics?.city || user?.city) ? (
+                <TouchableOpacity
+                  onPress={handleClearLocation}
+                  style={{
+                    backgroundColor: "#F5F5F3",
+                    borderRadius: 16,
+                    paddingVertical: 16,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Text style={{ color: "#EF4444", fontWeight: "bold", fontFamily: "Poppins", fontSize: 15 }}>
+                    Clear Location
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* State Selection Overlay Modal */}
+      <Modal
+        visible={statePickerVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setStatePickerVisible(false)}
+      >
+        <Pressable 
+          style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.5)", justifyContent: "flex-end" }}
+          onPress={() => setStatePickerVisible(false)}
+        >
+          <View 
+            style={{ 
+              backgroundColor: "#FFFFFF", 
+              borderTopLeftRadius: 32, 
+              borderTopRightRadius: 32, 
+              paddingHorizontal: 24, 
+              paddingTop: 24, 
+              paddingBottom: Platform.OS === "ios" ? 44 : 28, 
+              maxHeight: "50%" 
+            }}
+          >
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <Text style={{ fontSize: 16, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>Select State</Text>
+              <TouchableOpacity onPress={() => setStatePickerVisible(false)} style={{ padding: 4 }}>
+                <X size={18} color="#1F1F1F" />
+              </TouchableOpacity>
+            </View>
+
+            {statesLoading ? (
+              <ActivityIndicator size="small" color="#0B6B3A" style={{ marginVertical: 20 }} />
+            ) : (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {statesList.filter(s => s && s.name).map((stateItem) => (
+                  <TouchableOpacity
+                    key={stateItem.iso2 || stateItem.id || stateItem.name}
+                    onPress={() => {
+                      const code = stateItem.iso2 || (stateItem.id && stateItem.id.includes(":") ? stateItem.id.split(":")[1] : stateItem.id) || "";
+                      handleSelectState(stateItem.name, code);
+                    }}
+                    style={{
+                      paddingVertical: 14,
+                      borderBottomWidth: 1,
+                      borderBottomColor: "#F5F5F5",
+                    }}
+                  >
+                    <Text style={{ fontSize: 14, color: "#1F1F1F", fontFamily: "Nunito" }}>
+                      {stateItem.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* City Selection Overlay Modal */}
+      <Modal
+        visible={cityPickerVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setCityPickerVisible(false)}
+      >
+        <Pressable 
+          style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.5)", justifyContent: "flex-end" }}
+          onPress={() => setCityPickerVisible(false)}
+        >
+          <View 
+            style={{ 
+              backgroundColor: "#FFFFFF", 
+              borderTopLeftRadius: 32, 
+              borderTopRightRadius: 32, 
+              paddingHorizontal: 24, 
+              paddingTop: 24, 
+              paddingBottom: Platform.OS === "ios" ? 44 : 28, 
+              maxHeight: "50%" 
+            }}
+          >
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <Text style={{ fontSize: 16, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>Select City</Text>
+              <TouchableOpacity onPress={() => setCityPickerVisible(false)} style={{ padding: 4 }}>
+                <X size={18} color="#1F1F1F" />
+              </TouchableOpacity>
+            </View>
+
+            {citiesLoading ? (
+              <ActivityIndicator size="small" color="#0B6B3A" style={{ marginVertical: 20 }} />
+            ) : citiesList.length === 0 ? (
+              <Text style={{ fontSize: 14, color: "#7A7A7A", textAlign: "center", paddingVertical: 24, fontFamily: "Nunito" }}>No cities found</Text>
+            ) : (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {citiesList.map((cityItem, idx) => (
+                  <TouchableOpacity
+                    key={idx}
+                    onPress={() => handleSelectCity(cityItem.name)}
+                    style={{
+                      paddingVertical: 14,
+                      borderBottomWidth: 1,
+                      borderBottomColor: "#F5F5F5",
+                    }}
+                  >
+                    <Text style={{ fontSize: 14, color: "#1F1F1F", fontFamily: "Nunito" }}>
+                      {cityItem.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Rider Payouts & Settlement History Modal */}
+      <Modal
+        visible={riderPayoutsModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setRiderPayoutsModalVisible(false)}
+      >
+        <Pressable
+          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}
+          onPress={() => setRiderPayoutsModalVisible(false)}
+        >
+          <Pressable
+            style={{ backgroundColor: "#FFFFFF", borderTopLeftRadius: 28, borderTopRightRadius: 28, height: "75%", width: "100%" }}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: "#F1F1EF" }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 16, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F" }}>
+                  Delivery Fee Payout History
+                </Text>
+                <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#7A7A7A", marginTop: 2 }}>
+                  Bank transfers & delivery fee earnings credited by Admin
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setRiderPayoutsModalVisible(false)} style={{ padding: 4 }}>
+                <X size={20} color="#7A7A7A" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView contentContainerStyle={{ padding: 20, gap: 12 }}>
+              {riderPayoutsLoading ? (
+                <View style={{ paddingVertical: 40, alignItems: "center" }}>
+                  <ActivityIndicator size="large" color="#0B6B3A" />
+                </View>
+              ) : riderPayoutsList.length === 0 ? (
+                <View style={{ paddingVertical: 40, alignItems: "center" }}>
+                  <CreditCard size={36} color="#CCCCCC" />
+                  <Text style={{ fontSize: 13, fontFamily: "Nunito", color: "#7A7A7A", textAlign: "center", marginTop: 8 }}>
+                    No bank payout settlements recorded yet.
+                  </Text>
+                  <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#9CA3AF", textAlign: "center", marginTop: 4 }}>
+                    Admin delivery fee payouts will appear here with Date and UTR Reference number once transferred.
+                  </Text>
+                </View>
+              ) : (
+                riderPayoutsList.map((p) => (
+                  <View key={p.id} style={{ backgroundColor: "#F9FAFB", borderRadius: 16, padding: 14, borderWidth: 1, borderColor: "#E5E7EB" }}>
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                      <Text style={{ fontSize: 18, fontWeight: "bold", fontFamily: "Poppins", color: "#059669" }}>
+                        ₹{p.netPayout}
+                      </Text>
+                      <View style={{ backgroundColor: "#D1FAE5", paddingHorizontal: 10, paddingVertical: 2, borderRadius: 12 }}>
+                        <Text style={{ fontSize: 10, fontWeight: "bold", fontFamily: "Poppins", color: "#065F46" }}>
+                          PAID ✅
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={{ gap: 4 }}>
+                      <Text style={{ fontSize: 12, fontWeight: "bold", fontFamily: "monospace", color: "#1F2937" }}>
+                        UTR Ref: {p.utrNumber || "—"}
+                      </Text>
+                      <Text style={{ fontSize: 10, fontFamily: "Nunito", color: "#9CA3AF", marginTop: 2 }}>
+                        Paid on: {p.paidAt ? new Date(p.paidAt).toLocaleString("en-IN") : "—"}
+                      </Text>
+                      {p.notes ? (
+                        <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#4B5563", fontStyle: "italic" }}>
+                          Notes: {p.notes}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </View>
+                ))
+              )}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
       </Modal>
     </SafeAreaView>
   )

@@ -667,17 +667,17 @@ function PartnerSection() {
       initial="hidden"
       whileInView="visible"
       viewport={{ once: true, margin: "-50px" }}
-      className="hidden md:block mt-20 mb-12"
+      className="mt-10 md:mt-20 mb-8 md:mb-12"
     >
       {/* Stats row */}
-      <motion.div variants={fadeUp} className="grid grid-cols-3 gap-6 mb-16">
+      <motion.div variants={fadeUp} className="grid grid-cols-3 gap-3 md:gap-6 mb-8 md:mb-16">
         {stats.map((s, i) => {
           const Icon = s.icon
           return (
-            <div key={i} className="bg-white rounded-2xl p-8 text-center shadow-sm hover:shadow-md transition-shadow">
-              <Icon size={28} className="text-primary mx-auto mb-3" />
-              <p className="font-poppins font-extrabold text-3xl text-dark">{s.value}</p>
-              <p className="font-nunito text-gray text-sm mt-1">{s.label}</p>
+            <div key={i} className="bg-white rounded-xl md:rounded-2xl p-4 md:p-8 text-center shadow-sm hover:shadow-md transition-shadow">
+              <Icon size={24} className="text-primary mx-auto mb-2 md:mb-3" />
+              <p className="font-poppins font-extrabold text-xl md:text-3xl text-dark">{s.value}</p>
+              <p className="font-nunito text-gray text-xs md:text-sm mt-0.5 md:mt-1">{s.label}</p>
             </div>
           )
         })}
@@ -687,39 +687,39 @@ function PartnerSection() {
       <motion.div
         variants={fadeUp}
         custom={1}
-        className="relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-primary via-primary-dark to-[#023015] p-12 lg:p-16"
+        className="relative overflow-hidden rounded-2xl md:rounded-[2rem] bg-gradient-to-br from-primary via-primary-dark to-[#023015] p-6 md:p-12 lg:p-16"
       >
         <div className="absolute top-0 right-0 w-80 h-80 bg-secondary/10 rounded-full blur-3xl" />
         <div className="absolute bottom-0 left-0 w-60 h-60 bg-white/5 rounded-full blur-2xl" />
 
-        <div className="relative z-10 flex flex-col lg:flex-row items-center justify-between gap-8">
+        <div className="relative z-10 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 md:gap-8">
           <div className="max-w-xl">
-            <div className="flex items-center gap-2 mb-4">
-              <Handshake size={24} className="text-secondary" />
-              <span className="font-poppins font-semibold text-secondary text-sm uppercase tracking-wide">Partner With Us</span>
+            <div className="flex items-center gap-2 mb-3 md:mb-4">
+              <Handshake size={20} className="text-secondary" />
+              <span className="font-poppins font-semibold text-secondary text-xs md:text-sm uppercase tracking-wide">Partner With Us</span>
             </div>
-            <h3 className="font-poppins font-bold text-white text-3xl lg:text-4xl leading-tight">
+            <h3 className="font-poppins font-bold text-white text-2xl md:text-3xl lg:text-4xl leading-tight">
               Own a home kitchen?
-              <br />
+              <br className="hidden sm:inline" />
               Start selling today.
             </h3>
-            <p className="font-nunito text-white/70 text-lg mt-4 leading-relaxed">
+            <p className="font-nunito text-white/70 text-sm md:text-lg mt-3 md:mt-4 leading-relaxed">
               Join 500+ verified home kitchens. List your meals, ration items, and reach
               thousands of customers who trust homemade food.
             </p>
           </div>
 
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-3 w-full sm:w-auto">
             <Button
               variant="secondary"
               size="lg"
-              className="text-base px-8"
+              className="text-sm md:text-base px-6 md:px-8 w-full sm:w-auto justify-center"
               onClick={() => navigate("/kitchen/signup")}
             >
               Register Your Kitchen
               <ArrowRight size={18} />
             </Button>
-            <p className="font-nunito text-white/50 text-sm text-center">Free to register. Start earning in 24hrs.</p>
+            <p className="font-nunito text-white/50 text-xs md:text-sm text-center">Free to register. Start earning in 24hrs.</p>
           </div>
         </div>
       </motion.div>
