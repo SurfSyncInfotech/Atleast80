@@ -1,7 +1,7 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { ArrowLeft, Phone, Lock, ArrowRight } from "lucide-react"
+import { ArrowLeft, Phone, Lock, ArrowRight, RotateCw, CheckCircle } from "lucide-react"
 import Button from "../../components/ui/Button"
 import PasswordInput from "../../components/ui/PasswordInput"
 import { useAuth } from "../../context/AuthContext"
@@ -18,8 +18,24 @@ export default function KitchenForgotPasswordPage() {
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
   const [loading, setLoading] = useState(false)
+  const [resendTimer, setResendTimer] = useState(30)
+  const [resendCount, setResendCount] = useState(0)
+  const [resendLoading, setResendLoading] = useState(false)
+  const [toastMessage, setToastMessage] = useState("")
 
   const otpValue = otp.join("")
+
+  useEffect(() => {
+    let timer = null
+    if (step === "otp" && resendTimer > 0) {
+      timer = setInterval(() => {
+        setResendTimer((prev) => prev - 1)
+      }, 1000)
+    }
+    return () => {
+      if (timer) clearInterval(timer)
+    }
+  }, [step, resendTimer])
 
   const handleSendOtp = async (e) => {
     e.preventDefault()
@@ -34,10 +50,32 @@ export default function KitchenForgotPasswordPage() {
       setUserId(data.userId)
       setHint(data.phoneHint)
       setStep("otp")
+      setResendTimer(30)
+      setResendCount(0)
     } catch (err) {
       setError(err.message || "Failed to send OTP")
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleResendOtp = async () => {
+    if (resendTimer > 0 || resendCount >= 3 || resendLoading) return
+    setError("")
+    setSuccess("")
+    setResendLoading(true)
+    try {
+      const data = await sendKitchenForgotPasswordOtp(phone)
+      setUserId(data.userId)
+      setHint(data.phoneHint)
+      setResendCount((prev) => prev + 1)
+      setResendTimer(30)
+      setToastMessage("New OTP sent successfully to your mobile number!")
+      setTimeout(() => setToastMessage(""), 3500)
+    } catch (err) {
+      setError(err.message || "Failed to resend OTP")
+    } finally {
+      setResendLoading(false)
     }
   }
 
@@ -156,6 +194,37 @@ export default function KitchenForgotPasswordPage() {
                     className="w-full h-14 bg-white rounded-3xl border border-gray-200 text-center text-2xl font-poppins font-bold focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 shadow-sm"
                   />
                 ))}
+              </div>
+
+              {toastMessage && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="p-3 rounded-xl bg-green-50 border border-green-200 text-green-700 text-xs font-semibold text-center flex items-center justify-center gap-2 shadow-sm"
+                >
+                  <CheckCircle size={14} className="text-green-600 shrink-0" />
+                  <span>{toastMessage}</span>
+                </motion.div>
+              )}
+
+              <div className="flex items-center justify-between text-xs font-nunito px-1">
+                <span className="text-gray">Didn't receive code?</span>
+                {resendCount >= 3 ? (
+                  <span className="text-red-500 font-semibold text-[11px]">Limit reached (3/3)</span>
+                ) : resendTimer > 0 ? (
+                  <span className="text-gray font-semibold">Resend OTP in {resendTimer}s</span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleResendOtp}
+                    disabled={resendLoading}
+                    className="text-primary font-bold hover:underline inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                  >
+                    <RotateCw size={12} className={resendLoading ? "animate-spin" : ""} />
+                    {resendLoading ? "Sending..." : "Resend OTP"}
+                  </button>
+                )}
               </div>
 
               <div>

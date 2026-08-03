@@ -62,7 +62,7 @@ export default function OrderTrackingScreen() {
 
   const loadOrder = useCallback(async (showLoader = false) => {
     if (!id) {
-      router.replace("/(customer)/orders")
+      router.replace("/(customer)/(tabs)/home")
       return
     }
 
@@ -161,8 +161,8 @@ export default function OrderTrackingScreen() {
     return (
       <SafeAreaView className="flex-1 bg-cream items-center justify-center p-6">
         <Text className="font-nunito text-gray text-base mb-4">{error || "Order not found"}</Text>
-        <Button className="px-6" onPress={() => router.replace("/(customer)/orders")}>
-          Back to Orders
+        <Button className="px-6" onPress={() => router.replace("/(customer)/(tabs)/home")}>
+          Back to Home
         </Button>
       </SafeAreaView>
     )

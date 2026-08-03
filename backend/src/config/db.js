@@ -165,7 +165,7 @@ export async function connectDB() {
         await connection.query("ALTER TABLE orders ADD COLUMN rider_latitude DECIMAL(10, 8) DEFAULT NULL")
       } catch (_) {}
       try {
-        await connection.query("ALTER TABLE orders ADD COLUMN rider_longitude DECIMAL(11, 8) DEFAULT NULL")
+        await connection.query("ALTER TABLE orders ADD COLUMN cancellation_reason VARCHAR(255) DEFAULT NULL")
       } catch (_) {}
 
       console.log("✅ Auto-migrated delivery rider tables and columns")

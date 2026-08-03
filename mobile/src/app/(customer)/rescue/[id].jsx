@@ -81,7 +81,7 @@ export default function RescueDetailsScreen() {
       <SafeAreaView style={{ flex: 1, backgroundColor: "#FFFFFF" }}>
         {/* Header */}
         <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#F5F5F5" }}>
-          <TouchableOpacity onPress={() => router.back()} style={{ padding: 8, borderRadius: 12, backgroundColor: "#F5F5F3" }}>
+          <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.replace("/(customer)/(tabs)/home"))} style={{ padding: 8, borderRadius: 12, backgroundColor: "#F5F5F3" }}>
             <ArrowLeft size={20} color="#1F1F1F" />
           </TouchableOpacity>
           <Text style={{ fontSize: 18, fontWeight: "bold", marginLeft: 16, color: "#1F1F1F", fontFamily: "Poppins" }}>Food Rescue Details</Text>
@@ -115,7 +115,7 @@ export default function RescueDetailsScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: "#F9FAFC" }}>
       {/* Header */}
       <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, backgroundColor: "#FFFFFF", borderBottomWidth: 1, borderBottomColor: "#F1F1F1", elevation: 2, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 3 }}>
-        <TouchableOpacity onPress={() => router.back()} style={{ padding: 8, borderRadius: 12, backgroundColor: "#F5F5F3" }}>
+        <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.replace("/(customer)/(tabs)/home"))} style={{ padding: 8, borderRadius: 12, backgroundColor: "#F5F5F3" }}>
           <ArrowLeft size={20} color="#1F1F1F" />
         </TouchableOpacity>
         <Text style={{ fontSize: 18, fontWeight: "bold", marginLeft: 16, color: "#1F1F1F", fontFamily: "Poppins" }}>Claim Food Rescue</Text>

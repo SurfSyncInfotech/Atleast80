@@ -48,7 +48,7 @@ export default function CartScreen() {
 
   const handleCheckout = () => {
     if (!requireCustomer()) return
-    router.push({
+    router.replace({
       pathname: "/(customer)/checkout",
       params: {
         packing,
@@ -63,7 +63,7 @@ export default function CartScreen() {
     <SafeAreaView className="flex-1 bg-cream" edges={["top"]}>
       {/* Header */}
       <View className="flex-row items-center px-4 py-3 bg-white border-b border-gray-light/35">
-        <TouchableOpacity onPress={() => router.back()} className="mr-3">
+        <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.replace("/(customer)/(tabs)/home"))} className="mr-3">
           <ArrowLeft size={22} color="#1F1F1F" />
         </TouchableOpacity>
         <Text className="font-poppins font-bold text-lg text-dark">Your Cart</Text>

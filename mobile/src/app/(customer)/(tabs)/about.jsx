@@ -51,7 +51,7 @@ export default function AboutScreen() {
       {/* Header (Premium Native Style) */}
       <View className="flex-row items-center px-4 py-3.5 bg-white border-b border-gray-light/35">
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={() => (router.canGoBack() ? router.back() : router.replace("/(customer)/(tabs)/home"))}
           className="mr-3 p-1.5 rounded-full active:bg-gray-100"
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >

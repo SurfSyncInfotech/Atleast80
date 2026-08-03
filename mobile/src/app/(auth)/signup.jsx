@@ -260,7 +260,7 @@ export default function SignupPage() {
         pathname: "/(auth)/login",
         params: {
           message: "Account created and verified! Please sign in to continue.",
-          email: email.trim().toLowerCase(),
+          phone: phone.trim(),
         },
       })
     } catch (err) {

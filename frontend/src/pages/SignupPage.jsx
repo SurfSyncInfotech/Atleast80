@@ -1,7 +1,7 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { ArrowRight, ArrowLeft, Mail, Lock, User, Phone } from "lucide-react"
+import { ArrowRight, ArrowLeft, Mail, Lock, User, Phone, CheckCircle, RotateCw } from "lucide-react"
 import Button from "../components/ui/Button"
 import PasswordInput from "../components/ui/PasswordInput"
 import { useAuth } from "../context/AuthContext"
@@ -21,7 +21,25 @@ export default function SignupPage() {
   const [otp, setOtp] = useState(["", "", "", ""])
   const [phoneHint, setPhoneHint] = useState("")
 
+  // Resend OTP production logic
+  const [resendTimer, setResendTimer] = useState(30)
+  const [resendCount, setResendCount] = useState(0)
+  const [resendLoading, setResendLoading] = useState(false)
+  const [toastMessage, setToastMessage] = useState("")
+
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }))
+
+  useEffect(() => {
+    let timer = null
+    if (step === "otp" && resendTimer > 0) {
+      timer = setInterval(() => {
+        setResendTimer((prev) => prev - 1)
+      }, 1000)
+    }
+    return () => {
+      if (timer) clearInterval(timer)
+    }
+  }, [step, resendTimer])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -41,6 +59,8 @@ export default function SignupPage() {
         setUserId(res.userId)
         setPhoneHint(`******${phone.slice(-4)}`)
         setStep("otp")
+        setResendTimer(30)
+        setResendCount(0)
       } else {
         // Fallback login directly
         await loginCustomer(form.email, form.password)
@@ -68,7 +88,7 @@ export default function SignupPage() {
         replace: true,
         state: {
           message: "Account created and verified! Please sign in to continue.",
-          email: form.email.trim().toLowerCase(),
+          phone: form.phone.trim(),
         },
       })
     } catch (err) {
@@ -79,13 +99,21 @@ export default function SignupPage() {
   }
 
   const handleResendOtp = async () => {
+    if (resendTimer > 0 || resendCount >= 3 || resendLoading) return
     setError("")
+    setResendLoading(true)
     try {
       await resendSignupOtp(userId)
       setOtp(["", "", "", ""])
+      setResendCount((prev) => prev + 1)
+      setResendTimer(30)
+      setToastMessage("New OTP sent successfully to your mobile number!")
+      setTimeout(() => setToastMessage(""), 3500)
       document.getElementById("fp-otp-0")?.focus()
     } catch (err) {
       setError(err.message || "Failed to resend OTP")
+    } finally {
+      setResendLoading(false)
     }
   }
 
@@ -203,6 +231,19 @@ export default function SignupPage() {
               </motion.form>
             ) : (
               <motion.form key="otp" onSubmit={handleVerifyOtp} className="space-y-6 max-w-lg animate-fade-in" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+                {/* Floating Resend Toast Popup */}
+                {toastMessage && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="p-3 rounded-xl bg-green-50 border border-green-200 text-green-700 text-xs font-semibold text-center flex items-center justify-center gap-2 shadow-sm"
+                  >
+                    <CheckCircle size={14} className="text-green-600 shrink-0" />
+                    <span>{toastMessage}</span>
+                  </motion.div>
+                )}
+
                 <div className="flex gap-3 justify-center">
                   {otp.map((digit, i) => (
                     <input
@@ -222,14 +263,27 @@ export default function SignupPage() {
                   <ArrowRight size={18} />
                 </Button>
 
-                <button
-                  type="button"
-                  onClick={handleResendOtp}
-                  disabled={loading}
-                  className="w-full font-nunito text-sm text-primary font-semibold hover:underline disabled:opacity-50"
-                >
-                  Resend OTP
-                </button>
+                <div className="flex flex-col items-center gap-1">
+                  {resendCount >= 3 ? (
+                    <span className="text-xs text-red-500 font-medium text-center">
+                      Maximum resend limit reached (3/3). Please try again after a few minutes.
+                    </span>
+                  ) : resendTimer > 0 ? (
+                    <span className="text-xs text-gray font-semibold">
+                      Resend OTP in {resendTimer}s
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleResendOtp}
+                      disabled={resendLoading}
+                      className="font-nunito text-sm text-primary font-bold hover:underline inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <RotateCw size={14} className={resendLoading ? "animate-spin" : ""} />
+                      {resendLoading ? "Sending OTP..." : "Resend OTP"}
+                    </button>
+                  )}
+                </div>
               </motion.form>
             )}
           </AnimatePresence>

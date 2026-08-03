@@ -145,14 +145,14 @@ router.get("/dashboard", authRequired, requireRole("rider"), async (req, res) =>
       `[DASHBOARD] Fetching dashboard for rider ID: ${req.user.riderId}. Status in DB: ${rider.status}\n`
     )
 
-    // Calculate total and today's earnings from completed deliveries
+    // Calculate total and today's earnings from completed deliveries and cancelled orders where doorstep cancel fee was paid
     const [earningRows] = await pool.query(
       `SELECT 
          COALESCE(SUM(delivery_fee), 0) AS total_earnings, 
          COUNT(id) AS total_deliveries,
          COALESCE(SUM(CASE WHEN DATE(created_at) = CURDATE() THEN delivery_fee ELSE 0 END), 0) AS today_earnings,
          COUNT(CASE WHEN DATE(created_at) = CURDATE() THEN id ELSE NULL END) AS today_deliveries
-       FROM orders WHERE rider_id = ? AND status = 'delivered'`,
+       FROM orders WHERE rider_id = ? AND (status = 'delivered' OR cancel_fee_paid = 1)`,
       [req.user.riderId]
     )
     const stats = earningRows[0]
@@ -167,7 +167,7 @@ router.get("/dashboard", authRequired, requireRole("rider"), async (req, res) =>
        WHERE o.rider_id = ? AND (
          o.status IN ('preparing', 'out_for_delivery') OR 
          (o.status = 'delivered' AND o.delivery_status = 'handover_pending') OR
-         (o.status = 'cancelled' AND o.delivery_status = 'rescue_active')
+         (o.status = 'cancelled' AND o.delivery_status IN ('rescue_active', 'rescue_timeout', 'cancelled_unreachable'))
        )`,
       [req.user.riderId]
     )
@@ -472,6 +472,66 @@ router.post("/deposit-cash", authRequired, requireRole("rider"), async (req, res
   } catch (error) {
     console.error("Rider deposit cash error:", error)
     res.status(500).json({ message: "Failed to process cash deposit" })
+  }
+})
+
+// Rider cancels order when customer is unreachable at doorstep
+router.post("/deliveries/:id/cancel-unreachable", authRequired, requireRole("rider"), async (req, res) => {
+  const orderId = req.params.id
+  const { reason } = req.body
+
+  try {
+    const [orders] = await pool.query(
+      "SELECT id, status, delivery_status, rider_id FROM orders WHERE id = ? AND rider_id = ?",
+      [orderId, req.user.riderId]
+    )
+
+    if (orders.length === 0) {
+      return res.status(404).json({ message: "Active order not found" })
+    }
+
+    const cancellationReason = reason?.trim() || "Customer unreachable at doorstep"
+
+    await pool.query(
+      `UPDATE orders 
+       SET status = 'cancelled', 
+           delivery_status = 'cancelled_unreachable',
+           cancellation_reason = ?
+       WHERE id = ?`,
+      [cancellationReason, orderId]
+    )
+
+    const [updated] = await pool.query(
+      `SELECT o.*, k.name AS kitchen_name, k.address AS kitchen_address, k.phone AS kitchen_phone,
+              u.name AS customer_name, u.phone AS customer_phone
+       FROM orders o
+       JOIN kitchens k ON o.kitchen_id = k.id
+       JOIN users u ON o.user_id = u.id
+       WHERE o.id = ?`,
+      [orderId]
+    )
+
+    res.json({ message: "Order cancelled as customer unreachable", order: updated[0] })
+  } catch (error) {
+    console.error("Rider cancel unreachable error:", error)
+    res.status(500).json({ message: "Failed to cancel order" })
+  }
+})
+
+// Rider completes return to kitchen and clears active order card
+router.post("/deliveries/:id/dismiss-returned", authRequired, requireRole("rider"), async (req, res) => {
+  const orderId = req.params.id
+
+  try {
+    await pool.query(
+      `UPDATE orders SET delivery_status = 'returned_to_kitchen' WHERE id = ? AND rider_id = ?`,
+      [orderId, req.user.riderId]
+    )
+
+    res.json({ message: "Returned order dismissed successfully" })
+  } catch (error) {
+    console.error("Rider dismiss returned order error:", error)
+    res.status(500).json({ message: "Failed to dismiss returned order" })
   }
 })
 

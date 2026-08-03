@@ -191,7 +191,7 @@ export default function LoginPage() {
   const router = useRouter()
   const params = useLocalSearchParams()
   const successMessage = params?.message
-  const initialEmail = params?.email
+  const initialIdentifier = params?.phone || params?.email || params?.identifier
 
   const { loginCustomer, verifyLoginOtp, user } = useAuth()
   const [identifier, setIdentifier] = useState("")
@@ -208,12 +208,12 @@ export default function LoginPage() {
 
   const otpRefs = [useRef(null), useRef(null), useRef(null), useRef(null)]
 
-  const [prevInitialEmail, setPrevInitialEmail] = useState(null)
+  const [prevInitialIdentifier, setPrevInitialIdentifier] = useState(null)
 
-  // Sync identifier state when initialEmail parameter changes during render
-  if (initialEmail && initialEmail !== prevInitialEmail) {
-    setPrevInitialEmail(initialEmail)
-    setIdentifier(initialEmail)
+  // Sync identifier state when initialIdentifier parameter changes during render
+  if (initialIdentifier && initialIdentifier !== prevInitialIdentifier) {
+    setPrevInitialIdentifier(initialIdentifier)
+    setIdentifier(initialIdentifier)
   }
 
   useEffect(() => {

@@ -67,6 +67,7 @@ import {
   CreditCard,
   Search,
   AlertTriangle,
+  AlertCircle,
   Phone,
   Zap,
   Wallet,
@@ -183,6 +184,10 @@ export default function RiderDashboardScreen() {
   const [qrModalConfig, setQrModalConfig] = useState(null)
   const [depositUtrInput, setDepositUtrInput] = useState("")
 
+  // Customer Unreachable Modal States
+  const [unreachableModalVisible, setUnreachableModalVisible] = useState(false)
+  const [unreachableNote, setUnreachableNote] = useState("")
+
   // Rider Payouts Modal States
   const [riderPayoutsModalVisible, setRiderPayoutsModalVisible] = useState(false)
   const [riderPayoutsList, setRiderPayoutsList] = useState([])
@@ -198,6 +203,42 @@ export default function RiderDashboardScreen() {
       console.log("Failed to load rider payouts:", err)
     } finally {
       setRiderPayoutsLoading(false)
+    }
+  }
+
+  const handleCancelUnreachable = async () => {
+    if (!metrics?.activeOrder?.id) return
+    setActionLoading(true)
+    try {
+      await api(`/api/rider/deliveries/${metrics.activeOrder.id}/cancel-unreachable`, {
+        method: "POST",
+        body: JSON.stringify({ reason: unreachableNote || "Customer unreachable at doorstep" }),
+      })
+      setUnreachableModalVisible(false)
+      setUnreachableNote("")
+      const freshData = await getRiderDashboard()
+      setMetrics(freshData)
+      Alert.alert("Order Cancelled", "Order cancelled as customer was unreachable. Please return food to kitchen or call kitchen owner.")
+    } catch (err) {
+      Alert.alert("Cancellation Failed", err.message || "Failed to cancel order")
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleDismissReturnedOrder = async (orderId) => {
+    setActionLoading(true)
+    try {
+      await api(`/api/rider/deliveries/${orderId}/dismiss-returned`, {
+        method: "POST",
+      })
+      const freshData = await getRiderDashboard()
+      setMetrics(freshData)
+      Alert.alert("Delivery Cleared", "Order cleared. You can now accept new deliveries!")
+    } catch (err) {
+      Alert.alert("Action Failed", err.message || "Failed to dismiss order")
+    } finally {
+      setActionLoading(false)
     }
   }
 
@@ -979,7 +1020,14 @@ export default function RiderDashboardScreen() {
                     disabled={actionLoading}
                     style={{ borderWidth: 1.5, borderColor: "#EF4444", paddingVertical: 12, borderRadius: 12, alignItems: "center", opacity: actionLoading ? 0.7 : 1 }}
                   >
-                    <Text style={{ color: "#EF4444", fontWeight: "bold", fontFamily: "Poppins" }}>Cancel at Doorstep (QR / Cash)</Text>
+                    <Text style={{ color: "#EF4444", fontWeight: "bold", fontFamily: "Poppins" }}>Cancel at Doorstep (Customer Paid)</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setUnreachableModalVisible(true)}
+                    disabled={actionLoading}
+                    style={{ borderWidth: 1.5, borderColor: "#F59E0B", backgroundColor: "#FEF3C7", paddingVertical: 12, borderRadius: 12, alignItems: "center", opacity: actionLoading ? 0.7 : 1 }}
+                  >
+                    <Text style={{ color: "#B45309", fontWeight: "bold", fontFamily: "Poppins" }}>Customer Unreachable? (Cancel Order)</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -996,17 +1044,73 @@ export default function RiderDashboardScreen() {
                 </View>
               )}
 
-              {metrics.activeOrder.delivery_status === "rescue_timeout" && (
-                <View style={{ backgroundColor: "#FEE2E2", borderRadius: 12, padding: 16, gap: 8 }}>
-                  <Text style={{ fontFamily: "Poppins", fontWeight: "bold", color: "#B91C1C", fontSize: 13 }}>
-                    Rescue Timeout - Return to Kitchen 🛑
+              {(metrics.activeOrder.delivery_status === "rescue_timeout" || metrics.activeOrder.delivery_status === "cancelled_unreachable") && (
+                <View style={{ backgroundColor: "#FEF2F2", borderRadius: 16, padding: 16, gap: 12, borderWidth: 1.5, borderColor: "#FCA5A5" }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <AlertCircle size={20} color="#B91C1C" />
+                    <Text style={{ fontFamily: "Poppins", fontWeight: "bold", color: "#B91C1C", fontSize: 13.5, flex: 1 }}>
+                      Order Cancelled — Return Food to Kitchen 🏠
+                    </Text>
+                  </View>
+
+                  <Text style={{ fontFamily: "Nunito", fontSize: 12, color: "#991B1B", lineHeight: 18 }}>
+                    {metrics.activeOrder.delivery_status === "cancelled_unreachable"
+                      ? "Order was cancelled because customer was unreachable / not responding at doorstep."
+                      : "No nearby customer claimed the food within 3 minutes."}
+                    {" Please return the food items to the kitchen partner or call the kitchen owner for instructions."}
                   </Text>
-                  <Text style={{ fontFamily: "Nunito", fontSize: 11.5, color: "#991B1B", lineHeight: 17 }}>
-                    No nearby user claimed the food within 3 minutes. Please return the food to the kitchen partner ({metrics.activeOrder.kitchen_name}) and handover the items.
-                  </Text>
-                  <Text style={{ fontFamily: "Nunito", fontSize: 10.5, color: "#7F1D1D", fontStyle: "italic" }}>
-                    Once they confirm the return handover on their dashboard, this order will be cleared.
-                  </Text>
+
+                  <View style={{ backgroundColor: "#FFFFFF", borderRadius: 14, padding: 12, gap: 8, borderWidth: 1, borderColor: "#FECACA" }}>
+                    <Text style={{ fontSize: 10.5, fontWeight: "bold", color: "#7F1D1D", fontFamily: "Poppins", uppercase: true }}>
+                      KITCHEN CONTACT DETAILS:
+                    </Text>
+                    <Text style={{ fontSize: 13.5, fontWeight: "bold", color: "#1F2937", fontFamily: "Poppins" }}>
+                      {metrics.activeOrder.kitchen_name}
+                    </Text>
+                    <Text style={{ fontSize: 11.5, color: "#4B5563", fontFamily: "Nunito" }}>
+                      {metrics.activeOrder.kitchen_address}
+                    </Text>
+                    {metrics.activeOrder.kitchen_phone ? (
+                      <TouchableOpacity
+                        onPress={() => handleCall(metrics.activeOrder.kitchen_phone)}
+                        style={{
+                          backgroundColor: "#059669",
+                          flexDirection: "row",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 8,
+                          paddingVertical: 10,
+                          borderRadius: 10,
+                          marginTop: 4
+                        }}
+                      >
+                        <Phone size={14} color="#FFFFFF" />
+                        <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontSize: 12, fontFamily: "Poppins" }}>
+                          Call Kitchen Owner ({metrics.activeOrder.kitchen_phone})
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+
+                  <TouchableOpacity
+                    onPress={() => handleDismissReturnedOrder(metrics.activeOrder.id)}
+                    disabled={actionLoading}
+                    style={{
+                      backgroundColor: "#DC2626",
+                      paddingVertical: 12,
+                      borderRadius: 12,
+                      alignItems: "center",
+                      opacity: actionLoading ? 0.7 : 1
+                    }}
+                  >
+                    {actionLoading ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins" }}>
+                        Return Completed / Clear Active Delivery
+                      </Text>
+                    )}
+                  </TouchableOpacity>
                 </View>
               )}
 
@@ -1666,6 +1770,79 @@ export default function RiderDashboardScreen() {
                 ))
               )}
             </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Customer Unreachable Modal */}
+      <Modal
+        visible={unreachableModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setUnreachableModalVisible(false)}
+      >
+        <Pressable
+          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: 20 }}
+          onPress={() => setUnreachableModalVisible(false)}
+        >
+          <Pressable
+            style={{ backgroundColor: "#FFFFFF", borderRadius: 24, padding: 20, width: "100%", maxWidth: 400, gap: 16 }}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <Text style={{ fontSize: 16, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F" }}>
+                Customer Unreachable
+              </Text>
+              <TouchableOpacity onPress={() => setUnreachableModalVisible(false)} style={{ padding: 4 }}>
+                <X size={18} color="#7A7A7A" />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={{ fontSize: 12, fontFamily: "Nunito", color: "#4B5563", lineHeight: 18 }}>
+              Please confirm that you arrived at the customer doorstep and attempted to call/contact them. Add a short note below:
+            </Text>
+
+            <TextInput
+              value={unreachableNote}
+              onChangeText={setUnreachableNote}
+              placeholder="e.g. Called customer 3 times at doorstep, no answer."
+              placeholderTextColor="#9CA3AF"
+              multiline
+              numberOfLines={3}
+              style={{
+                backgroundColor: "#F9FAFB",
+                borderWidth: 1,
+                borderColor: "#D1D5DB",
+                borderRadius: 12,
+                padding: 12,
+                fontSize: 12.5,
+                fontFamily: "Nunito",
+                color: "#111827",
+                textAlignVertical: "top",
+                minHeight: 80,
+              }}
+            />
+
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <TouchableOpacity
+                onPress={() => setUnreachableModalVisible(false)}
+                style={{ flex: 1, paddingVertical: 12, borderRadius: 12, backgroundColor: "#F3F4F6", alignItems: "center" }}
+              >
+                <Text style={{ color: "#4B5563", fontWeight: "bold", fontFamily: "Poppins" }}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={handleCancelUnreachable}
+                disabled={actionLoading}
+                style={{ flex: 1, paddingVertical: 12, borderRadius: 12, backgroundColor: "#DC2626", alignItems: "center", opacity: actionLoading ? 0.7 : 1 }}
+              >
+                {actionLoading ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins" }}>Submit & Cancel</Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </Pressable>
         </Pressable>
       </Modal>

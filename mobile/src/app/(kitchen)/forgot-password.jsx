@@ -1,8 +1,8 @@
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { View, Text, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, TextInput } from "react-native"
 import { useRouter } from "expo-router"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import { ArrowLeft, Phone, Lock, ArrowRight, Utensils } from "lucide-react-native"
+import { ArrowLeft, Phone, Lock, ArrowRight, Utensils, RotateCw } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import Button from "../../components/ui/Button"
 import Input from "../../components/ui/Input"
@@ -23,8 +23,22 @@ export default function KitchenForgotPasswordPage() {
     const [error, setError] = useState("")
     const [success, setSuccess] = useState("")
     const [loading, setLoading] = useState(false)
+    const [resendTimer, setResendTimer] = useState(30)
+    const [resendLoading, setResendLoading] = useState(false)
 
     const otpRefs = [useRef(null), useRef(null), useRef(null), useRef(null)]
+
+    useEffect(() => {
+        let timer = null
+        if (step === "otp" && resendTimer > 0) {
+            timer = setInterval(() => {
+                setResendTimer((prev) => prev - 1)
+            }, 1000)
+        }
+        return () => {
+            if (timer) clearInterval(timer)
+        }
+    }, [step, resendTimer])
 
     const handleSendOtp = async () => {
         if (!/^[6-9]\d{9}$/.test(phone)) {
@@ -42,10 +56,33 @@ export default function KitchenForgotPasswordPage() {
             setHint(data.phoneHint)
             if (data.demoOtp) setDemoOtp(data.demoOtp)
             setStep("otp")
+            setResendTimer(30)
         } catch (err) {
             setError(err.message || "Failed to send OTP")
         } finally {
             setLoading(false)
+        }
+    }
+
+    const handleResendOtp = async () => {
+        if (resendTimer > 0 || resendLoading) return
+        setError("")
+        setSuccess("")
+        setResendLoading(true)
+        try {
+            const data = await api("/api/auth/kitchen/forgot-password/send-otp", {
+                method: "POST",
+                body: JSON.stringify({ phone }),
+            })
+            setUserId(data.userId)
+            setHint(data.phoneHint)
+            if (data.demoOtp) setDemoOtp(data.demoOtp)
+            setSuccess("New OTP sent successfully!")
+            setResendTimer(30)
+        } catch (err) {
+            setError(err.message || "Failed to resend OTP")
+        } finally {
+            setResendLoading(false)
         }
     }
 
@@ -225,6 +262,24 @@ export default function KitchenForgotPasswordPage() {
                                             />
                                         ))}
                                     </View>
+
+                                    <View className="flex-row items-center justify-between px-1">
+                                         <Text className="text-xs font-nunito text-gray">Didn't receive code?</Text>
+                                         {resendTimer > 0 ? (
+                                             <Text className="text-xs font-nunito text-gray font-semibold">Resend OTP in {resendTimer}s</Text>
+                                         ) : (
+                                             <TouchableOpacity
+                                                 onPress={handleResendOtp}
+                                                 disabled={resendLoading}
+                                                 className="flex-row items-center gap-1"
+                                             >
+                                                 <RotateCw size={12} color="#0B6B3A" />
+                                                 <Text className="text-xs font-nunito text-primary font-bold">
+                                                     {resendLoading ? "Sending..." : "Resend OTP"}
+                                                 </Text>
+                                             </TouchableOpacity>
+                                         )}
+                                     </View>
 
                                     <View>
                                         <Text className="font-poppins font-medium text-xs text-dark-light mb-2">New Password</Text>

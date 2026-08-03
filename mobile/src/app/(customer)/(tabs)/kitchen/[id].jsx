@@ -386,7 +386,7 @@ export default function KitchenDetailScreen() {
           {/* Navigation Bar */}
           <View className="absolute top-4 left-4 right-4 flex-row justify-between items-center z-10">
             <TouchableOpacity
-              onPress={() => router.back()}
+              onPress={() => (router.canGoBack() ? router.back() : router.replace("/(customer)/(tabs)/home"))}
               className="w-10 h-10 bg-white/95 rounded-full items-center justify-center shadow-md border border-white/50"
             >
               <ArrowLeft size={20} color="#1F1F1F" />

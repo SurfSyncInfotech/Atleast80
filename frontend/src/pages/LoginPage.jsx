@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react"
 import { Link, useNavigate, useLocation } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { ArrowRight, ArrowLeft, Mail, Lock, ShieldCheck, UtensilsCrossed, ShoppingCart, AtSign } from "lucide-react"
+import { ArrowRight, ArrowLeft, Mail, Lock, ShieldCheck, UtensilsCrossed, ShoppingCart, AtSign, RotateCw } from "lucide-react"
 import Button from "../components/ui/Button"
 import PasswordInput from "../components/ui/PasswordInput"
 import { useAuth } from "../context/AuthContext"
@@ -26,10 +26,11 @@ export default function LoginPage() {
   const otpValue = otp.join("")
 
   useEffect(() => {
-    if (location.state?.email) {
-      setIdentifier(location.state.email)
+    const prefill = location.state?.phone || location.state?.email || location.state?.identifier
+    if (prefill) {
+      setIdentifier(prefill)
     }
-  }, [location.state?.email])
+  }, [location.state])
 
   const handleOtpChange = (index, value) => {
     if (!/^\d?$/.test(value)) return
@@ -44,21 +45,19 @@ export default function LoginPage() {
     setError("")
     setLoading(true)
     try {
-      const isPhone = /^[6-9]\d{9}$/.test(identifier.replace(/\D/g, ""))
-      const loginPayload = isPhone
-        ? { phone: identifier.replace(/\D/g, ""), password }
-        : { email: identifier.trim().toLowerCase(), password }
       const data = await loginCustomer(identifier.trim(), password)
       if (data.requiresOtp) {
         setPhoneHint(data.phoneHint || "")
         setDemoOtp(data.demoOtp ?? null)
         setOtp(["", "", "", ""])
         setStep("otp")
-        return
+        setResendTimer(30)
+        setResendCount(0)
+      } else {
+        navigate(from, { replace: true })
       }
-      navigate(from, { replace: true })
     } catch (err) {
-      setError(err.message || "Login failed")
+      setError(err.message || "Failed to sign in")
     } finally {
       setLoading(false)
     }
@@ -79,23 +78,33 @@ export default function LoginPage() {
   }
 
   const handleResendOtp = async () => {
+    if (resendTimer > 0 || resendCount >= 3 || resendLoading) return
     setError("")
-    setLoading(true)
+    setResendLoading(true)
     try {
       const data = await loginCustomer(identifier.trim(), password)
       if (data.requiresOtp) {
         setDemoOtp(data.demoOtp ?? null)
         setOtp(["", "", "", ""])
+        setResendCount((prev) => prev + 1)
+        setResendTimer(30)
+        setToastMessage("New OTP sent successfully to your mobile number!")
+        setTimeout(() => setToastMessage(""), 3500)
       }
     } catch (err) {
       setError(err.message || "Failed to resend OTP")
     } finally {
-      setLoading(false)
+      setResendLoading(false)
     }
   }
 
   return (
     <div className="min-h-screen bg-cream flex flex-col md:flex-row">
+      {toastMessage && (
+        <div className="fixed top-5 right-5 z-50 bg-green-600 text-white px-6 py-3 rounded-xl shadow-lg font-nunito animate-in fade-in slide-in-from-top-4">
+          {toastMessage}
+        </div>
+      )}
       <div className="hidden md:flex md:w-1/2 lg:w-[55%] relative bg-gradient-to-br from-primary-dark via-primary to-[#0a4025] overflow-hidden">
         <div className="absolute top-0 right-0 w-96 h-96 bg-secondary/10 rounded-full blur-3xl" />
         <div className="relative z-10 flex flex-col items-center justify-center w-full px-12 lg:px-20">
@@ -251,14 +260,27 @@ export default function LoginPage() {
                   <ArrowRight size={18} />
                 </Button>
 
-                <button
-                  type="button"
-                  onClick={handleResendOtp}
-                  disabled={loading}
-                  className="w-full font-nunito text-sm text-primary font-semibold hover:underline disabled:opacity-50"
-                >
-                  Resend OTP
-                </button>
+                <div className="flex flex-col items-center gap-1">
+                  {resendCount >= 3 ? (
+                    <span className="text-xs text-red-500 font-medium text-center">
+                      Maximum resend limit reached (3/3). Please try again after a few minutes.
+                    </span>
+                  ) : resendTimer > 0 ? (
+                    <span className="text-xs text-gray font-semibold">
+                      Resend OTP in {resendTimer}s
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleResendOtp}
+                      disabled={resendLoading}
+                      className="font-nunito text-sm text-primary font-bold hover:underline inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <RotateCw size={14} className={resendLoading ? "animate-spin" : ""} />
+                      {resendLoading ? "Sending OTP..." : "Resend OTP"}
+                    </button>
+                  )}
+                </div>
               </motion.form>
             )}
           </AnimatePresence>

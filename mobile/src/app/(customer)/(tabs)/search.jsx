@@ -156,7 +156,7 @@ export default function SearchScreen() {
       {/* Header */}
       <View className="flex-row items-center px-4 py-3 bg-white border-b border-gray-light/35">
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={() => (router.canGoBack() ? router.back() : router.replace("/(customer)/(tabs)/home"))}
           className="mr-3 p-1"
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >

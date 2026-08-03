@@ -476,7 +476,7 @@ export default function KitchenSignupPage() {
           </View>
 
           <TouchableOpacity
-            onPress={() => router.back()}
+            onPress={() => (router.canGoBack() ? router.back() : router.replace("/(auth)/login"))}
             style={{
               flexDirection: "row",
               alignItems: "center",

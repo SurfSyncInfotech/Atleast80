@@ -1,11 +1,45 @@
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { View, Text, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, TextInput } from "react-native"
 import { useRouter } from "expo-router"
-import { ArrowLeft, Phone, Lock, ArrowRight } from "lucide-react-native"
+import { ArrowLeft, Phone, Lock, ArrowRight, RotateCw } from "lucide-react-native"
+import Svg, { Path, Rect, Circle } from "react-native-svg"
 import Button from "../../components/ui/Button"
 import Input from "../../components/ui/Input"
 import PasswordInput from "../../components/ui/PasswordInput"
 import { useAuth } from "../../context/AuthContext"
+
+function SecurityIllustration() {
+  return (
+    <View className="items-center justify-center mb-6">
+      <Svg width="120" height="100" viewBox="0 0 120 100">
+        {/* Shield */}
+        <Path
+          d="M 68 25 L 98 35 C 98 65 68 85 68 85 C 68 85 38 65 38 35 Z"
+          fill="#C4D1DB"
+          opacity="0.5"
+        />
+        <Path
+          d="M 68 25 L 98 35 C 98 65 68 85 68 85 L 68 25 Z"
+          fill="#94A3B8"
+          opacity="0.6"
+        />
+
+        {/* Lock Body */}
+        <Rect x="42" y="40" width="36" height="28" rx="6" fill="#FFFFFF" stroke="#334155" strokeWidth="2.5" />
+        {/* Lock Shackle */}
+        <Path d="M 50 40 V 28 C 50 20 70 20 70 28 V 40" fill="none" stroke="#334155" strokeWidth="2.5" strokeLinecap="round" />
+        {/* Keyhole */}
+        <Circle cx="60" cy="52" r="3" fill="#334155" />
+        <Path d="M 59 52 L 61 52 L 62 60 L 58 60 Z" fill="#334155" />
+
+        {/* Key */}
+        <Path d="M 26 48 L 44 48" stroke="#94A3B8" strokeWidth="3" strokeLinecap="round" />
+        <Circle cx="24" cy="48" r="6" fill="none" stroke="#94A3B8" strokeWidth="2.5" />
+        <Path d="M 38 48 V 53 M 42 48 V 52" stroke="#94A3B8" strokeWidth="2" strokeLinecap="round" />
+      </Svg>
+    </View>
+  )
+}
 
 export default function ForgotPasswordPage() {
   const router = useRouter()
@@ -18,9 +52,23 @@ export default function ForgotPasswordPage() {
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
   const [loading, setLoading] = useState(false)
+  const [resendTimer, setResendTimer] = useState(30)
+  const [resendLoading, setResendLoading] = useState(false)
 
   const otpRefs = [useRef(null), useRef(null), useRef(null), useRef(null)]
   const otpValue = otp.join("")
+
+  useEffect(() => {
+    let timer = null
+    if (step === "otp" && resendTimer > 0) {
+      timer = setInterval(() => {
+        setResendTimer((prev) => prev - 1)
+      }, 1000)
+    }
+    return () => {
+      if (timer) clearInterval(timer)
+    }
+  }, [step, resendTimer])
 
   const handleSendOtp = async () => {
     if (!phone || phone.trim().length < 10) {
@@ -33,10 +81,28 @@ export default function ForgotPasswordPage() {
       const data = await sendForgotPasswordOtp(phone.trim())
       setPhoneHint(data.phoneHint || `******${phone.trim().slice(-4)}`)
       setStep("otp")
+      setResendTimer(30)
     } catch (err) {
       setError(err.message || "Failed to send OTP")
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleResendOtp = async () => {
+    if (resendTimer > 0 || resendLoading) return
+    setError("")
+    setSuccess("")
+    setResendLoading(true)
+    try {
+      const data = await sendForgotPasswordOtp(phone.trim())
+      setPhoneHint(data.phoneHint || `******${phone.trim().slice(-4)}`)
+      setSuccess("New OTP sent successfully!")
+      setResendTimer(30)
+    } catch (err) {
+      setError(err.message || "Failed to resend OTP")
+    } finally {
+      setResendLoading(false)
     }
   }
 
@@ -85,119 +151,141 @@ export default function ForgotPasswordPage() {
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : "height"}
-      className="flex-1 bg-cream"
+      className="flex-1 bg-cream relative"
     >
-      <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
-        {/* Header */}
-        <View className="px-6 pt-12">
-          <TouchableOpacity
-            onPress={() => (step === "otp" ? setStep("phone") : router.replace("/(auth)/login"))}
-            className="w-10 h-10 rounded-xl bg-white border border-gray-light flex items-center justify-center"
-          >
-            <ArrowLeft size={18} color="#1F1F1F" />
-          </TouchableOpacity>
+      <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: "center", paddingVertical: 40 }} keyboardShouldPersistTaps="handled">
+        {/* Top Left Back Circle Button */}
+        <TouchableOpacity
+          onPress={() => (step === "otp" ? setStep("phone") : router.replace("/(auth)/login"))}
+          className="absolute top-12 left-6 w-10 h-10 rounded-full bg-white border border-gray-light flex items-center justify-center shadow-sm z-20"
+        >
+          <ArrowLeft size={18} color="#1F1F1F" />
+        </TouchableOpacity>
 
-          <Text className="font-poppins font-bold text-3xl text-dark mt-6">Reset password</Text>
-          <Text className="font-nunito text-gray text-base mt-2">
+        <View className="px-6 items-center w-full max-w-md self-center">
+          {/* Top Security Illustration */}
+          <SecurityIllustration />
+
+          {/* Centered Header */}
+          <Text className="font-poppins font-bold text-3xl text-dark text-center">Reset password</Text>
+          <Text className="font-nunito text-gray text-sm mt-2 text-center max-w-xs leading-5">
             {step === "phone"
               ? "Enter your phone number — we'll send an OTP to verify your identity"
               : `OTP sent to ${phoneHint || "your phone"}`}
           </Text>
-        </View>
 
-        {/* Form Container */}
-        <View className="flex-1 px-6 py-6 justify-center">
-          {error ? (
-            <View className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
-              <Text className="font-nunito text-sm text-red-700">{error}</Text>
-            </View>
-          ) : null}
-
-          {success ? (
-            <View className="mb-4 rounded-xl border border-green-200 bg-green-50 px-4 py-3">
-              <Text className="font-nunito text-sm text-green-800">{success}</Text>
-            </View>
-          ) : null}
-
-          {step === "phone" ? (
-            <View className="space-y-4">
-              <View>
-                <Text className="font-poppins font-medium text-sm text-dark mb-2">Phone Number</Text>
-                <Input
-                  value={phone}
-                  onChangeText={setPhone}
-                  placeholder="Enter 10-digit number"
-                  icon={Phone}
-                  keyboardType="phone-pad"
-                  maxLength={10}
-                />
+          {/* Form Container */}
+          <View className="w-full mt-6">
+            {error ? (
+              <View className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+                <Text className="font-nunito text-sm text-red-700 text-center">{error}</Text>
               </View>
+            ) : null}
 
-              <View className="pt-2">
-                <Button onPress={handleSendOtp} size="lg" className="w-full h-14" loading={loading}>
-                  <View className="flex-row items-center justify-center gap-2">
-                    <Text className="text-white text-lg font-bold">Send OTP</Text>
-                    <ArrowRight size={18} color="#FFFFFF" />
-                  </View>
-                </Button>
+            {success ? (
+              <View className="mb-4 rounded-xl border border-green-200 bg-green-50 px-4 py-3">
+                <Text className="font-nunito text-sm text-green-800 text-center">{success}</Text>
               </View>
-            </View>
-          ) : (
-            <View className="space-y-6">
-              {/* 4 Digit OTP Inputs */}
-              <View className="flex-row gap-3 justify-center py-2">
-                {otp.map((digit, i) => (
-                  <TextInput
-                    key={i}
-                    ref={otpRefs[i]}
-                    keyboardType="number-pad"
-                    maxLength={1}
-                    value={digit}
-                    onChangeText={(val) => handleOtpChange(i, val)}
-                    onKeyPress={({ nativeEvent }) => handleOtpKeyPress(i, nativeEvent.key)}
-                    style={{
-                      width: 56,
-                      height: 56,
-                      backgroundColor: "white",
-                      borderRadius: 12,
-                      borderWidth: 2,
-                      borderColor: "#E8E8E8",
-                      textAlign: "center",
-                      fontSize: 24,
-                      fontWeight: "bold",
-                      color: "#1F1F1F",
-                    }}
+            ) : null}
+
+            {step === "phone" ? (
+              <View className="space-y-4">
+                <View>
+                  <Text className="font-poppins font-medium text-xs text-dark mb-2">Phone Number</Text>
+                  <Input
+                    value={phone}
+                    onChangeText={setPhone}
+                    placeholder="Enter 10-digit number"
+                    icon={Phone}
+                    keyboardType="phone-pad"
+                    maxLength={10}
                   />
-                ))}
-              </View>
+                </View>
 
-              <View>
-                <Text className="font-poppins font-medium text-sm text-dark mb-2">New Password</Text>
-                <PasswordInput
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder="At least 6 characters"
-                  icon={Lock}
-                />
+                <View className="pt-2">
+                  <Button onPress={handleSendOtp} size="lg" className="w-full h-14 rounded-full" loading={loading}>
+                    <View className="flex-row items-center justify-center gap-2">
+                      <Text className="text-white text-base font-bold">Send OTP</Text>
+                      <ArrowRight size={18} color="#FFFFFF" />
+                    </View>
+                  </Button>
+                </View>
               </View>
+            ) : (
+              <View className="space-y-6">
+                {/* 4 Digit OTP Inputs */}
+                <View className="flex-row gap-3 justify-center py-2">
+                  {otp.map((digit, i) => (
+                    <TextInput
+                      key={i}
+                      ref={otpRefs[i]}
+                      keyboardType="number-pad"
+                      maxLength={1}
+                      value={digit}
+                      onChangeText={(val) => handleOtpChange(i, val)}
+                      onKeyPress={({ nativeEvent }) => handleOtpKeyPress(i, nativeEvent.key)}
+                      style={{
+                        width: 54,
+                        height: 54,
+                        backgroundColor: "white",
+                        borderRadius: 14,
+                        borderWidth: 2,
+                        borderColor: "#E8E8E8",
+                        textAlign: "center",
+                        fontSize: 22,
+                        fontWeight: "bold",
+                        color: "#1F1F1F",
+                      }}
+                    />
+                  ))}
+                </View>
 
-              <View className="pt-2">
-                <Button
-                  onPress={handleReset}
-                  size="lg"
-                  className="w-full h-14"
-                  loading={loading}
-                  disabled={otp.some((d) => !d) || password.length < 6}
-                >
-                  <Text className="text-white text-lg font-bold">Reset Password</Text>
-                </Button>
+                <View className="flex-row items-center justify-between px-1">
+                  <Text className="text-xs font-nunito text-gray">Didn't receive code?</Text>
+                  {resendTimer > 0 ? (
+                    <Text className="text-xs font-nunito text-gray font-semibold">Resend OTP in {resendTimer}s</Text>
+                  ) : (
+                    <TouchableOpacity
+                      onPress={handleResendOtp}
+                      disabled={resendLoading}
+                      className="flex-row items-center gap-1"
+                    >
+                      <RotateCw size={12} color="#0B6B3A" />
+                      <Text className="text-xs font-nunito text-primary font-bold">
+                        {resendLoading ? "Sending..." : "Resend OTP"}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                <View>
+                  <Text className="font-poppins font-medium text-xs text-dark mb-2">New Password</Text>
+                  <PasswordInput
+                    value={password}
+                    onChangeText={setPassword}
+                    placeholder="At least 6 characters"
+                    icon={Lock}
+                  />
+                </View>
+
+                <View className="pt-2">
+                  <Button
+                    onPress={handleReset}
+                    size="lg"
+                    className="w-full h-14 rounded-full"
+                    loading={loading}
+                    disabled={otp.some((d) => !d) || password.length < 6}
+                  >
+                    <Text className="text-white text-base font-bold">Reset Password</Text>
+                  </Button>
+                </View>
               </View>
-            </View>
-          )}
+            )}
 
-          <TouchableOpacity onPress={() => router.replace("/(auth)/login")} className="mt-6">
-            <Text className="text-primary font-bold text-center text-base">Back to sign in</Text>
-          </TouchableOpacity>
+            <TouchableOpacity onPress={() => router.replace("/(auth)/login")} className="mt-6">
+              <Text className="text-primary font-bold text-center text-sm underline">Back to sign in</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

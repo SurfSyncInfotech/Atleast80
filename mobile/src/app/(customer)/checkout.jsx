@@ -31,10 +31,10 @@ export default function CheckoutScreen() {
   const deliveryAddress = [user?.address, user?.city, user?.pincode].filter(Boolean).join(", ")
 
   useEffect(() => {
-    if (cart.length === 0 && !orderPlaced) {
+    if (cart.length === 0 && !orderPlaced && !loading) {
       router.replace("/(customer)/cart")
     }
-  }, [cart, orderPlaced, router])
+  }, [cart.length, orderPlaced, loading, router])
 
   const executeOrderPlacement = async (selectedPayment) => {
     setLoading(true)
@@ -63,10 +63,18 @@ export default function CheckoutScreen() {
 
       setUpiModalVisible(false)
       setOrderPlaced(true)
-      clearCart()
+      
+      const newOrderId = data?.order?.id
+      // Hold Order Placed screen for 2.5s, then navigate directly to order tracking before clearing cart state
       setTimeout(() => {
-        router.replace(`/(customer)/orders/${data.order.id}`)
-      }, 2000)
+        router.replace({
+          pathname: "/(customer)/orders/[id]",
+          params: { id: String(newOrderId) }
+        })
+        setTimeout(() => {
+          clearCart()
+        }, 300)
+      }, 2500)
     } catch (err) {
       setError(err.message || "Failed to place order")
       setUpiModalVisible(false)
@@ -100,27 +108,29 @@ export default function CheckoutScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-cream relative" edges={["top"]}>
-      {/* Success Overlay Modal */}
-      {orderPlaced ? (
+      {/* Fullscreen Order Placed Success Modal */}
+      <Modal visible={orderPlaced} transparent animationType="fade">
         <LinearGradient
           colors={["#0B6B3A", "#064d29", "#04331b"]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
-          className="absolute inset-0 items-center justify-center z-50 px-6"
+          style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24 }}
         >
-          <View className="bg-white/10 rounded-full p-6 mb-6 border border-white/10 shadow-sm">
-            <CheckCircle size={84} color="#FFFFFF" strokeWidth={1.5} />
+          <View style={{ backgroundColor: "rgba(255,255,255,0.12)", borderRadius: 100, padding: 24, marginBottom: 24, borderWidth: 1, borderColor: "rgba(255,255,255,0.18)" }}>
+            <CheckCircle size={90} color="#FFFFFF" strokeWidth={1.5} />
           </View>
-          <Text className="font-poppins font-bold text-white text-3xl mt-2 text-center">Order Placed!</Text>
-          <Text className="font-nunito text-white/80 text-base mt-2 text-center max-w-xs leading-relaxed">
+          <Text style={{ fontFamily: "Poppins", fontWeight: "bold", color: "#FFFFFF", fontSize: 32, textAlign: "center" }}>
+            Order Placed!
+          </Text>
+          <Text style={{ fontFamily: "Nunito", color: "rgba(255,255,255,0.85)", fontSize: 16, marginTop: 8, textAlign: "center", maxWidth: 290, lineHeight: 24 }}>
             Your food is being prepared with pure love and hygiene.
           </Text>
         </LinearGradient>
-      ) : null}
+      </Modal>
 
       {/* Header */}
       <View className="flex-row items-center px-4 py-3 bg-white border-b border-gray-light/35">
-        <TouchableOpacity onPress={() => router.back()} className="mr-3">
+        <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.replace("/(customer)/cart"))} className="mr-3">
           <ArrowLeft size={22} color="#1F1F1F" />
         </TouchableOpacity>
         <Text className="font-poppins font-bold text-lg text-dark">Checkout</Text>

@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react"
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Linking, Image, Alert, Platform, Modal } from "react-native"
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Linking, Image, Alert, Platform, Modal, Pressable } from "react-native"
 import { useRouter } from "expo-router"
 import { SafeAreaView } from "react-native-safe-area-context"
 import {
