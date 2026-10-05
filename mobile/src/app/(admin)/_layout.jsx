@@ -1,5 +1,5 @@
 import { useEffect } from "react"
-import { Stack, useSegments, useRouter } from "expo-router"
+import { Stack, useSegments, useRouter, useRootNavigationState } from "expo-router"
 import { useAuth } from "../../context/AuthContext"
 import { View, ActivityIndicator } from "react-native"
 
@@ -7,24 +7,25 @@ export default function AdminLayout() {
   const { user, isAdmin, loading } = useAuth()
   const segments = useSegments()
   const router = useRouter()
+  const rootNavState = useRootNavigationState()
 
   useEffect(() => {
-    if (!loading) {
-      const isAdminRoute = segments.includes("(admin)")
-      if (!isAdminRoute) return
+    if (!rootNavState?.key || loading) return
 
-      const isLoginScreen = segments.includes("login")
-      if (!user || !isAdmin) {
-        if (!isLoginScreen) {
-          router.replace("/(admin)/login")
-        }
-      } else {
-        if (isLoginScreen) {
-          router.replace("/(admin)/dashboard")
-        }
+    const isAdminRoute = segments.includes("(admin)")
+    if (!isAdminRoute) return
+
+    const isLoginScreen = segments.includes("login")
+    if (!user || !isAdmin) {
+      if (!isLoginScreen) {
+        router.replace("/(admin)/login")
+      }
+    } else {
+      if (isLoginScreen) {
+        router.replace("/(admin)/dashboard")
       }
     }
-  }, [user, isAdmin, loading, segments])
+  }, [rootNavState?.key, user, isAdmin, loading, segments])
 
   if (loading) {
     return (

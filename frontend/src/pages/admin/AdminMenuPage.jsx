@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from "react"
 import {
-  UtensilsCrossed, CheckCircle, XCircle, ChevronDown, Store, Trash2, MessageSquare,
+  UtensilsCrossed, CheckCircle, XCircle, ChevronDown, Store, Trash2, MessageSquare, Pencil, Check, ShieldCheck,
 } from "lucide-react"
 import AdminLayout from "../../components/layout/AdminLayout"
 import Chip from "../../components/common/Chip"
@@ -18,7 +18,7 @@ const FILTERS = [
   { id: "", label: "All" },
 ]
 
-const TABLE_HEADERS = ["Item", "Category", "Type", "Price", "Submitted", "Status", "Admin comment", "Actions"]
+const TABLE_HEADERS = ["Item", "Category", "Packaging / GST", "Type", "Price", "Submitted", "Status", "Availability", "Admin comment", "Actions"]
 
 function formatDate(value) {
   if (!value) return "—"
@@ -45,6 +45,185 @@ function StatusBadge({ status }) {
     >
       {status}
     </span>
+  )
+}
+
+function AdminEditModal({ item, saving, onClose, onSubmit }) {
+  if (!item) return null
+
+  const pkgType = item.packaging_type || item.packagingType || "packaged"
+  const defaultGst = item.category === "grocery" ? (pkgType === "loose" ? 0 : 5) : 18
+
+  const [name, setName] = useState(item.name || "")
+  const [localName, setLocalName] = useState(item.local_name || item.localName || "")
+  const [price, setPrice] = useState(String(item.price || ""))
+  const [category, setCategory] = useState(item.category || "food")
+  const [packagingType, setPackagingType] = useState(pkgType)
+  const [gstRate, setGstRate] = useState(Number(item.gst_rate !== undefined && item.gst_rate !== null ? item.gst_rate : (item.gstRate !== undefined && item.gstRate !== null ? item.gstRate : defaultGst)))
+
+  const handleCategoryChange = (newCat) => {
+    setCategory(newCat)
+    if (newCat === "grocery") {
+      setGstRate(packagingType === "loose" ? 0 : 5)
+    } else {
+      setGstRate(18)
+    }
+  }
+
+  const handlePackagingChange = (newPkg) => {
+    setPackagingType(newPkg)
+    if (category === "grocery") {
+      setGstRate(newPkg === "loose" ? 0 : 5)
+    }
+  }
+
+  const handleSubmit = (autoApprove = false) => {
+    const finalGstRate = category === "grocery" ? (packagingType === "loose" ? 0 : 5) : 18
+    onSubmit({
+      id: item.id,
+      name: name.trim(),
+      localName: localName.trim() || null,
+      price: Number(price),
+      category,
+      packagingType,
+      gstRate: finalGstRate,
+      autoApprove,
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+          <div>
+            <h3 className="font-poppins font-bold text-lg text-dark">Edit & Verify Item</h3>
+            <p className="font-nunito text-xs text-gray">Verify GST tax tiers, local name & item details</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray cursor-pointer">
+            ✕
+          </button>
+        </div>
+
+        <div className="space-y-4 mt-4">
+          <div>
+            <label className="text-xs font-poppins font-semibold text-dark block mb-1">Item Title (English)</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm font-nunito focus:outline-none focus:border-primary"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-poppins font-semibold text-dark block mb-1">Local / Hindi Title</label>
+            <input
+              type="text"
+              value={localName}
+              onChange={(e) => setLocalName(e.target.value)}
+              placeholder="e.g. दाल मखनी / चीनी"
+              className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm font-nunito focus:outline-none focus:border-primary"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-poppins font-semibold text-dark block mb-1">Price (₹)</label>
+              <input
+                type="number"
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm font-nunito focus:outline-none focus:border-primary"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-poppins font-semibold text-dark block mb-1">Category</label>
+              <select
+                value={category}
+                onChange={(e) => handleCategoryChange(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm font-nunito focus:outline-none focus:border-primary cursor-pointer"
+              >
+                <option value="food">Food</option>
+                <option value="grocery">Grocery / Ration</option>
+              </select>
+            </div>
+          </div>
+
+          {category === "grocery" && (
+            <div>
+              <label className="text-xs font-poppins font-semibold text-dark block mb-1">Packaging Type</label>
+              <div className="flex gap-2">
+                {[
+                  { id: "packaged", label: "Packaged / Branded" },
+                  { id: "loose", label: "Loose / Raw" },
+                ].map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => handlePackagingChange(p.id)}
+                    className={cn(
+                      "flex-1 py-2 px-3 rounded-lg border text-xs font-poppins font-medium cursor-pointer transition-colors",
+                      packagingType === p.id
+                        ? p.id === "loose"
+                          ? "border-slate-600 bg-slate-50 text-slate-900 font-bold"
+                          : "border-emerald-600 bg-emerald-50 text-emerald-900 font-bold"
+                        : "border-gray-200 text-gray hover:bg-gray-50"
+                    )}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {category === "grocery" && (
+            packagingType === "loose" ? (
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 flex items-center justify-between">
+                <span className="text-xs font-poppins font-semibold text-slate-900">Grocery GST Tax Rate</span>
+                <span className="text-xs font-poppins font-bold bg-slate-700 text-white px-2.5 py-0.5 rounded-full">
+                  0% (Exempted / Zero GST)
+                </span>
+              </div>
+            ) : (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex items-center justify-between">
+                <span className="text-xs font-poppins font-semibold text-emerald-950">Grocery GST Tax Rate</span>
+                <span className="text-xs font-poppins font-bold bg-emerald-600 text-white px-2.5 py-0.5 rounded-full">
+                  5% (Standard Fixed)
+                </span>
+              </div>
+            )
+          )}
+
+          <div className="flex gap-2 pt-3 border-t border-gray-100">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={saving}
+              className="px-4 py-2.5 rounded-lg border border-gray-200 font-poppins text-xs font-medium hover:bg-gray-50 cursor-pointer disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSubmit(false)}
+              disabled={saving}
+              className="flex-1 py-2.5 rounded-lg border border-primary text-primary font-poppins text-xs font-bold hover:bg-primary/5 cursor-pointer disabled:opacity-50"
+            >
+              Save Changes
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSubmit(true)}
+              disabled={saving}
+              className="flex-1 py-2.5 rounded-lg bg-primary text-white font-poppins text-xs font-bold hover:bg-primary-dark cursor-pointer disabled:opacity-50 shadow-sm"
+            >
+              Save & Approve
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -121,8 +300,10 @@ function KitchenMenuTable({
   expanded,
   onToggle,
   onApprove,
+  onEditItem,
   onOpenModal,
   onViewItem,
+  onToggleAvailability,
 }) {
   const [itemPage, setItemPage] = useState(1)
   const [itemPageSize, setItemPageSize] = useState(10)
@@ -204,7 +385,13 @@ function KitchenMenuTable({
                 const status = item.approvalStatus || item.approval_status || "pending"
                 const category = item.category === "grocery" ? "Grocery" : "Food"
                 const itemType = item.item_type === "non_veg" ? "Non-veg" : "Veg"
+                const localName = item.local_name || item.localName
+                const isGrocery = item.category === "grocery"
+                const packaging = item.packaging_type || item.packagingType || "packaged"
+                const defaultGst = isGrocery ? (packaging === "loose" ? 0 : 5) : 5
+                const gstRate = item.gst_rate !== undefined && item.gst_rate !== null ? Number(item.gst_rate) : (item.gstRate !== undefined && item.gstRate !== null ? Number(item.gstRate) : defaultGst)
                 const adminComment = item.reviewComment || item.review_comment
+                const isAvail = item.is_available === 1 || item.is_available === true || item.isAvailable === true
 
                 return (
                   <tr key={item.id} className="border-b border-[#f0f0f0] last:border-0 hover:bg-[#fafafa] transition-colors">
@@ -213,7 +400,7 @@ function KitchenMenuTable({
                         <button
                           type="button"
                           onClick={() => onViewItem(item, kitchen)}
-                          className="w-10 h-10 bg-gray-100 overflow-hidden flex-shrink-0 border border-[#eee] cursor-pointer hover:ring-2 hover:ring-primary/30 transition-all"
+                          className="w-10 h-10 bg-gray-100 overflow-hidden flex-shrink-0 border border-[#eee] rounded-lg cursor-pointer hover:ring-2 hover:ring-primary/30 transition-all"
                           aria-label={`View ${item.name}`}
                         >
                           {thumb ? (
@@ -228,10 +415,13 @@ function KitchenMenuTable({
                           <button
                             type="button"
                             onClick={() => onViewItem(item, kitchen)}
-                            className="font-poppins font-semibold text-sm text-[#1c1c1c] truncate text-left hover:text-primary cursor-pointer"
+                            className="font-poppins font-semibold text-sm text-[#1c1c1c] truncate text-left hover:text-primary cursor-pointer block"
                           >
                             {item.name}
                           </button>
+                          {localName && (
+                            <p className="font-nunito text-[11px] text-gray-500 truncate">{localName}</p>
+                          )}
                           {item.description && (
                             <p className="font-nunito text-xs text-[#999] truncate max-w-[220px]">{item.description}</p>
                           )}
@@ -239,6 +429,21 @@ function KitchenMenuTable({
                       </div>
                     </td>
                     <td className="px-4 py-3 font-nunito text-sm text-[#363636] whitespace-nowrap">{category}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <div className="flex flex-col gap-1">
+                        <span className="inline-flex text-[10px] font-poppins font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-700 capitalize w-fit">
+                          {packaging}
+                        </span>
+                        <span className={cn(
+                          "inline-flex text-[10px] font-poppins font-bold px-2 py-0.5 rounded border w-fit",
+                          gstRate === 0
+                            ? "bg-slate-50 text-slate-700 border-slate-200"
+                            : "bg-emerald-50 text-emerald-700 border border-emerald-200/60"
+                        )}>
+                          GST: {gstRate}%
+                        </span>
+                      </div>
+                    </td>
                     <td className="px-4 py-3 font-nunito text-sm text-[#363636] whitespace-nowrap">{itemType}</td>
                     <td className="px-4 py-3 font-poppins font-semibold text-sm text-primary whitespace-nowrap">
                       ₹{Number(item.price)}
@@ -248,6 +453,30 @@ function KitchenMenuTable({
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <StatusBadge status={status} />
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onToggleAvailability(item)}
+                          disabled={actionId === item.id}
+                          className={cn(
+                            "relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-50",
+                            isAvail ? "bg-emerald-500" : "bg-gray-300"
+                          )}
+                          title={isAvail ? "Click to mark as unavailable" : "Click to mark as available"}
+                        >
+                          <span
+                            className={cn(
+                              "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                              isAvail ? "translate-x-4" : "translate-x-0"
+                            )}
+                          />
+                        </button>
+                        <span className={cn("text-xs font-nunito font-semibold", isAvail ? "text-emerald-700" : "text-gray-400")}>
+                          {isAvail ? "Available" : "Disabled"}
+                        </span>
+                      </div>
                     </td>
                     <td className="px-4 py-3 max-w-[200px]">
                       {adminComment ? (
@@ -272,6 +501,15 @@ function KitchenMenuTable({
                             Approve
                           </button>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => onEditItem(item)}
+                          title="Edit & Verify GST"
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 text-[11px] font-poppins font-semibold hover:bg-emerald-100 cursor-pointer"
+                        >
+                          <Pencil size={11} />
+                          Edit / GST
+                        </button>
                         {status === "pending" && (
                           <button
                             type="button"
@@ -345,6 +583,7 @@ export default function AdminMenuPage() {
   const [actionId, setActionId] = useState(null)
   const [expandedIds, setExpandedIds] = useState(new Set())
   const [modal, setModal] = useState(null)
+  const [editItem, setEditItem] = useState(null)
   const [comment, setComment] = useState("")
   const [saving, setSaving] = useState(false)
   const [selectedItem, setSelectedItem] = useState(null)
@@ -364,25 +603,46 @@ export default function AdminMenuPage() {
     if (kitchenPage > paginatedKitchens.totalPages) setKitchenPage(paginatedKitchens.totalPages)
   }, [kitchenPage, paginatedKitchens.totalPages])
 
-  const load = useCallback(() => {
-    setLoading(true)
+  const load = useCallback((showSkeleton = true) => {
+    if (showSkeleton) setLoading(true)
     const params = filter ? `?status=${filter}` : ""
     api(`/api/admin/menu${params}`, {}, "admin")
       .then((d) => {
         const list = d.kitchens || []
         setKitchens(list)
-        setExpandedIds(new Set(list.map((k) => k.id)))
+        setExpandedIds((prev) => {
+          if (prev.size === 0) return new Set(list.map((k) => k.id))
+          const next = new Set(prev)
+          list.forEach((k) => {
+            if (!prev.has(k.id) && k.pendingCount > 0) next.add(k.id)
+          })
+          return next
+        })
       })
       .catch(() => {
-        setKitchens([])
-        setExpandedIds(new Set())
+        if (showSkeleton) {
+          setKitchens([])
+          setExpandedIds(new Set())
+        }
       })
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (showSkeleton) setLoading(false)
+      })
   }, [filter])
 
   useEffect(() => {
-    load()
+    load(true)
   }, [load])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!editItem && !modal && !saving && !actionId) {
+        load(false)
+      }
+    }, 3000)
+
+    return () => clearInterval(interval)
+  }, [load, editItem, modal, saving, actionId])
 
   const toggleKitchen = (id) => {
     setExpandedIds((prev) => {
@@ -423,6 +683,38 @@ export default function AdminMenuPage() {
       alert(err.message || "Failed to approve")
     } finally {
       setActionId(null)
+    }
+  }
+
+  const handleToggleAvailability = async (item) => {
+    setActionId(item.id)
+    try {
+      const isAvail = item.is_available === 1 || item.is_available === true || item.isAvailable === true
+      await api(`/api/admin/menu/${item.id}/toggle-availability`, {
+        method: "PATCH",
+        body: JSON.stringify({ isAvailable: !isAvail }),
+      }, "admin")
+      load()
+    } catch (err) {
+      alert(err.message || "Failed to update item availability")
+    } finally {
+      setActionId(null)
+    }
+  }
+
+  const handleEditSubmit = async (payload) => {
+    setSaving(true)
+    try {
+      await api(`/api/admin/menu/${payload.id}/edit`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      }, "admin")
+      setEditItem(null)
+      load()
+    } catch (err) {
+      alert(err.message || "Failed to update item")
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -468,7 +760,7 @@ export default function AdminMenuPage() {
           <h1 className="font-poppins font-bold text-xl sm:text-2xl text-[#1c1c1c]">Menu approvals</h1>
         </div>
         <p className="font-nunito text-sm text-[#999] mb-6">
-          Review menu items by kitchen. Reject or comment to send feedback to the seller.
+          Review menu items by kitchen. Verify GST tax tiers, edit details, approve or reject submissions.
         </p>
 
         <div className="flex flex-wrap gap-2 mb-5">
@@ -506,8 +798,10 @@ export default function AdminMenuPage() {
                   expanded={expandedIds.has(kitchen.id)}
                   onToggle={() => toggleKitchen(kitchen.id)}
                   onApprove={handleApprove}
+                  onEditItem={(item) => setEditItem(item)}
                   onOpenModal={openModal}
                   onViewItem={handleViewItem}
+                  onToggleAvailability={handleToggleAvailability}
                 />
               ))}
             </div>
@@ -531,6 +825,13 @@ export default function AdminMenuPage() {
         saving={saving}
         onClose={closeModal}
         onSubmit={handleModalSubmit}
+      />
+
+      <AdminEditModal
+        item={editItem}
+        saving={saving}
+        onClose={() => setEditItem(null)}
+        onSubmit={handleEditSubmit}
       />
 
       <MenuItemDetailModal

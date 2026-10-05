@@ -96,6 +96,19 @@ export async function uploadKitchenCover(file) {
   return uploadFormData("/api/kitchens/me/cover", formData, "kitchen")
 }
 
+export async function uploadKitchenFestivalOfferImage(file, slot = 1) {
+  const formData = new FormData()
+  formData.append("image", file)
+  return uploadFormData(`/api/kitchens/me/festival-offer/image?slot=${slot}`, formData, "kitchen")
+}
+
+export async function uploadKitchenImages(files) {
+  if (!files?.length) return { kitchenImages: [] }
+  const formData = new FormData()
+  files.forEach((file) => formData.append("images", file))
+  return uploadFormData("/api/kitchens/me/images", formData, "kitchen")
+}
+
 export async function uploadHygieneVideo(blob) {
   const formData = new FormData()
   formData.append("video", blob, "hygiene-daily.webm")
@@ -180,3 +193,52 @@ export async function uploadRiderAgreementPdf(file) {
 export async function deleteRiderAgreementPdf() {
   return api("/api/admin/settings/rider-agreement", { method: "DELETE" }, "admin")
 }
+
+// User Agreement & Terms
+export async function getUserAgreement() {
+  return api("/api/auth/user-agreement")
+}
+
+export async function uploadUserAgreementPdf(file) {
+  const formData = new FormData()
+  formData.append("agreement", file)
+  return uploadFormData("/api/admin/settings/user-agreement", formData, "admin")
+}
+
+export async function deleteUserAgreementPdf() {
+  return api("/api/admin/settings/user-agreement", { method: "DELETE" }, "admin")
+}
+
+// CMS Policies (Privacy Policy & Terms of Service)
+export async function getCmsPolicy(type) {
+  return api(`/api/cms/policies/${type}`)
+}
+
+export async function getAdminCmsPolicy(type) {
+  return api(`/api/cms/admin/policies/${type}`, {}, "admin")
+}
+
+export async function updateAdminCmsPolicy(type, sections) {
+  return api(`/api/cms/admin/policies/${type}`, {
+    method: "PUT",
+    body: JSON.stringify({ sections }),
+  }, "admin")
+}
+
+// Support Contact Settings
+export async function getAdminContactSettings() {
+  return api("/api/admin/settings/contact", {}, "admin")
+}
+
+export async function updateAdminContactSettings(data) {
+  return api("/api/admin/settings/contact", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  }, "admin")
+}
+
+export async function getPublicContactSettings() {
+  return api("/api/cms/contact")
+}
+
+

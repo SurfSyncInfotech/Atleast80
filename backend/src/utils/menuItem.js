@@ -21,8 +21,16 @@ export function formatMenuItem(item) {
 
   return {
     ...item,
+    is_available: item.is_available === undefined || item.is_available === null ? true : Boolean(item.is_available),
+    isAvailable: item.is_available === undefined || item.is_available === null ? true : Boolean(item.is_available),
     is_combo: Boolean(item.is_combo),
     isCombo: Boolean(item.is_combo),
+    packaging_type: item.packaging_type || "packaged",
+    packagingType: item.packaging_type || "packaged",
+    gst_rate: item.gst_rate !== undefined && item.gst_rate !== null ? Number(item.gst_rate) : (item.category === "grocery" ? (item.packaging_type === "loose" ? 0 : 5) : 5),
+    gstRate: item.gst_rate !== undefined && item.gst_rate !== null ? Number(item.gst_rate) : (item.category === "grocery" ? (item.packaging_type === "loose" ? 0 : 5) : 5),
+    local_name: item.local_name || null,
+    localName: item.local_name || null,
     comboItems: item.comboItems || [],
     approval_status: item.approval_status || "pending",
     approvalStatus: item.approval_status || "pending",

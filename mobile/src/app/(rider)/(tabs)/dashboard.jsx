@@ -739,7 +739,26 @@ export default function RiderDashboardScreen() {
             <TouchableOpacity
               activeOpacity={0.7}
               onPress={() => {
+                const remittance = metrics?.remittanceStatus
+                const remStatus = String(remittance?.status || "").toLowerCase()
+                const isPendingRemittance = remStatus === "pending"
+                const isRejectedRemittance = remStatus === "rejected"
+
+                if (isPendingRemittance) {
+                  Alert.alert(
+                    "Deposit Pending Approval 🕒",
+                    `Your cash deposit request of ₹${cashCollected} has been submitted to Admin and is under review.\n\nYour cash balance will clear automatically as soon as Admin approves it.`
+                  )
+                  return
+                }
+
                 if (cashCollected > 0) {
+                  if (isRejectedRemittance && remittance?.rejection_reason) {
+                    Alert.alert(
+                      "Previous Deposit Rejected ❌",
+                      `Admin rejected your previous deposit request of ₹${remittance.amount}.\n\nReason: ${remittance.rejection_reason}\n\nPlease click OK to submit a new deposit request with correct payment proof.`
+                    )
+                  }
                   setDepositUtrInput("")
                   setQrModalConfig({
                     title: "Deposit Cash to Admin (QR)",
@@ -752,9 +771,33 @@ export default function RiderDashboardScreen() {
                           method: "POST",
                           body: JSON.stringify({ amount: cashCollected, utrNumber: utrVal }),
                         })
+                        setQrModalConfig(null)
+                        setMetrics((prev) => ({
+                          ...prev,
+                          remittanceStatus: {
+                            amount: cashCollected,
+                            status: "pending",
+                            utr_number: utrVal,
+                          }
+                        }))
                         Alert.alert("Deposit Request Sent 🕒", `Your deposit request of ₹${cashCollected} has been submitted to Admin. Admin will verify your UTR and approve your deposit.`)
+                        const updatedData = await getRiderDashboard()
+                        setMetrics(updatedData)
                       } catch (err) {
-                        Alert.alert("Deposit Failed", err.message || "Failed to process cash deposit")
+                        setQrModalConfig(null)
+                        const isAlreadyPending = err.message && /pending|already/i.test(err.message)
+                        if (isAlreadyPending) {
+                          setMetrics((prev) => ({
+                            ...prev,
+                            remittanceStatus: {
+                              amount: cashCollected,
+                              status: "pending",
+                            }
+                          }))
+                          Alert.alert("Deposit Request Pending 🕒", `Your deposit request of ₹${cashCollected} is already pending Admin approval.`)
+                        } else {
+                          Alert.alert("Deposit Request Failed", err.message || "Failed to process cash deposit")
+                        }
                       } finally {
                         setActionLoading(false)
                       }
@@ -767,15 +810,66 @@ export default function RiderDashboardScreen() {
               style={{ flex: 1, paddingVertical: 16, alignItems: "center", gap: 4 }}
             >
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <CreditCard size={15} color={cashCollected > 0 ? "#F59E0B" : "#0B6B3A"} />
+                <CreditCard size={15} color={
+                  cashCollected > 0
+                    ? (String(metrics?.remittanceStatus?.status || "").toLowerCase() === "pending" ? "#D97706" : String(metrics?.remittanceStatus?.status || "").toLowerCase() === "rejected" ? "#DC2626" : "#F59E0B")
+                    : "#0B6B3A"
+                } />
                 <Text style={{ fontSize: 16, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F" }}>₹{cashCollected}</Text>
               </View>
-              <Text style={{ fontSize: 10.5, color: cashCollected > 0 ? "#B7791F" : "#8A8A8A", fontFamily: "Nunito", fontWeight: cashCollected > 0 ? "bold" : "400" }}>
-                {cashCollected > 0 ? "Cash · Deposit due" : "Cash in Hand"}
+              <Text style={{
+                fontSize: 10.5,
+                color: cashCollected > 0
+                  ? (String(metrics?.remittanceStatus?.status || "").toLowerCase() === "pending" ? "#D97706" : String(metrics?.remittanceStatus?.status || "").toLowerCase() === "rejected" ? "#DC2626" : "#B7791F")
+                  : "#8A8A8A",
+                fontFamily: "Nunito",
+                fontWeight: cashCollected > 0 ? "bold" : "400"
+              }}>
+                {cashCollected > 0
+                  ? (String(metrics?.remittanceStatus?.status || "").toLowerCase() === "pending" ? "Deposit Pending 🕒" : String(metrics?.remittanceStatus?.status || "").toLowerCase() === "rejected" ? "Deposit Rejected ❌" : "Cash · Deposit due")
+                  : "Cash in Hand"}
               </Text>
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* Remittance Status Banner (Pending or Rejected) */}
+        {String(metrics?.remittanceStatus?.status || "").toLowerCase() === "pending" && (
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => Alert.alert("Deposit Pending Approval 🕒", `Your deposit of ₹${cashCollected || metrics?.remittanceStatus?.amount} was sent to Admin for verification. Cash balance will clear once approved.`)}
+            style={{ backgroundColor: "#FEF3C7", borderWidth: 1, borderColor: "#FCD34D", borderRadius: 18, padding: 14, marginBottom: 16, flexDirection: "row", alignItems: "center", gap: 10 }}
+          >
+            <Clock size={20} color="#D97706" />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontFamily: "Poppins", fontWeight: "bold", fontSize: 12.5, color: "#92400E" }}>Deposit Request Sent to Admin 🕒</Text>
+              <Text style={{ fontFamily: "Nunito", fontSize: 11, color: "#B45309", marginTop: 2 }}>
+                Your cash deposit of ₹{cashCollected || metrics?.remittanceStatus?.amount} is under Admin review. Balance will clear automatically on approval.
+              </Text>
+            </View>
+          </TouchableOpacity>
+        )}
+
+        {cashCollected > 0 && String(metrics?.remittanceStatus?.status || "").toLowerCase() === "rejected" && (
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => {
+              Alert.alert(
+                "Deposit Rejected ❌",
+                `Reason: ${metrics.remittanceStatus.rejection_reason || "Verification failed"}.\n\nPlease tap to resubmit deposit with valid proof.`
+              )
+            }}
+            style={{ backgroundColor: "#FEE2E2", borderWidth: 1, borderColor: "#FCA5A5", borderRadius: 18, padding: 14, marginBottom: 16, flexDirection: "row", alignItems: "center", gap: 10 }}
+          >
+            <XCircle size={20} color="#DC2626" />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontFamily: "Poppins", fontWeight: "bold", fontSize: 12.5, color: "#991B1B" }}>Deposit Request Rejected ❌</Text>
+              <Text style={{ fontFamily: "Nunito", fontSize: 11, color: "#B91C1C", marginTop: 2 }}>
+                {metrics.remittanceStatus.rejection_reason ? `Reason: ${metrics.remittanceStatus.rejection_reason}. ` : ""}Tap here to re-submit deposit.
+              </Text>
+            </View>
+          </TouchableOpacity>
+        )}
 
         {/* Payouts & Settlement History Dedicated Card */}
         <TouchableOpacity

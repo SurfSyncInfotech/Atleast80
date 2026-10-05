@@ -2,7 +2,7 @@ import { Pencil, Trash2, MessageSquare } from "lucide-react"
 import { resolveMediaUrl } from "../../lib/media"
 import { cn } from "../../lib/utils"
 
-const HEADERS = ["Item", "Category", "Type", "Price", "Status", "Admin comment", "Actions"]
+const HEADERS = ["Item", "Category", "Packaging / GST", "Type", "Price", "Status", "Admin comment", "Actions"]
 
 function formatDate(value) {
   if (!value) return "—"
@@ -60,8 +60,13 @@ export default function KitchenMenuTable({
             const thumb = resolveMediaUrl(item.image || item.images?.[0])
             const status = item.approvalStatus || item.approval_status || "pending"
             const adminComment = item.reviewComment || item.review_comment
+            const localName = item.local_name || item.localName
             const category = item.category === "grocery" ? "Grocery" : "Food"
             const itemType = item.item_type === "non_veg" ? "Non-veg" : "Veg"
+            const isGrocery = item.category === "grocery"
+            const packaging = item.packaging_type || item.packagingType || "packaged"
+            const defaultGst = isGrocery ? (packaging === "loose" ? 0 : 5) : 5
+            const gstRate = item.gst_rate !== undefined && item.gst_rate !== null ? Number(item.gst_rate) : (item.gstRate !== undefined && item.gstRate !== null ? Number(item.gstRate) : defaultGst)
 
             return (
               <tr
@@ -73,7 +78,7 @@ export default function KitchenMenuTable({
               >
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-3 min-w-[180px]">
-                    <div className="w-10 h-10 bg-gray-100 overflow-hidden flex-shrink-0 border border-[#eee]">
+                    <div className="w-10 h-10 bg-gray-100 overflow-hidden flex-shrink-0 border border-[#eee] rounded-lg">
                       {thumb ? (
                         <img src={thumb} alt="" className="w-full h-full object-cover" />
                       ) : (
@@ -82,15 +87,45 @@ export default function KitchenMenuTable({
                     </div>
                     <div className="min-w-0">
                       <p className="font-poppins font-semibold text-sm text-[#1c1c1c] truncate">{item.name}</p>
-                      <p className="font-nunito text-[11px] text-[#999]">{formatDate(item.created_at)}</p>
+                      {localName && (
+                        <p className="font-nunito text-[11px] text-gray-500 truncate">{localName}</p>
+                      )}
+                      <p className="font-nunito text-[10px] text-[#999]">{formatDate(item.created_at)}</p>
                       {!item.is_available && (
                         <span className="text-[10px] font-poppins font-semibold text-gray-500">Unavailable</span>
                       )}
                     </div>
                   </div>
                 </td>
-                <td className="px-4 py-3 font-nunito text-sm text-[#363636] whitespace-nowrap">{category}</td>
-                <td className="px-4 py-3 font-nunito text-sm text-[#363636] whitespace-nowrap">{itemType}</td>
+                <td className="px-4 py-3 font-nunito text-sm text-[#363636] whitespace-nowrap">
+                  <span className={`inline-flex items-center text-xs font-semibold px-2 py-0.5 rounded-full ${
+                    item.category === "grocery" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-orange-50 text-orange-700 border border-orange-200"
+                  }`}>
+                    {category}
+                  </span>
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  {item.category === "grocery" ? (
+                    <div className="flex flex-col gap-1">
+                      <span className="inline-flex text-[10px] font-poppins font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-700 capitalize w-fit">
+                        {packaging}
+                      </span>
+                      <span className={cn(
+                        "inline-flex text-[10px] font-poppins font-bold px-2 py-0.5 rounded border w-fit",
+                        gstRate === 0
+                          ? "bg-slate-50 text-slate-700 border-slate-200"
+                          : "bg-emerald-50 text-emerald-700 border border-emerald-200/60"
+                      )}>
+                        GST: {gstRate}%
+                      </span>
+                    </div>
+                  ) : (
+                    <span className="font-nunito text-xs text-[#bbb]">—</span>
+                  )}
+                </td>
+                <td className="px-4 py-3 font-nunito text-sm text-[#363636] whitespace-nowrap">
+                  {item.category === "grocery" ? "—" : itemType}
+                </td>
                 <td className="px-4 py-3 font-poppins font-semibold text-sm text-primary whitespace-nowrap">
                   ₹{Number(item.price)}
                 </td>

@@ -1,6 +1,6 @@
+import "dotenv/config"
 import express from "express"
 import cors from "cors"
-import dotenv from "dotenv"
 import path from "path"
 import { fileURLToPath } from "url"
 import { connectDB } from "./config/db.js"
@@ -15,11 +15,11 @@ import alertRoutes from "./routes/alertRoutes.js"
 import locationRoutes from "./routes/locationRoutes.js"
 import bulkEnquiryRoutes from "./routes/bulkEnquiryRoutes.js"
 import riderRoutes from "./routes/riderRoutes.js"
+import cmsRoutes from "./routes/cmsRoutes.js"
+import paymentRoutes from "./routes/paymentRoutes.js"
 import pool from "./config/db.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-
-dotenv.config()
 
 const app = express()
 const PORT = process.env.PORT || 5000
@@ -74,6 +74,8 @@ app.use("/api/alerts", alertRoutes)
 app.use("/api/locations", locationRoutes)
 app.use("/api/bulk-enquiries", bulkEnquiryRoutes)
 app.use("/api/rider", riderRoutes)
+app.use("/api/cms", cmsRoutes)
+app.use("/api/payments", paymentRoutes)
 
 async function startServer() {
   try {

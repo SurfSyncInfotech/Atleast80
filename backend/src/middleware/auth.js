@@ -1,9 +1,9 @@
 import jwt from "jsonwebtoken"
 
-const JWT_SECRET = process.env.JWT_SECRET || "atleast80_dev_secret_change_in_production"
+const getJwtSecret = () => process.env.JWT_SECRET || "atleast80_dev_secret_change_in_production"
 
 export function signToken(payload) {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: "30d" })
+  return jwt.sign(payload, getJwtSecret(), { expiresIn: "30d" })
 }
 
 export function authRequired(req, res, next) {
@@ -13,11 +13,25 @@ export function authRequired(req, res, next) {
   }
 
   try {
-    req.user = jwt.verify(header.slice(7), JWT_SECRET)
+    req.user = jwt.verify(header.slice(7), getJwtSecret())
     next()
   } catch {
     return res.status(401).json({ message: "Invalid or expired token" })
   }
+}
+
+export function optionalAuth(req, res, next) {
+  const header = req.headers.authorization
+  if (header?.startsWith("Bearer ")) {
+    try {
+      req.user = jwt.verify(header.slice(7), getJwtSecret())
+    } catch {
+      req.user = null
+    }
+  } else {
+    req.user = null
+  }
+  next()
 }
 
 export function requireRole(...roles) {

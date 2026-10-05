@@ -11,6 +11,8 @@ export default function PasswordInput({
   className,
   inputClassName,
   style: customStyle,
+  onFocus: customOnFocus,
+  onBlur: customOnBlur,
   ...props
 }) {
   const [show, setShow] = useState(false)
@@ -37,8 +39,14 @@ export default function PasswordInput({
         placeholderTextColor="#7A7A7A"
         secureTextEntry={!show}
         autoCapitalize="none"
-        onFocus={() => setIsFocused(true)}
-        onBlur={() => setIsFocused(false)}
+        onFocus={(e) => {
+          setIsFocused(true)
+          if (customOnFocus) customOnFocus(e)
+        }}
+        onBlur={(e) => {
+          setIsFocused(false)
+          if (customOnBlur) customOnBlur(e)
+        }}
         className={cn(
           "flex-1 h-full text-sm font-nunito text-dark",
           inputClassName

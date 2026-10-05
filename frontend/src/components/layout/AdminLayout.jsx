@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 
-import { NavLink, useNavigate } from "react-router-dom"
+import { NavLink, useNavigate, useLocation } from "react-router-dom"
 
 import {
 
@@ -35,6 +35,7 @@ import {
 import { useAuth } from "../../context/AuthContext"
 
 import { cn } from "../../lib/utils"
+import { fetchAdminBadgeCounts, readUsersSeenAt, writeUsersSeenAt } from "../../lib/adminBadges"
 
 
 
@@ -42,13 +43,13 @@ const links = [
 
   { to: "/admin", label: "Overview", icon: LayoutDashboard, end: true },
 
-  { to: "/admin/kitchens", label: "Kitchens", icon: ChefHat },
+  { to: "/admin/kitchens", label: "Kitchens", icon: ChefHat, badge: "kitchens" },
 
   { to: "/admin/hygiene", label: "Hygiene", icon: ShieldCheck },
 
-  { to: "/admin/menu", label: "Menu", icon: UtensilsCrossed },
+  { to: "/admin/menu", label: "Menu", icon: UtensilsCrossed, badge: "menu" },
 
-  { to: "/admin/orders", label: "Orders", icon: ShoppingBag },
+  { to: "/admin/orders", label: "Orders", icon: ShoppingBag, badge: "orders" },
 
   { to: "/admin/payments", label: "Payments", icon: Wallet },
 
@@ -56,7 +57,7 @@ const links = [
 
   { to: "/admin/alerts", label: "Alerts", icon: Bell },
 
-  { to: "/admin/users", label: "Users", icon: Users },
+  { to: "/admin/users", label: "Users", icon: Users, badge: "users" },
 
   { to: "/admin/riders", label: "Riders", icon: Truck },
 
@@ -73,6 +74,40 @@ export default function AdminLayout({ children }) {
   const navigate = useNavigate()
 
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [badges, setBadges] = useState({ kitchens: 0, menu: 0, orders: 0, users: 0 })
+  const location = useLocation()
+  const onUsersPage = location.pathname.startsWith("/admin/users") || location.pathname.startsWith("/admin/customers")
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadBadges = async () => {
+      let seenAt = readUsersSeenAt()
+      if (!seenAt || onUsersPage) {
+        seenAt = new Date().toISOString()
+        writeUsersSeenAt(seenAt)
+      }
+
+      try {
+        const counts = await fetchAdminBadgeCounts(onUsersPage ? new Date().toISOString() : seenAt)
+        if (!cancelled) {
+          setBadges({
+            ...counts,
+            users: onUsersPage ? 0 : counts.users,
+          })
+        }
+      } catch {
+        // Keep the last counts if a refresh fails.
+      }
+    }
+
+    loadBadges()
+    const timer = setInterval(loadBadges, 3000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [onUsersPage])
 
 
 
@@ -184,7 +219,13 @@ export default function AdminLayout({ children }) {
 
               <Icon size={18} />
 
-              {link.label}
+              <span className="flex-1">{link.label}</span>
+
+              {link.badge && badges[link.badge] > 0 && (
+                <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none flex items-center justify-center">
+                  {badges[link.badge] > 99 ? "99+" : badges[link.badge]}
+                </span>
+              )}
 
               {link.disabled && (
 

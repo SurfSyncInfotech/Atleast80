@@ -205,8 +205,22 @@ export default function LoginPage() {
   const [otp, setOtp] = useState(["", "", "", ""])
   const [phoneHint, setPhoneHint] = useState("")
   const [demoOtp, setDemoOtp] = useState("")
+  const [resendTimer, setResendTimer] = useState(30)
+  const [resendMessage, setResendMessage] = useState("")
 
   const otpRefs = [useRef(null), useRef(null), useRef(null), useRef(null)]
+
+  useEffect(() => {
+    let interval = null
+    if (step === "otp" && resendTimer > 0) {
+      interval = setInterval(() => {
+        setResendTimer((prev) => prev - 1)
+      }, 1000)
+    }
+    return () => {
+      if (interval) clearInterval(interval)
+    }
+  }, [step, resendTimer])
 
   const [prevInitialIdentifier, setPrevInitialIdentifier] = useState(null)
 
@@ -235,6 +249,7 @@ export default function LoginPage() {
       const data = await loginCustomer(identifier, password)
       if (data?.requiresOtp) {
         setPhoneHint(data.phoneHint || "")
+        setResendTimer(30)
         setStep("otp")
         setOtp(["", "", "", ""])
       } else {
@@ -285,15 +300,20 @@ export default function LoginPage() {
   }
 
   const handleResendOtp = async () => {
+    if (resendTimer > 0) return
     setError("")
+    setResendMessage("")
     setLoading(true)
     try {
-      const data = await loginCustomer(email, password)
+      const data = await loginCustomer(identifier, password)
       setError("")
       if (data?.demoOtp) setDemoOtp(data.demoOtp)
+      setResendMessage("New OTP sent successfully!")
+      setResendTimer(30)
       setOtp(["", "", "", ""])
       // Focus first input
       if (otpRefs[0]?.current) otpRefs[0].current.focus()
+      setTimeout(() => setResendMessage(""), 4000)
     } catch (err) {
       setError(err.message || "Failed to resend OTP")
     } finally {
@@ -353,12 +373,12 @@ export default function LoginPage() {
               borderTopRightRadius: 36,
               paddingHorizontal: 24,
               paddingTop: 24,
-              paddingBottom: Platform.OS === "ios" ? 44 : 24,
+              paddingBottom: Platform.OS === "ios" ? 44 : 28,
               shadowColor: "#000000",
-              shadowOffset: { width: 0, height: -12 },
-              shadowOpacity: 0.05,
-              shadowRadius: 16,
-              elevation: 16,
+              shadowOffset: { width: 0, height: -4 },
+              shadowOpacity: 0.04,
+              shadowRadius: 12,
+              elevation: 4,
               flex: 1,
               marginTop: 12,
             }}
@@ -442,6 +462,12 @@ export default function LoginPage() {
               </View>
             ) : (
               <View style={{ gap: 16 }}>
+                {resendMessage ? (
+                  <View style={{ backgroundColor: "#EAF7EE", borderRadius: 16, borderHeight: 1, borderColor: "#D6EAE7", padding: 12, flexDirection: "row", items: "center", justifyContent: "center", gap: 8 }}>
+                    <CheckCircle size={16} color="#059669" />
+                    <Text style={{ color: "#0B6B3A", fontWeight: "bold", fontSize: 13 }}>{resendMessage}</Text>
+                  </View>
+                ) : null}
 
                 {/* 4 Digit OTP Inputs */}
                 <View style={{ flexDirection: "row", gap: 12, justifyContent: "center", paddingVertical: 8 }}>
@@ -481,10 +507,12 @@ export default function LoginPage() {
 
                 <TouchableOpacity
                   onPress={handleResendOtp}
-                  disabled={loading}
+                  disabled={loading || resendTimer > 0}
                   style={{ alignSelf: "center", marginTop: 12 }}
                 >
-                  <Text style={{ color: "#0B6B3A", fontWeight: "bold", fontSize: 14 }}>Resend OTP</Text>
+                  <Text style={{ color: resendTimer > 0 ? "#9A9A9A" : "#0B6B3A", fontWeight: "bold", fontSize: 14 }}>
+                    {resendTimer > 0 ? `Resend OTP in ${resendTimer}s` : "Resend OTP"}
+                  </Text>
                 </TouchableOpacity>
               </View>
             )}

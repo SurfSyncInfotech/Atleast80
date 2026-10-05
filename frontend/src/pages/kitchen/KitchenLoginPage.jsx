@@ -1,4 +1,4 @@
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { motion } from "framer-motion"
 import { ChefHat, ArrowRight, ArrowLeft, User, Lock, UtensilsCrossed, TrendingUp, CheckCircle, RotateCw } from "lucide-react"

@@ -46,10 +46,10 @@ export async function sendOtpSms(phone, otp) {
 
   if (parsed && typeof parsed === "object") {
     const status = String(parsed.status ?? parsed.Status ?? parsed.type ?? "").toLowerCase()
-    const success = status === "success" || status === "ok" || parsed.success === true
-    if (!success && status) {
-      console.error("SMS API rejected request:", body)
-      throw new Error("Failed to send OTP SMS")
+    const success = status === "true" || status === "success" || status === "ok" || parsed.success === true
+    if (!success) {
+      console.error("[SMS Gateway Rejected Request]:", body)
+      throw new Error(`SMS Gateway Error: ${parsed.description || body}`)
     }
   }
 

@@ -4,7 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context"
 import { LinearGradient } from "expo-linear-gradient"
 import { useRouter, useFocusEffect } from "expo-router"
 import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing } from "react-native-reanimated"
-import { LogOut, Phone, Mail, Truck, ShieldCheck, Hash, Calendar, CheckCircle, Wallet, CreditCard } from "lucide-react-native"
+import { LogOut, Phone, Mail, Truck, ShieldCheck, Hash, Calendar, CheckCircle, Wallet, CreditCard, User } from "lucide-react-native"
 import { useAuth } from "../../../context/AuthContext"
 import { toggleRiderStatus } from "../../../lib/api"
 

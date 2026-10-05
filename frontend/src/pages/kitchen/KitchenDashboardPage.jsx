@@ -7,7 +7,10 @@ import {
 } from "lucide-react"
 import KitchenLayout from "../../components/layout/KitchenLayout"
 import KitchenHomeImageSection from "../../components/kitchen/KitchenHomeImageSection"
+import HygieneUploadSection from "../../components/kitchen/HygieneUploadSection"
 import HygieneRecordSection from "../../components/kitchen/HygieneRecordSection"
+import PayoutSettingsSection from "../../components/kitchen/PayoutSettingsSection"
+import FestivalSpecialsSection from "../../components/kitchen/FestivalSpecialsSection"
 import { useAuth } from "../../context/AuthContext"
 import { api } from "../../lib/api"
 import { cn } from "../../lib/utils"
@@ -16,7 +19,7 @@ const kitchenTypeLabel = { veg: "Pure Veg", non_veg: "Non-Veg", both: "Veg & Non
 
 const onboardingSteps = [
   { key: "register", label: "Application submitted" },
-  { key: "home", label: "Upload home image" },
+  { key: "home", label: "Upload home image & setup photos" },
   { key: "review", label: "Admin review" },
   { key: "approved", label: "Go live on Atleast80" },
 ]
@@ -64,7 +67,12 @@ export default function KitchenDashboardPage() {
   useEffect(() => {
     loadMenuCount()
     loadOrderStats()
-  }, [loadMenuCount, loadOrderStats])
+    if (kitchen?.status !== "approved") return
+    const interval = setInterval(() => {
+      loadOrderStats()
+    }, 4000)
+    return () => clearInterval(interval)
+  }, [loadMenuCount, loadOrderStats, kitchen?.status])
 
   const handleRefresh = async () => {
     setRefreshing(true)
@@ -84,17 +92,39 @@ export default function KitchenDashboardPage() {
   const isPending = status === "pending"
   const isRejected = status === "rejected"
   const hasHomeImage = Boolean(kitchen?.cover_image || kitchen?.cover)
+  const hasCookingPhotos = (kitchen?.kitchenImages?.length || 0) >= 2
   const currentStep = isApproved
     ? 4
     : isRejected
     ? 3
-    : isPending && hasHomeImage
+    : isPending && hasHomeImage && hasCookingPhotos
     ? 3
     : isPending
     ? 2
     : 1
 
   const isNewSignup = location.state?.newSignup
+
+  const [resubmitting, setResubmitting] = useState(false)
+  const [resubmitMessage, setResubmitMessage] = useState("")
+
+  const handleResubmit = async () => {
+    if (!hasHomeImage || !hasCookingPhotos) {
+      alert("Please upload your home card image and at least 2 cooking area setup photos before re-submitting.")
+      return
+    }
+    setResubmitting(true)
+    setResubmitMessage("")
+    try {
+      const res = await api("/api/kitchens/me/resubmit", { method: "POST" }, "kitchen")
+      await refreshKitchen()
+      setResubmitMessage(res.message || "Application re-submitted for Admin review!")
+    } catch (err) {
+      alert(err.message || "Failed to re-submit application")
+    } finally {
+      setResubmitting(false)
+    }
+  }
 
   const refreshHomeImage = async () => {
     await refreshKitchen()
@@ -125,6 +155,37 @@ export default function KitchenDashboardPage() {
           Refresh
         </button>
       </div>
+
+      {isApproved && (
+        <FestivalSpecialsSection kitchen={kitchen} onUpdated={refreshKitchen} />
+      )}
+
+      {isApproved && (Number(orderStats.pendingOrders || 0) > 0 || Number(orderStats.activeOrders || 0) > 0) && (
+        <div className="mb-6 rounded-2xl bg-gradient-to-r from-red-600 to-rose-600 text-white p-4 sm:p-5 shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-in fade-in">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0 animate-bounce">
+              <ShoppingBag size={20} className="text-white" />
+            </div>
+            <div>
+              <p className="font-poppins font-bold text-base flex items-center gap-2">
+                <span>⚡ New Orders Received!</span>
+                <span className="bg-white text-red-600 font-extrabold text-xs px-2 py-0.5 rounded-full shadow-sm">
+                  {orderStats.pendingOrders || orderStats.activeOrders} Pending
+                </span>
+              </p>
+              <p className="font-nunito text-xs text-white/90 mt-0.5">
+                New customer orders are waiting for your acceptance.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => navigate("/kitchen/orders")}
+            className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-white text-red-600 font-poppins font-bold text-xs hover:bg-red-50 transition-colors shadow-md cursor-pointer whitespace-nowrap text-center"
+          >
+            View Orders →
+          </button>
+        </div>
+      )}
 
       {isApproved && (
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 mb-6">
@@ -181,21 +242,69 @@ export default function KitchenDashboardPage() {
           </div>
           {isPending && (
             <p className="font-nunito text-xs text-amber-800 bg-amber-50 rounded-xl px-4 py-3 mt-4 border border-amber-100">
-              {!hasHomeImage
-                ? "Upload your home card image below. Hygiene videos are recorded daily after approval."
-                : "Home image uploaded. Admin will review your application soon."}
+              {!hasHomeImage && !hasCookingPhotos
+                ? "Upload your home card image and at least 2 cooking area setup photos below for Admin approval."
+                : !hasHomeImage
+                ? "Upload your home card image below to complete your application."
+                : !hasCookingPhotos
+                ? "Upload at least 2 cooking area setup photos below for Admin approval."
+                : "Home card image and cooking area setup photos uploaded. Admin will review your application soon."}
             </p>
           )}
-          {isRejected && kitchen?.rejection_reason && (
-            <p className="font-nunito text-xs text-red-700 bg-red-50 rounded-xl px-4 py-3 mt-4 border border-red-100">
-              <strong>Rejected:</strong> {kitchen.rejection_reason}
-            </p>
+          {isRejected && (
+            <div className="mt-4 p-4 rounded-xl bg-red-50 border border-red-200">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <XCircle size={18} className="text-red-600" />
+                </div>
+                <div className="flex-1">
+                  <p className="font-poppins font-bold text-sm text-red-800">
+                    Application Needs Changes
+                  </p>
+                  <p className="font-nunito text-xs text-red-700 mt-1">
+                    <strong>Reason from Admin:</strong> {kitchen?.rejection_reason || "Please update your photos/documents and re-submit."}
+                  </p>
+                  <p className="font-nunito text-xs text-gray-700 mt-2">
+                    👉 Please update your Home card image or Cooking area setup photos below, then click <strong>Re-Submit Application</strong>.
+                  </p>
+                  {resubmitMessage && (
+                    <p className="font-nunito text-xs text-emerald-700 bg-emerald-100 rounded-md px-3 py-1.5 mt-3 font-semibold">
+                      ✅ {resubmitMessage}
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleResubmit}
+                    disabled={resubmitting || !hasHomeImage || !hasCookingPhotos}
+                    className="mt-3 px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-dark text-white font-poppins font-semibold text-xs transition-colors shadow-md disabled:opacity-50 cursor-pointer flex items-center gap-2"
+                  >
+                    {resubmitting ? (
+                      <>
+                        <RefreshCw size={14} className="animate-spin" /> Re-submitting...
+                      </>
+                    ) : (
+                      "🚀 Re-Submit Application for Review"
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       )}
 
-      {isPending && (
-        <KitchenHomeImageSection kitchen={kitchen} onUploaded={refreshHomeImage} />
+      {(isPending || isRejected) && (
+        <div className="space-y-6 mb-6">
+          <KitchenHomeImageSection kitchen={kitchen} onUploaded={refreshHomeImage} />
+          <HygieneUploadSection onChange={() => refreshKitchen()} />
+          <PayoutSettingsSection />
+        </div>
+      )}
+
+      {isApproved && (
+        <div className="mb-6">
+          <PayoutSettingsSection />
+        </div>
       )}
 
       {isApproved && <HygieneRecordSection />}

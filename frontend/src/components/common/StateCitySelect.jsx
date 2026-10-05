@@ -42,7 +42,9 @@ export default function StateCitySelect({
 
   useEffect(() => {
     if (!state || !states.length) return
-    const match = states.find((s) => s.name === state)
+    const match = states.find(
+      (s) => s.name?.toLowerCase().trim() === state?.toLowerCase().trim() || s.iso2?.toLowerCase() === state?.toLowerCase()
+    )
     if (match && match.iso2 !== stateIso) {
       setStateIso(match.iso2)
     }

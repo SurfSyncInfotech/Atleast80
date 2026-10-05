@@ -147,6 +147,18 @@ function OrderDetailModal({ order, onClose, onStatusUpdate, onAcknowledge, updat
                   <span className="font-poppins font-semibold">₹{item.price * item.qty}</span>
                 </div>
               ))}
+              {order.gstAmount > 0 && (
+                <div className="flex justify-between px-4 py-2 text-xs font-nunito border-t border-gray-50 text-gray">
+                  <span>Item Total</span>
+                  <span>₹{order.itemTotal}</span>
+                </div>
+              )}
+              {order.gstAmount > 0 && (
+                <div className="flex justify-between px-4 py-2 text-xs font-nunito text-gray">
+                  <span>Taxes & GST (18%)</span>
+                  <span>₹{order.gstAmount}</span>
+                </div>
+              )}
               <div className="flex justify-between px-4 py-3 bg-[#fafafa] font-poppins font-bold text-sm border-t border-gray-100">
                 <span>Grand total</span>
                 <span className="text-primary">₹{order.grandTotal}</span>
@@ -240,6 +252,15 @@ export default function KitchenOrdersPage() {
 
       setAllOrders((prevOrders) => {
         const prevList = prevOrders || []
+        const prevPendingIds = new Set(prevList.filter(o => o.status === "pending").map(o => o.id))
+        const hasNewPending = newOrders.some(o => o.status === "pending" && !prevPendingIds.has(o.id))
+
+        if (hasNewPending && prevList.length > 0) {
+          import("../../lib/firebase").then(({ playKitchenOrderRingtone }) => {
+            playKitchenOrderRingtone()
+          }).catch(() => {})
+        }
+
         return newOrders.map((newO) => {
           if (newO.status === "cancelled") {
             const oldO = prevList.find((o) => o.id === newO.id)
@@ -271,11 +292,9 @@ export default function KitchenOrdersPage() {
   }, [loadOrders])
 
   useEffect(() => {
-    const hasActive = allOrders.some((o) => ["pending", "confirmed", "preparing"].includes(o.status))
-    const intervalTime = hasActive ? 1000 : 25000
-    const interval = setInterval(loadOrders, intervalTime)
+    const interval = setInterval(loadOrders, 3000)
     return () => clearInterval(interval)
-  }, [allOrders, loadOrders])
+  }, [loadOrders])
 
   const tabCounts = useMemo(() => {
     const counts = { active: 0, all: allOrders.length }

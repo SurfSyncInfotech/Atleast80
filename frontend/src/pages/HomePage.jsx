@@ -5,7 +5,7 @@ import {
   Search, ChevronRight, ShieldCheck, Leaf, Truck, ArrowRight,
   UtensilsCrossed, Salad, ShoppingCart, Package, Soup,
   Milk, Cookie, Cherry, Candy, Coffee, Home, Heart,
-  Store, Users, TrendingUp, Handshake, Info
+  Store, Users, TrendingUp, Handshake, Info, Sparkles
 } from "lucide-react"
 import Navbar from "../components/layout/Navbar"
 import Footer from "../components/layout/Footer"
@@ -16,7 +16,7 @@ import Button from "../components/ui/Button"
 import { stories as mockStories, menuItems } from "../data/mockData"
 import StoryViewer from "../components/common/StoryViewer"
 import { api } from "../lib/api"
-import { resolveStoryGroups } from "../lib/media"
+import { resolveStoryGroups, resolveMediaUrl } from "../lib/media"
 import { toKitchenCard } from "../lib/kitchen"
 import { useLocationPreference, matchesLocation } from "../lib/locationPreference"
 import HomepageLocationBar from "../components/common/HomepageLocationBar"
@@ -340,6 +340,143 @@ function StoriesSection() {
   )
 }
 
+function FestivalSpecialsShowcase() {
+  const navigate = useNavigate()
+  const { state, city } = useLocationPreference()
+  const [kitchens, setKitchens] = useState([])
+
+  useEffect(() => {
+    const load = () => {
+      fetchKitchenList("/api/kitchens")
+        .then((list) => {
+          const matching = list.filter((k) => matchesLocation(k, { state, city }))
+          const withOffers = matching.filter(
+            (k) =>
+              k.festivalOffer?.active ||
+              (k.festival_offer_enabled && Number(k.festival_offer_discount_percent) > 0)
+          )
+          setKitchens(withOffers)
+        })
+        .catch(() => setKitchens([]))
+    }
+    load()
+    const interval = setInterval(load, 4000)
+    return () => clearInterval(interval)
+  }, [state, city])
+
+  if (kitchens.length === 0) return null
+
+  return (
+    <motion.section
+      variants={sectionReveal}
+      initial="hidden"
+      whileInView="visible"
+      viewport={{ once: true, margin: "-50px" }}
+      className="mt-8 md:mt-14"
+    >
+      <div className="flex items-center justify-between mb-4 md:mb-6">
+        <div className="flex items-center gap-2.5">
+          <span className="text-2xl">🎉</span>
+          <h3 className="font-poppins font-bold text-dark text-lg md:text-xl lg:text-2xl">
+            Festival Specials &amp; Deals
+          </h3>
+          <span className="bg-amber-100 text-amber-800 text-[10px] font-poppins font-extrabold px-2.5 py-0.5 rounded-full border border-amber-300">
+            ⚡ LIMITED TIME
+          </span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        {kitchens.map((k) => {
+          const fest = k.festivalOffer || {
+            title: k.festival_offer_title || "Festival Special",
+            discountPercent: Number(k.festival_offer_discount_percent || 15),
+            category: k.festival_offer_category || "both",
+            description: k.festival_offer_description,
+            image: k.festival_offer_image || "/festival_offer_default.jpg",
+          }
+          const logoSrc = resolveMediaUrl(k.logo || k.image)
+          const offerImgSrc = resolveMediaUrl(fest.image || k.festival_offer_image) || "/festival_offer_default.jpg"
+
+          return (
+            <div
+              key={k.id}
+              onClick={() => navigate(`/kitchen/${k.id}`)}
+              className="bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 rounded-3xl p-5 text-white shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer relative overflow-hidden group"
+            >
+              {/* Floating Festival Visual Badge / Illustration on the right */}
+              <div className="absolute -right-4 -top-4 w-28 h-28 rounded-full overflow-hidden border-2 border-white/20 opacity-25 group-hover:opacity-40 group-hover:scale-110 transition-all pointer-events-none shadow-2xl">
+                <img
+                  src={offerImgSrc}
+                  alt=""
+                  onError={(e) => {
+                    e.currentTarget.onerror = null
+                    e.currentTarget.src = "/festival_offer_default.jpg"
+                  }}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+              <div className="absolute -right-6 -bottom-6 opacity-15 pointer-events-none group-hover:scale-110 transition-transform">
+                <Sparkles size={120} />
+              </div>
+
+              <div className="flex items-center justify-between gap-2 mb-3 relative z-10">
+                <span className="bg-white/20 backdrop-blur-sm border border-white/30 text-white text-[10px] font-poppins font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                  {fest.category === "both" ? "🍲 Food & Ration" : fest.category === "grocery" ? "🌾 Ration Only" : "🍲 Homemade Food"}
+                </span>
+                <span className="bg-white text-rose-600 font-poppins font-extrabold text-xs px-3 py-1 rounded-full shadow-sm">
+                  Flat {fest.discountPercent}% OFF
+                </span>
+              </div>
+
+              <div className="flex items-center gap-3.5 my-2 relative z-10">
+                <div className="w-12 h-12 rounded-2xl bg-white p-0.5 overflow-hidden shadow-md flex-shrink-0">
+                  <img
+                    src={logoSrc || "https://images.unsplash.com/photo-1556910103-1c02745aae4d?w=200&h=200&fit=crop"}
+                    alt={k.name}
+                    className="w-full h-full rounded-[14px] object-cover"
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h4 className="font-poppins font-bold text-white text-base sm:text-lg leading-tight truncate">
+                    {k.name}
+                  </h4>
+                  <p className="font-nunito text-amber-200 text-xs font-semibold mt-0.5 truncate">
+                    ✨ {fest.title}
+                  </p>
+                </div>
+                {/* Floating Preview Pill */}
+                <div className="w-10 h-10 rounded-xl overflow-hidden border border-white/40 shadow-sm flex-shrink-0 bg-white/20">
+                  <img
+                    src={offerImgSrc}
+                    alt=""
+                    onError={(e) => {
+                      e.currentTarget.onerror = null
+                      e.currentTarget.src = "/festival_offer_default.jpg"
+                    }}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              </div>
+
+              <p className="font-nunito text-white/90 text-xs mt-1 mb-4 line-clamp-2 leading-relaxed relative z-10">
+                {fest.description || "Handcrafted festive delicacies and special packages available for a limited time."}
+              </p>
+
+              <div className="bg-white text-dark rounded-xl py-2.5 px-4 flex items-center justify-between shadow-sm group-hover:bg-amber-50 transition-colors relative z-10">
+                <span className="font-poppins font-bold text-xs text-[#0a1f13]">
+                  Unlock Secret Festival Menu
+                </span>
+                <ArrowRight size={14} className="text-orange-600 group-hover:translate-x-1 transition-transform" />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </motion.section>
+  )
+}
+
 function FeaturedKitchens() {
   const navigate = useNavigate()
   const { state, city } = useLocationPreference()
@@ -363,6 +500,12 @@ function FeaturedKitchens() {
 
   useEffect(() => {
     loadKitchens()
+    const interval = setInterval(() => {
+      fetchKitchenList("/api/kitchens/featured")
+        .then(setKitchens)
+        .catch(() => {})
+    }, 4000)
+    return () => clearInterval(interval)
   }, [])
 
   if (!loading && !error && filteredKitchens.length === 0) return null
@@ -521,10 +664,10 @@ function AboutSection() {
       initial="hidden"
       whileInView="visible"
       viewport={{ once: true, margin: "-50px" }}
-      className="mt-8 md:mt-12 relative rounded-2xl md:rounded-3xl overflow-hidden shadow-lg border border-gray-100"
+      className="mt-8 md:mt-12 relative rounded-2xl md:rounded-3xl bg-white p-3 md:p-4 border border-gray-100 shadow-md"
     >
-      <div className="grid md:grid-cols-2">
-        <div className="relative bg-[#0a1f13] p-6 md:p-10 flex flex-col justify-center min-h-[260px]">
+      <div className="grid md:grid-cols-2 gap-3 md:gap-4">
+        <div className="relative rounded-xl md:rounded-2xl overflow-hidden bg-[#0a1f13] p-6 md:p-10 flex flex-col justify-center min-h-[260px] border border-primary/20 shadow-sm">
           <div className="absolute inset-0 opacity-40">
             <img
               src="https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=800&h=600&fit=crop"
@@ -553,22 +696,22 @@ function AboutSection() {
             </button>
           </div>
         </div>
-        <div className="relative bg-white p-4 md:p-5 grid grid-cols-2 gap-2 md:gap-3 min-h-[260px]">
+        <div className="relative grid grid-cols-2 gap-2 md:gap-3 min-h-[260px]">
           <img
             src="https://images.unsplash.com/photo-1589301760014-d929f3979dbc?w=400&h=500&fit=crop"
             alt="Homemade meal"
-            className="rounded-xl w-full h-full min-h-[110px] object-cover"
+            className="rounded-xl md:rounded-2xl w-full h-full min-h-[110px] object-cover border border-gray-100 shadow-sm"
           />
           <div className="flex flex-col gap-2 md:gap-3">
             <img
               src="/indianwomen.png"
               alt="Indian woman preparing roti"
-              className="rounded-xl w-full h-[48%] min-h-[80px] object-cover flex-1"
+              className="rounded-xl md:rounded-2xl w-full h-[48%] min-h-[80px] object-cover flex-1 border border-gray-100 shadow-sm"
             />
             <img
               src="/grocery.jpeg"
               alt="Supermarket grocery"
-              className="rounded-xl w-full h-[48%] min-h-[80px] object-cover flex-1"
+              className="rounded-xl md:rounded-2xl w-full h-[48%] min-h-[80px] object-cover flex-1 border border-gray-100 shadow-sm"
             />
           </div>
         </div>
@@ -749,6 +892,7 @@ export default function HomePage() {
           <CategoryRow />
           <AboutSection />
           <StoriesSection />
+          <FestivalSpecialsShowcase />
           <FeaturedKitchens />
           <ExploreMoreKitchens />
           <HowItWorks />

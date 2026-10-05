@@ -185,6 +185,10 @@ export async function getPartnerAgreement() {
   return api("/api/kitchens/partner-agreement")
 }
 
+export async function getUserAgreement() {
+  return api("/api/auth/user-agreement")
+}
+
 export async function uploadFiles(path, files) {
   if (!files?.length) return { images: [], videos: [] }
 
@@ -299,11 +303,16 @@ export async function performRiderDeliveryAction(orderId, action, extra = {}) {
   })
 }
 
-export async function checkPhoneAvailability(phone, email) {
+export async function checkPhoneAvailability(phone, email, role = null) {
   return api("/api/auth/check-phone", {
     method: "POST",
-    body: JSON.stringify({ phone, email }),
+    body: JSON.stringify({ phone, email, role }),
   })
 }
+
+export async function getContactSettings() {
+  return api("/api/cms/contact")
+}
+
 
 

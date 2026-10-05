@@ -1,25 +1,27 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import {
   View, Text, ScrollView, Image, TouchableOpacity, Platform,
   Animated, useWindowDimensions, RefreshControl, Modal, Pressable, ActivityIndicator, Alert, TextInput
 } from "react-native"
 import * as Location from "expo-location"
+import * as Notifications from "expo-notifications"
 import { useRouter } from "expo-router"
 import { SafeAreaView } from "react-native-safe-area-context"
 import { LinearGradient } from "expo-linear-gradient"
 import {
   Search, ChevronRight, Info, UtensilsCrossed, Coffee,
   ShoppingCart, Package, MapPin, Bell, ShieldCheck, Handshake, ArrowRight, Scan, Truck,
-  Home, User, CheckCircle2, ChefHat,
+  Home, User, CheckCircle2, ChefHat, FileText, MessageSquare,
   Utensils, Salad, ShoppingBag, Soup, Milk, Cookie, Flame, Candy, Egg,
-  ChevronDown, X
+  ChevronDown, X, Navigation, Check
 } from "lucide-react-native"
 import VideoHero from "../../../components/home/VideoHero"
 import StoryCircle from "../../../components/common/StoryCircle"
 import KitchenCard from "../../../components/common/KitchenCard"
 import SkeletonLoader from "../../../components/common/SkeletonLoader"
+import LocationMapModal from "../../../components/common/LocationMapModal"
 import { api } from "../../../lib/api"
-import { resolveStoryGroups } from "../../../lib/media"
+import { resolveStoryGroups, resolveMediaUrl } from "../../../lib/media"
 import { setCachedStoryGroups } from "../../../lib/storyCache"
 import { toKitchenCard } from "../../../lib/kitchen"
 import { cn } from "../../../lib/utils"
@@ -29,18 +31,52 @@ import { getLocationPreference, setLocationPreference, matchesLocation } from ".
 const FALLBACK_LOCATIONS = {
   states: [
     { name: "Maharashtra", iso2: "MH" },
+    { name: "Andhra Pradesh", iso2: "AP" },
+    { name: "Arunachal Pradesh", iso2: "AR" },
+    { name: "Assam", iso2: "AS" },
+    { name: "Bihar", iso2: "BR" },
+    { name: "Chandigarh", iso2: "CH" },
+    { name: "Chhattisgarh", iso2: "CG" },
     { name: "Delhi", iso2: "DL" },
-    { name: "Karnataka", iso2: "KA" },
+    { name: "Goa", iso2: "GA" },
     { name: "Gujarat", iso2: "GJ" },
-    { name: "Uttar Pradesh", iso2: "UP" }
+    { name: "Haryana", iso2: "HR" },
+    { name: "Himachal Pradesh", iso2: "HP" },
+    { name: "Jammu and Kashmir", iso2: "JK" },
+    { name: "Jharkhand", iso2: "JH" },
+    { name: "Karnataka", iso2: "KA" },
+    { name: "Kerala", iso2: "KL" },
+    { name: "Ladakh", iso2: "LA" },
+    { name: "Madhya Pradesh", iso2: "MP" },
+    { name: "Manipur", iso2: "MN" },
+    { name: "Meghalaya", iso2: "ML" },
+    { name: "Mizoram", iso2: "MZ" },
+    { name: "Nagaland", iso2: "NL" },
+    { name: "Odisha", iso2: "OR" },
+    { name: "Puducherry", iso2: "PY" },
+    { name: "Punjab", iso2: "PB" },
+    { name: "Rajasthan", iso2: "RJ" },
+    { name: "Sikkim", iso2: "SK" },
+    { name: "Tamil Nadu", iso2: "TN" },
+    { name: "Telangana", iso2: "TG" },
+    { name: "Tripura", iso2: "TR" },
+    { name: "Uttar Pradesh", iso2: "UP" },
+    { name: "Uttarakhand", iso2: "UK" },
+    { name: "West Bengal", iso2: "WB" }
   ],
   cities: {
     MH: [
-      { name: "Goregaon" },
+      { name: "Raigad" },
+      { name: "Roha" },
+      { name: "Kolad" },
       { name: "Mumbai" },
+      { name: "Goregaon" },
       { name: "Pune" },
       { name: "Thane" },
-      { name: "Navi Mumbai" }
+      { name: "Navi Mumbai" },
+      { name: "Nagpur" },
+      { name: "Nashik" },
+      { name: "Aurangabad" }
     ],
     DL: [
       { name: "New Delhi" },
@@ -142,6 +178,26 @@ function PressableScale({ children, onPress, className, style, activeOpacity = 0
   )
 }
 
+const FESTIVAL_DEFAULT_IMG = require("../../../../assets/images/festival_offer_default.jpg")
+
+function FestivalOfferThumb({ uri, style, resizeMode = "cover" }) {
+  const [hasError, setHasError] = useState(false)
+  const isDefaultOrEmpty = !uri || typeof uri !== "string" || uri.includes("festival_offer_default") || hasError
+
+  if (isDefaultOrEmpty) {
+    return <Image source={FESTIVAL_DEFAULT_IMG} style={style} resizeMode={resizeMode} />
+  }
+
+  return (
+    <Image
+      source={{ uri }}
+      style={style}
+      resizeMode={resizeMode}
+      onError={() => setHasError(true)}
+    />
+  )
+}
+
 export default function HomeScreen() {
   const router = useRouter()
   const [selectedCategory, setSelectedCategory] = useState(null)
@@ -174,10 +230,26 @@ export default function HomeScreen() {
       console.log("Failed to dismiss alert:", err)
     }
   }
+
+  const handleAlertClick = async (alertItem) => {
+    if (alertItem.title?.toLowerCase().includes("rescue") || alertItem.body?.toLowerCase().includes("rescue")) {
+      try {
+        const res = await api("/api/orders/rescue/available")
+        if (res.orders && res.orders.length > 0) {
+          setAlertsModalVisible(false)
+          router.push(`/(customer)/rescue/${res.orders[0].id}`)
+          return
+        }
+      } catch (err) {
+        console.log("Failed to load active rescue order:", err)
+      }
+    }
+  }
   // Location Filter States
   const [location, setLocation] = useState({ state: "", city: "", stateIso: "" })
   const [locationModalVisible, setLocationModalVisible] = useState(false)
-  const [statesList, setStatesList] = useState([])
+  const [isMapModalVisible, setIsMapModalVisible] = useState(false)
+  const [statesList, setStatesList] = useState(FALLBACK_LOCATIONS.states)
   const [citiesList, setCitiesList] = useState([])
   const [statesLoading, setStatesLoading] = useState(false)
   const [citiesLoading, setCitiesLoading] = useState(false)
@@ -188,6 +260,50 @@ export default function HomeScreen() {
   const [tempAddress, setTempAddress] = useState("")
   const [tempPincode, setTempPincode] = useState("")
   const [detectingLocation, setDetectingLocation] = useState(false)
+  const [stateSearchQuery, setStateSearchQuery] = useState("")
+  const [citySearchQuery, setCitySearchQuery] = useState("")
+
+  useEffect(() => {
+    if (locationModalVisible) {
+      setTempState(location.state || "")
+      setTempStateIso(location.stateIso || "")
+      setTempCity(location.city || "")
+      setTempAddress(location.address || "")
+      setTempPincode(location.pincode || "")
+    }
+  }, [locationModalVisible, location])
+
+  const handleConfirmMapLocation = async (data) => {
+    if (!data) return
+    let { address, city, state, pincode, suburb, latitude, longitude } = data
+
+    if (suburb && address && !address.toLowerCase().includes(suburb.toLowerCase())) {
+      suburb = ""
+    }
+    if (address) {
+      const parts = address.split(",").map(p => p.trim()).filter(Boolean)
+      if (parts.length > 0 && (!city || !address.toLowerCase().includes(city.toLowerCase()))) {
+        city = parts[0]
+      }
+    }
+
+    const nextLoc = await setLocationPreference({
+      state: state || "",
+      city: city || "",
+      suburb: suburb || "",
+      stateIso: state || "",
+      address: address || "",
+      pincode: pincode || "",
+      lat: latitude || null,
+      lng: longitude || null
+    })
+    setLocation(nextLoc)
+    setTempState(nextLoc.state || "")
+    setTempCity(nextLoc.city || "")
+    setTempAddress(nextLoc.address || "")
+    setTempPincode(nextLoc.pincode || "")
+    setIsMapModalVisible(false)
+  }
 
   const handleAutoDetectLocation = async () => {
     setDetectingLocation(true)
@@ -202,21 +318,22 @@ export default function HomeScreen() {
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
       const { latitude, longitude } = loc.coords
 
-      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`, {
-        headers: {
-          "User-Agent": "Atleast80App/1.0"
-        }
-      })
-      const data = await res.json()
-      if (data && data.address) {
-        const addr = data.address
-        const state = addr.state || ""
-        const city = addr.city || addr.town || addr.village || addr.county || addr.suburb || ""
-        const road = addr.road || addr.suburb || addr.neighbourhood || ""
-        const houseNumber = addr.house_number || ""
-        const postcode = addr.postcode || ""
+      let data = null
+      try {
+        data = await api(`/api/locations/reverse?lat=${latitude}&lng=${longitude}`)
+      } catch (err) {
+        console.warn("SurfSync reverse geocode error:", err)
+      }
 
-        let streetAddress = [houseNumber, road].filter(Boolean).join(", ")
+      if (data) {
+        const addr = data.address || {}
+        const state = data.state || addr.state || ""
+        const city = data.city || data.suburb || data.district || addr.city || addr.town || addr.village || addr.county || ""
+        const road = data.suburb || addr.road || addr.suburb || addr.neighbourhood || ""
+        const houseNumber = addr.house_number || ""
+        const postcode = data.postcode || addr.postcode || ""
+
+        let streetAddress = data.formattedAddress || data.displayName || [houseNumber, road].filter(Boolean).join(", ")
         if (!streetAddress && data.display_name) {
           streetAddress = data.display_name.split(",").slice(0, 2).map(s => s.trim()).join(", ")
         }
@@ -292,173 +409,147 @@ export default function HomeScreen() {
     const startupLocation = async () => {
       try {
         const loc = await getLocationPreference()
-        if (loc && loc.state && loc.city) {
+        if (loc && loc.isCleared) {
+          // User explicitly cleared location: respect decision and don't auto-detect
           setLocation(loc)
-          setTempState(loc.state)
-          setTempStateIso(loc.stateIso)
-          setTempCity(loc.city)
+          setTempState("")
+          setTempStateIso("")
+          setTempCity("")
+          setTempAddress("")
+          setTempPincode("")
+          return
+        }
+
+        if (loc && (loc.state || loc.city)) {
+          setLocation(loc)
+          setTempState(loc.state || "")
+          setTempStateIso(loc.stateIso || "")
+          setTempCity(loc.city || "")
           setTempAddress(loc.address || "")
           setTempPincode(loc.pincode || "")
+          return
+        }
 
-          // Silently refresh location in background if permission is already granted
-          const { status } = await Location.getForegroundPermissionsAsync()
-          if (status === "granted") {
-            const gpsLoc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
-            const { latitude, longitude } = gpsLoc.coords
-            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`, {
-              headers: { "User-Agent": "Atleast80App/1.0" }
-            })
-            const data = await res.json()
-            if (data && data.address) {
-              const state = data.address.state || ""
-              const city = data.address.city || data.address.town || data.address.village || data.address.county || data.address.suburb || ""
-              const road = data.address.road || data.address.suburb || data.address.neighbourhood || ""
-              const houseNumber = data.address.house_number || ""
-              const postcode = data.address.postcode || ""
+        // First launch or no preference set: Request location permission
+        const { status } = await Location.requestForegroundPermissionsAsync()
+        if (status === "granted") {
+          const gpsLoc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+          const { latitude, longitude } = gpsLoc.coords
+          let data = null
+          try {
+            data = await api(`/api/locations/reverse?lat=${latitude}&lng=${longitude}`)
+          } catch (err) {
+            console.warn("SurfSync reverse geocode error:", err)
+          }
 
-              let streetAddress = [houseNumber, road].filter(Boolean).join(", ")
-              if (!streetAddress && data.display_name) {
-                streetAddress = data.display_name.split(",").slice(0, 2).map(s => s.trim()).join(", ")
-              }
+          if (data) {
+            const addr = data.address || {}
+            const state = data.state || addr.state || ""
+            const city = data.city || data.suburb || data.district || addr.city || addr.town || addr.village || addr.county || ""
+            const road = data.suburb || addr.road || addr.suburb || addr.neighbourhood || ""
+            const houseNumber = addr.house_number || ""
+            const postcode = data.postcode || addr.postcode || ""
 
-              if (state && city) {
-                const displayState = state.charAt(0).toUpperCase() + state.slice(1)
-                const displayCity = city.charAt(0).toUpperCase() + city.slice(1)
+            let streetAddress = data.formattedAddress || data.displayName || [houseNumber, road].filter(Boolean).join(", ")
+            if (!streetAddress && data.display_name) {
+              streetAddress = data.display_name.split(",").slice(0, 2).map(s => s.trim()).join(", ")
+            }
 
-                const matchedStateObj = FALLBACK_LOCATIONS.states.find(
-                  (s) => s.name.toLowerCase() === state.toLowerCase()
-                )
-                const stateIso = matchedStateObj ? matchedStateObj.iso2 : ""
+            if (state && city) {
+              const displayState = state.charAt(0).toUpperCase() + state.slice(1)
+              const displayCity = city.charAt(0).toUpperCase() + city.slice(1)
 
-                if (displayState !== loc.state || displayCity !== loc.city || streetAddress !== loc.address) {
-                  const updated = await setLocationPreference({ 
-                    state: displayState, 
-                    city: displayCity, 
-                    stateIso,
-                    address: streetAddress,
-                    pincode: postcode
-                  })
-                  setLocation(updated)
-                  setTempState(displayState)
-                  setTempStateIso(stateIso)
-                  setTempCity(displayCity)
-                  setTempAddress(streetAddress)
-                  setTempPincode(postcode)
-                }
-              }
+              const matchedStateObj = FALLBACK_LOCATIONS.states.find(
+                (s) => s.name.toLowerCase() === state.toLowerCase()
+              )
+              const stateIso = matchedStateObj ? matchedStateObj.iso2 : ""
+
+              const updated = await setLocationPreference({ 
+                state: displayState, 
+                city: displayCity, 
+                stateIso,
+                address: streetAddress,
+                pincode: postcode,
+                isCleared: false,
+              })
+              setLocation(updated)
+              setTempState(displayState)
+              setTempStateIso(stateIso)
+              setTempCity(displayCity)
+              setTempAddress(streetAddress)
+              setTempPincode(postcode)
+              return
             }
           }
-        } else {
-          // First launch or no preference: Request location permission
-          const { status } = await Location.requestForegroundPermissionsAsync()
-          if (status === "granted") {
-            const gpsLoc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
-            const { latitude, longitude } = gpsLoc.coords
-            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`, {
-              headers: { "User-Agent": "Atleast80App/1.0" }
-            })
-            const data = await res.json()
-            if (data && data.address) {
-              const state = data.address.state || ""
-              const city = data.address.city || data.address.town || data.address.village || data.address.county || data.address.suburb || ""
-              const road = data.address.road || data.address.suburb || data.address.neighbourhood || ""
-              const houseNumber = data.address.house_number || ""
-              const postcode = data.address.postcode || ""
-
-              let streetAddress = [houseNumber, road].filter(Boolean).join(", ")
-              if (!streetAddress && data.display_name) {
-                streetAddress = data.display_name.split(",").slice(0, 2).map(s => s.trim()).join(", ")
-              }
-
-              if (state && city) {
-                const displayState = state.charAt(0).toUpperCase() + state.slice(1)
-                const displayCity = city.charAt(0).toUpperCase() + city.slice(1)
-
-                const matchedStateObj = FALLBACK_LOCATIONS.states.find(
-                  (s) => s.name.toLowerCase() === state.toLowerCase()
-                )
-                const stateIso = matchedStateObj ? matchedStateObj.iso2 : ""
-
-                const updated = await setLocationPreference({ 
-                  state: displayState, 
-                  city: displayCity, 
-                  stateIso,
-                  address: streetAddress,
-                  pincode: postcode
-                })
-                setLocation(updated)
-                setTempState(displayState)
-                setTempStateIso(stateIso)
-                setTempCity(displayCity)
-                setTempAddress(streetAddress)
-                setTempPincode(postcode)
-                return
-              }
-            }
-          }
-          // Fallback to manual selection modal if permission denied or geocoding failed
-          setLocationModalVisible(true)
         }
       } catch (err) {
         console.warn("Startup location load/auto-detect failed:", err)
-        setLocationModalVisible(true)
       }
     }
     startupLocation()
+    loadStates()
   }, [])
- 
+
   // Load States list
   const loadStates = async () => {
-    if (statesList.length > 0) return
-    setStatesLoading(true)
     try {
       const data = await api("/api/locations/states")
-      setStatesList(data.states || [])
+      if (data?.states && data.states.length > 0) {
+        setStatesList(data.states)
+      }
     } catch (err) {
       console.warn("Failed to load states from API, using fallback locations:", err)
-      setStatesList(FALLBACK_LOCATIONS.states)
-    } finally {
-      setStatesLoading(false)
     }
   }
- 
+
   const handleSelectState = async (stateName, stateIso) => {
     setTempState(stateName)
     setTempStateIso(stateIso)
     setTempCity("")
     setStatePickerVisible(false)
- 
+
     setCitiesLoading(true)
+    const controller = new AbortController()
     try {
-      const data = await api(`/api/locations/cities?state=${stateIso}`)
+      const data = await api(`/api/locations/cities?state=${stateIso}`, { signal: controller.signal })
       setCitiesList(data.cities || [])
     } catch (err) {
+      if (err?.name === "AbortError") return // user navigated away, ignore
       console.warn("Failed to load cities from API, using fallback locations:", err)
       setCitiesList(FALLBACK_LOCATIONS.cities[stateIso] || [])
     } finally {
       setCitiesLoading(false)
     }
   }
- 
+
   const handleSelectCity = (cityName) => {
     setTempCity(cityName)
     setCityPickerVisible(false)
   }
- 
+
   const handleSaveLocation = async () => {
     const next = await setLocationPreference({
       state: tempState,
       city: tempCity,
+      suburb: "",
       stateIso: tempStateIso,
       address: tempAddress,
       pincode: tempPincode,
+      isCleared: !tempCity && !tempState,
     })
     setLocation(next)
     setLocationModalVisible(false)
   }
- 
+
   const handleClearLocation = async () => {
-    const next = await setLocationPreference({ state: "", city: "", stateIso: "", address: "", pincode: "" })
+    const next = await setLocationPreference({ 
+      state: "", 
+      city: "", 
+      stateIso: "", 
+      address: "", 
+      pincode: "", 
+      isCleared: true 
+    })
     setTempState("")
     setTempStateIso("")
     setTempCity("")
@@ -482,9 +573,15 @@ export default function HomeScreen() {
   const [allLoading, setAllLoading] = useState(true)
   const [allError, setAllError] = useState(false)
 
-  // Filtered Kitchens computed client-side
-  const filteredFeaturedKitchens = featuredKitchens.filter((k) => matchesLocation(k, location))
-  const filteredAllKitchens = allKitchens.filter((k) => matchesLocation(k, location))
+  const hasLocation = Boolean((location?.city && location.city.trim()) || (location?.state && location.state.trim()))
+
+  // Filtered Kitchens computed client-side (strictly for user selected location)
+  const filteredFeaturedKitchens = hasLocation ? featuredKitchens.filter((k) => matchesLocation(k, location)) : []
+  const filteredAllKitchens = hasLocation ? allKitchens.filter((k) => matchesLocation(k, location)) : []
+
+  const festivalKitchens = (hasLocation ? filteredFeaturedKitchens.concat(filteredAllKitchens) : featuredKitchens.concat(allKitchens))
+    .filter((k, index, self) => index === self.findIndex((t) => String(t.id) === String(k.id)))
+    .filter((k) => Boolean(k.festivalOffer?.active))
 
   // Interactive States
   const [scrolled, setScrolled] = useState(false)
@@ -568,6 +665,120 @@ export default function HomeScreen() {
     }
   }, [fadeAnim])
 
+  // Live polling so festival offers and kitchen details sync instantly
+  useEffect(() => {
+    const interval = setInterval(() => {
+      api("/api/kitchens/featured")
+        .then((data) => {
+          if (data?.kitchens) {
+            setFeaturedKitchens(data.kitchens.map(toKitchenCard))
+          }
+        })
+        .catch(() => {})
+
+      api("/api/kitchens")
+        .then((data) => {
+          if (data?.kitchens) {
+            setAllKitchens(data.kitchens.map(toKitchenCard))
+          }
+        })
+        .catch(() => {})
+    }, 3500)
+
+    return () => clearInterval(interval)
+  }, [])
+
+  const [quotationToast, setQuotationToast] = useState(null)
+  const shownQuotationIdsRef = useRef(new Set())
+  const isInitialPollRef = useRef(true)
+
+  // Auto-remove quotation popup after 5 seconds
+  useEffect(() => {
+    if (quotationToast) {
+      const timer = setTimeout(() => {
+        setQuotationToast(null)
+      }, 5000)
+      return () => clearTimeout(timer)
+    }
+  }, [quotationToast])
+
+  // Listen for incoming foreground push notifications or live status check
+  useEffect(() => {
+    let sub
+    try {
+      sub = Notifications.addNotificationReceivedListener((notification) => {
+        const data = notification.request?.content?.data
+        if (data && (data.type === "quotation_reply" || data.type === "quotation" || data.type === "chat_message")) {
+          const key = `push_${data.enquiryId || Date.now()}_${data.type}`
+          if (!shownQuotationIdsRef.current.has(key)) {
+            shownQuotationIdsRef.current.add(key)
+            setQuotationToast({
+              id: key,
+              kitchenId: data.kitchenId,
+              kitchenName: data.kitchenName || "Kitchen",
+              quotationAmount: data.quotationAmount || "",
+              message: data.message || "",
+              isMessage: data.type === "chat_message",
+            })
+          }
+        }
+      })
+    } catch (e) {
+      // notification fallback
+    }
+
+    // Interval check for newly quoted bulk enquiries or new chat messages
+    const checkQuotations = async () => {
+      try {
+        const data = await api("/api/bulk-enquiries/mine").catch(() => null)
+        if (data && Array.isArray(data.enquiries)) {
+          if (isInitialPollRef.current) {
+            // Seed all existing enquiries on app launch so old state never pops up on app open
+            data.enquiries.forEach((e) => {
+              const changeKey = `${e.id}_${e.customerUnreadCount}_${e.quotationAmount || 0}_${e.status}_${e.lastMessage || ""}`
+              shownQuotationIdsRef.current.add(changeKey)
+            })
+            isInitialPollRef.current = false
+            return
+          }
+
+          const newlyQuoted = data.enquiries.find((e) => {
+            if (e.customerUnreadCount > 0 || e.status === "quoted") {
+              const changeKey = `${e.id}_${e.customerUnreadCount}_${e.quotationAmount || 0}_${e.status}_${e.lastMessage || ""}`
+              return !shownQuotationIdsRef.current.has(changeKey)
+            }
+            return false
+          })
+
+          if (newlyQuoted) {
+            const changeKey = `${newlyQuoted.id}_${newlyQuoted.customerUnreadCount}_${newlyQuoted.quotationAmount || 0}_${newlyQuoted.status}_${newlyQuoted.lastMessage || ""}`
+            shownQuotationIdsRef.current.add(changeKey)
+
+            const isChatMessage = newlyQuoted.customerUnreadCount > 0 && newlyQuoted.lastMessageSenderId !== newlyQuoted.customerId
+
+            setQuotationToast({
+              id: changeKey,
+              kitchenId: newlyQuoted.kitchenId,
+              kitchenName: newlyQuoted.kitchenName || "Kitchen",
+              quotationAmount: newlyQuoted.quotationAmount || newlyQuoted.estimatedValue || "",
+              message: newlyQuoted.lastMessage || "",
+              isMessage: isChatMessage,
+            })
+          }
+        }
+      } catch (err) {
+        // silent
+      }
+    }
+    const interval = setInterval(checkQuotations, 2500)
+    checkQuotations()
+
+    return () => {
+      if (sub && sub.remove) sub.remove()
+      clearInterval(interval)
+    }
+  }, [])
+
 
 
   // Handle carousel scroll dot selection
@@ -602,22 +813,21 @@ export default function HomeScreen() {
       >
         {/* Top Row: Brand & Location on Left, Icons on Right */}
         <View className="flex-row items-center justify-between">
-          <View className="flex-col">
+          <View className="flex-col flex-1 mr-2">
             <Text className="font-poppins font-extrabold text-xl text-primary leading-none">Atleast80</Text>
             <PressableScale
               className="flex-row items-center gap-1 mt-1"
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               onPress={() => {
-                setLocationModalVisible(true)
-                loadStates()
+                setIsMapModalVisible(true)
               }}
             >
-              <MapPin size={11} color="#0B6B3A" />
-              <Text className="text-[10px] font-nunito font-semibold text-gray" numberOfLines={1}>
-                {location.address
-                  ? `${location.address} ▼`
-                  : location.city
-                  ? `${location.city}, ${location.state} ▼`
+              <MapPin size={12} color="#0B6B3A" />
+              <Text className="text-[11px] font-nunito font-semibold text-gray-700 flex-shrink pr-2" numberOfLines={1} ellipsizeMode="tail">
+                {location.city
+                  ? `${location.suburb && location.suburb.toLowerCase() !== location.city.toLowerCase() ? location.suburb + ", " : ""}${location.city}${location.state ? ", " + location.state : ""}${location.pincode ? " " + location.pincode : ""} ▼`
+                  : location.address
+                  ? `${location.address.substring(0, 30).trim()}... ▼`
                   : location.state
                     ? `${location.state} ▼`
                     : "Select Location ▼"}
@@ -648,7 +858,7 @@ export default function HomeScreen() {
 
             {/* Shopping Cart Icon (with badge) */}
             <PressableScale
-              onPress={() => router.push("/(customer)/cart")}
+              onPress={() => router.push("/cart")}
               className="relative p-2.5 rounded-full bg-white border border-white shadow-sm"
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               style={Platform.select({
@@ -684,10 +894,56 @@ export default function HomeScreen() {
         >
           <Search size={16} color="#0B6B3A" style={{ marginRight: 8 }} />
           <Text className="text-gray/80 text-xs font-nunito flex-1" numberOfLines={1}>
-            Search homemade food & essentials...
+            Search homemade food &amp; essentials...
           </Text>
           <Scan size={16} color="#0B6B3A" />
         </PressableScale>
+
+        {/* In-App Quotation Notification Popup (Right Below Search Input Bar - 5 Seconds Auto Remove & Premium Styling) */}
+        {quotationToast && (
+          <View className="mt-2.5 bg-[#0B6B3A] border border-emerald-400/40 rounded-2xl p-3 shadow-xl flex-row items-center justify-between">
+            <TouchableOpacity
+              onPress={() => {
+                const targetKitchenId = quotationToast.kitchenId
+                setQuotationToast(null)
+                if (targetKitchenId) {
+                  router.push(`/(customer)/(tabs)/kitchen/${targetKitchenId}`)
+                }
+              }}
+              activeOpacity={0.85}
+              className="flex-row items-center gap-3 flex-1"
+            >
+              <View className="w-9.5 h-9.5 rounded-xl bg-amber-400/25 border border-amber-300/40 items-center justify-center">
+                {quotationToast.isMessage ? (
+                  <MessageSquare size={18} color="#FBBF24" />
+                ) : (
+                  <FileText size={18} color="#FBBF24" />
+                )}
+              </View>
+              <View className="flex-1">
+                <View className="flex-row items-center gap-1.5">
+                  <Text className="font-poppins font-bold text-xs text-amber-300">
+                    {quotationToast.isMessage ? `New Message! 💬` : `Quotation Received! 📜`}
+                  </Text>
+                  <View className="bg-amber-400/20 px-1.5 py-0.5 rounded-full">
+                    <Text className="font-poppins font-bold text-[9px] text-amber-200">5s</Text>
+                  </View>
+                </View>
+                <Text className="font-nunito font-semibold text-xs text-white mt-0.5" numberOfLines={1}>
+                  {quotationToast.kitchenName || "Kitchen"}: {quotationToast.isMessage ? `"${quotationToast.message || "Sent a message"}"` : `Replied with quote (₹${quotationToast.quotationAmount})`}
+                </Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => setQuotationToast(null)}
+              className="p-1.5 rounded-full bg-white/10 hover:bg-white/20 ml-2"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <X size={16} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
 
       <ScrollView
@@ -745,17 +1001,20 @@ export default function HomeScreen() {
                       <Text className="text-[10px] font-poppins font-semibold uppercase tracking-[0.24em] text-secondary/80">
                         Fresh today
                       </Text>
-                      <Text className="font-poppins font-extrabold text-white text-xl leading-tight mt-1">
-                        Home-cooked meals in one tap
+                      <Text 
+                        className="font-poppins font-extrabold text-white text-[19px] leading-[23px] mt-1"
+                        style={Platform.select({ web: { wordBreak: "keep-all", hyphens: "none" } })}
+                      >
+                        Home-Cooked{"\n"}Meals in One Tap
                       </Text>
-                      <Text className="font-nunito text-white/85 text-xs mt-2 leading-relaxed">
+                      <Text className="font-nunito text-white/85 text-xs mt-1.5 leading-relaxed">
                         Find verified kitchens, comfort food, and daily essentials without the clutter.
                       </Text>
                       <PressableScale
                         onPress={() => router.push("/(customer)/search")}
-                        className="mt-3.5 bg-secondary self-start px-6 py-2.5 rounded-full shadow-sm"
+                        className="mt-3 bg-secondary self-start px-5 py-2 rounded-full shadow-sm"
                       >
-                        <Text className="text-[#0a1f13] font-poppins font-bold text-[10px] uppercase tracking-wider">
+                        <Text className="text-[#0a1f13] font-poppins font-bold text-[9.5px] uppercase tracking-wider">
                           Explore kitchens
                         </Text>
                       </PressableScale>
@@ -854,7 +1113,7 @@ export default function HomeScreen() {
           </View>
 
           {/* Core shortcuts / top menu row */}
-          <View className="flex-row justify-between gap-1.5 mb-5">
+          <View className="flex-row justify-between gap-1 mb-5">
             {[
               { 
                 label: "Find Food", 
@@ -926,7 +1185,7 @@ export default function HomeScreen() {
                 <PressableScale
                   key={item.label}
                   onPress={item.action}
-                  className="flex-1 items-center justify-center rounded-[20px] border py-3 px-1 shadow-sm h-[94px]"
+                  className="flex-1 items-center justify-center rounded-[18px] border py-2 px-0.5 shadow-sm h-[88px]"
                   style={[
                     Platform.select({
                       web: { boxShadow: "0px 4px 8px rgba(0,0,0,0.03)" },
@@ -935,10 +1194,17 @@ export default function HomeScreen() {
                     { backgroundColor: item.bg, borderColor: item.borderColor }
                   ]}
                 >
-                  <View className="items-center justify-center mb-2.5 h-7">
+                  <View className="items-center justify-center mb-1.5 h-6">
                     {item.renderIcon()}
                   </View>
-                  <Text className="font-poppins font-bold text-[9.5px] text-[#0C4240] text-center" numberOfLines={1}>{item.label}</Text>
+                  <Text 
+                    className="font-poppins font-bold text-[8.5px] text-[#0C4240] text-center" 
+                    numberOfLines={1}
+                    adjustsFontSizeToFit={true}
+                    minimumFontScale={0.8}
+                  >
+                    {item.label}
+                  </Text>
                 </PressableScale>
               )
             })}
@@ -1250,9 +1516,138 @@ export default function HomeScreen() {
             </View>
           ) : null}
 
+          {/* Festival Specials & Flash Deals Curiosity Showcase */}
+          {festivalKitchens.length > 0 && (
+            <View className="mb-6">
+              <View className="flex-row justify-between items-center mb-3">
+                <View className="flex-row items-center gap-2">
+                  <Text className="text-base">🎉</Text>
+                  <Text className="font-poppins font-bold text-dark text-base">
+                    Festival Specials & Deals
+                  </Text>
+                </View>
+                <View className="bg-amber-100 px-2.5 py-0.5 rounded-full border border-amber-300 shadow-sm">
+                  <Text className="text-amber-800 text-[9px] font-poppins font-extrabold uppercase tracking-wide">
+                    ⚡ LIMITED TIME
+                  </Text>
+                </View>
+              </View>
+
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingRight: 16 }}
+              >
+                {festivalKitchens.map((k) => {
+                  const fest = k.festivalOffer || {}
+                  const logoSrc = resolveMediaUrl(k.logo || k.image)
+                  const offerImgSrc = resolveMediaUrl(fest.image || k.festival_offer_image)
+
+                  return (
+                    <PressableScale
+                      key={k.id}
+                      onPress={() => router.push(`/(customer)/(tabs)/kitchen/${k.id}`)}
+                      className="mr-3.5"
+                      style={{ width: Math.min(320, windowWidth - 48) }}
+                    >
+                      <LinearGradient
+                        colors={["#D97706", "#EA580C", "#E11D48"]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={{
+                          borderRadius: 24,
+                          padding: 16,
+                          overflow: "hidden",
+                          position: "relative",
+                          ...Platform.select({
+                            web: { boxShadow: "0px 8px 20px rgba(234, 88, 12, 0.25)" },
+                            default: { shadowColor: "#EA580C", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.25, shadowRadius: 10, elevation: 4 }
+                          }),
+                        }}
+                      >
+                        {/* Floating Offer Illustration / Image in Background */}
+                        <View
+                          style={{
+                            position: "absolute",
+                            top: -15,
+                            right: -15,
+                            width: 105,
+                            height: 105,
+                            borderRadius: 52.5,
+                            overflow: "hidden",
+                            opacity: 0.22,
+                            borderWidth: 2,
+                            borderColor: "rgba(255, 255, 255, 0.4)",
+                          }}
+                        >
+                          <FestivalOfferThumb
+                            uri={offerImgSrc}
+                            style={{ width: "100%", height: "100%" }}
+                            resizeMode="cover"
+                          />
+                        </View>
+
+                        <View className="flex-row items-center justify-between mb-2">
+                          <View className="bg-white/20 border border-white/30 px-2.5 py-0.5 rounded-full">
+                            <Text className="text-white text-[9px] font-poppins font-bold uppercase tracking-wider">
+                              {fest.category === "both" ? "🍲 Food & Ration" : fest.category === "grocery" ? "🌾 Ration Only" : "🍲 Homemade Food"}
+                            </Text>
+                          </View>
+                          <View className="bg-white px-2.5 py-0.5 rounded-full shadow-sm">
+                            <Text className="text-[#E11D48] text-[10px] font-poppins font-extrabold uppercase">
+                              Flat {fest.discountPercent}% OFF
+                            </Text>
+                          </View>
+                        </View>
+
+                        <View className="flex-row items-center gap-3 my-1">
+                          <View className="w-11 h-11 rounded-2xl bg-white p-0.5 overflow-hidden shadow-sm">
+                            <Image
+                              source={{ uri: logoSrc || "https://images.unsplash.com/photo-1556910103-1c02745aae4d?w=200&h=200&fit=crop" }}
+                              className="w-full h-full rounded-[14px]"
+                              resizeMode="cover"
+                            />
+                          </View>
+                          <View className="flex-1 min-w-0">
+                            <Text className="font-poppins font-bold text-white text-base leading-tight" numberOfLines={1}>
+                              {k.name}
+                            </Text>
+                            <Text className="font-nunito text-amber-200 text-xs font-semibold mt-0.5" numberOfLines={1}>
+                              ✨ {fest.title}
+                            </Text>
+                          </View>
+                          {/* Floating Image Thumbnail Pill */}
+                          <View className="w-10 h-10 rounded-xl overflow-hidden border border-white/40 shadow-sm bg-white/20">
+                            <FestivalOfferThumb
+                              uri={offerImgSrc}
+                              style={{ width: "100%", height: "100%" }}
+                              resizeMode="cover"
+                            />
+                          </View>
+                        </View>
+
+                        <Text className="font-nunito text-white/90 text-[11px] leading-snug mt-1 mb-3" numberOfLines={2}>
+                          {fest.description || `Special festive delicacies & offers handcrafted for this occasion.`}
+                        </Text>
+
+                        <View className="bg-white/95 rounded-xl py-2 px-3 flex-row items-center justify-between shadow-sm">
+                          <Text className="font-poppins font-bold text-[#0a1f13] text-[11px]">
+                            Unlock Secret Festival Menu
+                          </Text>
+                          <View className="w-5 h-5 rounded-full bg-[#EA580C] items-center justify-center">
+                            <ArrowRight size={11} color="#FFFFFF" strokeWidth={3} />
+                          </View>
+                        </View>
+                      </LinearGradient>
+                    </PressableScale>
+                  )
+                })}
+              </ScrollView>
+            </View>
+          )}
+
           {/* Featured Kitchens */}
-          {/* Featured Kitchens */}
-          {featuredLoading || (!featuredError && filteredFeaturedKitchens.length > 0) ? (
+          {hasLocation && (featuredLoading || (!featuredError && filteredFeaturedKitchens.length > 0)) ? (
             <View className="mb-6">
               <View className="flex-row justify-between items-center mb-3">
                 <Text className="font-poppins font-bold text-dark text-base">
@@ -1295,20 +1690,66 @@ export default function HomeScreen() {
             </View>
           ) : null}
  
-          {/* Explore More Kitchens */}
+          {/* Explore More Kitchens / Location Required State */}
           <View className="mb-6">
             <View className="mb-3">
               <Text className="font-poppins font-bold text-dark text-base">
-                Explore More
+                {hasLocation ? "Explore More" : "Nearby Kitchens"}
               </Text>
               <Text className="font-nunito text-gray text-xs mt-0.5">
                 {location.city 
                   ? `Browse verified kitchens in ${location.city}`
-                  : "Browse all verified kitchens near you"}
+                  : location.state
+                  ? `Browse verified kitchens in ${location.state}`
+                  : "Select your location to discover kitchens delivering to you"}
               </Text>
             </View>
  
-            {allLoading ? (
+            {!hasLocation ? (
+              <View className="py-8 items-center bg-white rounded-[28px] border border-emerald-100 p-6 shadow-sm">
+                <View className="w-14 h-14 rounded-full bg-[#EAF7EE] items-center justify-center mb-3.5 border border-[#D1E6E3]">
+                  <MapPin size={26} color="#0B6B3A" />
+                </View>
+                <Text className="font-poppins font-bold text-dark text-base text-center mb-1.5">
+                  Set Your Location
+                </Text>
+                <Text className="font-nunito text-gray text-xs text-center mb-5 leading-relaxed max-w-[260px]">
+                  Please allow or select your location to see home kitchens delivering fresh meals near you.
+                </Text>
+                <TouchableOpacity 
+                  onPress={() => setIsMapModalVisible(true)}
+                  activeOpacity={0.85}
+                  style={{
+                    backgroundColor: "#0B6B3A",
+                    borderRadius: 14,
+                    paddingHorizontal: 22,
+                    paddingVertical: 12,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 6,
+                    shadowColor: "#0B6B3A",
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.2,
+                    shadowRadius: 6,
+                    elevation: 3
+                  }}
+                >
+                  <MapPin size={16} color="#FFFFFF" />
+                  <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontSize: 13, fontFamily: "Poppins" }}>
+                    Select Location
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => router.push("/(customer)/search")}
+                  className="mt-3.5 py-1.5"
+                >
+                  <Text className="font-nunito font-semibold text-xs text-primary">
+                    Or browse all kitchens in Discover →
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : allLoading ? (
               <View className="flex-row flex-wrap -mx-1.5">
                 {Array.from({ length: 4 }).map((_, i) => (
                   <View key={i} className="w-1/2 p-1.5">
@@ -1339,12 +1780,20 @@ export default function HomeScreen() {
                     ? `We don't have any registered kitchens in ${location.city} yet.` 
                     : "Please select a location to see nearby kitchens."}
                 </Text>
-                <TouchableOpacity 
-                  onPress={() => setLocationModalVisible(true)}
-                  style={{ backgroundColor: "#EAF7EE", borderRadius: 12, paddingHorizontal: 16, paddingVertical: 10 }}
-                >
-                  <Text style={{ color: "#0B6B3A", fontWeight: "bold", fontSize: 13 }}>Change Location</Text>
-                </TouchableOpacity>
+                <View className="flex-row gap-2.5 items-center">
+                  <TouchableOpacity 
+                    onPress={() => setIsMapModalVisible(true)}
+                    style={{ backgroundColor: "#EAF7EE", borderRadius: 12, paddingHorizontal: 16, paddingVertical: 10 }}
+                  >
+                    <Text style={{ color: "#0B6B3A", fontWeight: "bold", fontSize: 13 }}>Change Location</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    onPress={() => router.push("/(customer)/search")}
+                    style={{ backgroundColor: "#0B6B3A", borderRadius: 12, paddingHorizontal: 16, paddingVertical: 10 }}
+                  >
+                    <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontSize: 13 }}>Browse All</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             ) : (
               <View className="flex-row flex-wrap -mx-1.5">
@@ -1360,176 +1809,9 @@ export default function HomeScreen() {
             )}
           </View>
 
-          {/* Partner With Us CTA Section */}
-          <View className="mb-8">
-            <LinearGradient
-              colors={["#0B6B3A", "#064d29"]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={{
-                borderRadius: 24,
-                padding: 24,
-                position: "relative",
-                overflow: "hidden",
-                ...Platform.select({
-                  web: {
-                    boxShadow: "0px 4px 10px rgba(11, 107, 58, 0.15)",
-                  },
-                  default: {
-                    shadowColor: "#0B6B3A",
-                    shadowOffset: { width: 0, height: 4 },
-                    shadowOpacity: 0.15,
-                    shadowRadius: 10,
-                    elevation: 4,
-                  },
-                }),
-              }}
-            >
-              {/* Decorative background circles */}
-              <View
-                style={{
-                  position: "absolute",
-                  top: -40,
-                  right: -40,
-                  width: 120,
-                  height: 120,
-                  borderRadius: 60,
-                  backgroundColor: "rgba(244, 196, 0, 0.08)",
-                }}
-              />
-              <View
-                style={{
-                  position: "absolute",
-                  bottom: -30,
-                  left: -30,
-                  width: 100,
-                  height: 100,
-                  borderRadius: 50,
-                  backgroundColor: "rgba(255, 255, 255, 0.04)",
-                }}
-              />
 
-              <View className="flex-row items-center gap-2 mb-3">
-                <Handshake size={18} color="#F4C400" />
-                <Text className="font-poppins font-bold text-secondary text-[11px] uppercase tracking-wider mt-0.5">
-                  Partner With Us
-                </Text>
-              </View>
 
-              <Text className="font-poppins font-extrabold text-white text-xl leading-tight mb-2">
-                Own a home kitchen?{"\n"}Start selling today.
-              </Text>
 
-              <Text className="font-nunito text-white/80 text-xs leading-relaxed mb-5">
-                Join 500+ verified home kitchens. List your meals, ration items, and reach thousands of customers who trust homemade food.
-              </Text>
-
-              <View className="items-center sm:items-start">
-                <PressableScale
-                  onPress={() => router.push("/(kitchen)/signup")}
-                  className="w-full sm:w-auto bg-secondary px-6 py-3 rounded-full flex-row items-center justify-center gap-2 shadow-sm"
-                >
-                  <Text className="text-[#0a1f13] font-poppins font-bold text-xs uppercase tracking-wider">
-                    Register Your Kitchen
-                  </Text>
-                  <ArrowRight size={14} color="#0a1f13" strokeWidth={2.5} />
-                </PressableScale>
-                <Text className="font-nunito text-white/50 text-[10px] mt-2 text-center w-full sm:text-left">
-                  Free to register. Start earning in 24hrs.
-                </Text>
-              </View>
-            </LinearGradient>
-          </View>
-
-          {/* Delivery Partner CTA Section */}
-          <View className="mb-8 mt-2">
-            <LinearGradient
-              colors={["#064d29", "#0B6B3A"]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={{
-                borderRadius: 24,
-                padding: 24,
-                position: "relative",
-                overflow: "hidden",
-                ...Platform.select({
-                  web: {
-                    boxShadow: "0px 4px 10px rgba(11, 107, 58, 0.15)",
-                  },
-                  default: {
-                    shadowColor: "#0B6B3A",
-                    shadowOffset: { width: 0, height: 4 },
-                    shadowOpacity: 0.15,
-                    shadowRadius: 10,
-                    elevation: 4,
-                  },
-                }),
-              }}
-            >
-              {/* Decorative background circles */}
-              <View
-                style={{
-                  position: "absolute",
-                  top: -40,
-                  right: -40,
-                  width: 120,
-                  height: 120,
-                  borderRadius: 60,
-                  backgroundColor: "rgba(255, 255, 255, 0.08)",
-                }}
-              />
-              <View
-                style={{
-                  position: "absolute",
-                  bottom: -30,
-                  left: -30,
-                  width: 100,
-                  height: 100,
-                  borderRadius: 50,
-                  backgroundColor: "rgba(0, 0, 0, 0.04)",
-                }}
-              />
-
-              <View className="flex-row items-center gap-2 mb-3">
-                <Truck size={18} color="#FFFFFF" />
-                <Text className="font-poppins font-bold text-white text-[11px] uppercase tracking-wider mt-0.5">
-                  Delivery Partner
-                </Text>
-              </View>
-
-              <Text className="font-poppins font-extrabold text-white text-xl leading-tight mb-2">
-                Deliver & Earn{"\n"}On Your Schedule.
-              </Text>
-
-              <Text className="font-nunito text-white/80 text-xs leading-relaxed mb-5">
-                Join our delivery fleet today. Help deliver fresh, warm home-cooked meals to customer doorsteps in Lucknow and earn per trip.
-              </Text>
-
-              <View className="items-center sm:items-start">
-                <TouchableOpacity
-                  onPress={() => router.push("/(rider)/signup")}
-                  style={{
-                    backgroundColor: "#F4C400",
-                    paddingHorizontal: 24,
-                    paddingVertical: 12,
-                    borderRadius: 999,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 8,
-                  }}
-                >
-                  <Text className="text-[#0a1f13] font-poppins font-bold text-xs uppercase tracking-wider">
-                    Register as Rider
-                  </Text>
-                  <ArrowRight size={14} color="#0a1f13" strokeWidth={2.5} />
-                </TouchableOpacity>
-                <Text className="font-nunito text-white/50 text-[10px] mt-2 text-center w-full sm:text-left">
-                  Start delivering with bike, scooty, or cycle.
-                </Text>
-              </View>
-            </LinearGradient>
-          </View>
 
         </Animated.View>
       </ScrollView>
@@ -1538,294 +1820,391 @@ export default function HomeScreen() {
         visible={locationModalVisible}
         animationType="slide"
         transparent={true}
-        onRequestClose={() => setLocationModalVisible(false)}
+        statusBarTranslucent={true}
+        onRequestClose={() => {
+          if (statePickerVisible) {
+            setStatePickerVisible(false)
+            setStateSearchQuery("")
+          } else if (cityPickerVisible) {
+            setCityPickerVisible(false)
+            setCitySearchQuery("")
+          } else {
+            setLocationModalVisible(false)
+          }
+        }}
       >
         <Pressable 
           style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.5)", justifyContent: "flex-end" }}
-          onPress={() => setLocationModalVisible(false)}
+          onPress={() => {
+            if (statePickerVisible) {
+              setStatePickerVisible(false)
+              setStateSearchQuery("")
+            } else if (cityPickerVisible) {
+              setCityPickerVisible(false)
+              setCitySearchQuery("")
+            } else {
+              setLocationModalVisible(false)
+            }
+          }}
         >
-          <Pressable 
-            style={{ 
-              backgroundColor: "#FFFFFF", 
-              borderTopLeftRadius: 32, 
-              borderTopRightRadius: 32, 
-              paddingHorizontal: 24, 
-              paddingTop: 24, 
-              paddingBottom: Platform.OS === "ios" ? 44 : 28, 
-              maxHeight: "85%" 
-            }}
-            onPress={(e) => e.stopPropagation()}
-          >
-            {/* Modal Header */}
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <Text style={{ fontSize: 18, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>Select Delivery Location</Text>
-              <TouchableOpacity onPress={() => setLocationModalVisible(false)} style={{ padding: 4 }}>
-                <X size={20} color="#1F1F1F" />
-              </TouchableOpacity>
-            </View>
+          <Pressable
+              style={{
+                backgroundColor: "#FFFFFF",
+                borderTopLeftRadius: 32,
+                borderTopRightRadius: 32,
+                paddingHorizontal: 24,
+                paddingTop: 24,
+                paddingBottom: Platform.OS === "ios" ? 44 : 16,
+                maxHeight: "88%",
+                width: "100%"
+              }}
+              onPress={(e) => e.stopPropagation()}
+            >
+              {statePickerVisible ? (
+                /* STATE PICKER VIEW OVERLAY */
+                <View style={{ width: "100%" }}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                    <Text style={{ fontSize: 18, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>Select State</Text>
+                    <TouchableOpacity onPress={() => {
+                      setStatePickerVisible(false)
+                      setStateSearchQuery("")
+                    }} style={{ padding: 4 }}>
+                      <X size={20} color="#1F1F1F" />
+                    </TouchableOpacity>
+                  </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              {/* Auto Detect Button */}
-              <TouchableOpacity
-                onPress={handleAutoDetectLocation}
-                disabled={detectingLocation}
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  backgroundColor: "#EAF7EE",
-                  borderRadius: 16,
-                  paddingVertical: 12,
-                  gap: 8,
-                  marginBottom: 16,
-                }}
-              >
-                {detectingLocation ? (
-                  <ActivityIndicator size="small" color="#0B6B3A" />
-                ) : (
-                  <MapPin size={16} color="#0B6B3A" />
-                )}
-                <Text style={{ color: "#0B6B3A", fontWeight: "bold", fontFamily: "Poppins", fontSize: 14 }}>
-                  {detectingLocation ? "Detecting location..." : "Auto-Detect Current Location"}
-                </Text>
-              </TouchableOpacity>
-   
-              {/* State Picker Box */}
-              <View style={{ marginBottom: 16 }}>
-                <Text style={{ fontSize: 13, fontWeight: "600", color: "#1F1F1F", fontFamily: "Poppins", marginBottom: 8 }}>State</Text>
-                <TouchableOpacity
-                  onPress={() => setStatePickerVisible(true)}
-                  style={{
+                  {/* State Search Bar */}
+                  <View style={{
                     flexDirection: "row",
-                    justifyContent: "space-between",
                     alignItems: "center",
-                    borderWidth: 2,
-                    borderColor: "#E8E8E8",
-                    borderRadius: 16,
-                    paddingHorizontal: 16,
-                    paddingVertical: 14,
-                    backgroundColor: "#FFFFFF",
-                  }}
-                >
-                  <Text style={{ fontSize: 14, color: "#1F1F1F", fontFamily: "Nunito" }}>
-                    {tempState || "Select State"}
-                  </Text>
-                  <ChevronDown size={16} color="#7A7A7A" />
-                </TouchableOpacity>
-              </View>
-   
-              {/* City Picker Box */}
-              <View style={{ marginBottom: 16 }}>
-                <Text style={{ fontSize: 13, fontWeight: "600", color: "#1F1F1F", fontFamily: "Poppins", marginBottom: 8 }}>City</Text>
-                <TouchableOpacity
-                  disabled={!tempState}
-                  onPress={async () => {
-                    if (citiesList.length === 0 && tempState) {
-                      setCitiesLoading(true)
-                      try {
-                        let fetched = []
-                        if (tempStateIso) {
-                          const cData = await api(`/api/locations/cities?state=${tempStateIso}`)
-                          fetched = cData.cities || []
-                        }
-                        if (fetched.length === 0 && tempStateIso) {
-                          fetched = FALLBACK_LOCATIONS.cities[tempStateIso] || []
-                        }
-                        if (tempCity && !fetched.some((c) => c.name?.toLowerCase() === tempCity.toLowerCase())) {
-                          fetched = [{ name: tempCity }, ...fetched]
-                        }
-                        setCitiesList(fetched.length > 0 ? fetched : tempCity ? [{ name: tempCity }] : [])
-                      } catch (err) {
-                        setCitiesList(tempCity ? [{ name: tempCity }] : [])
-                      } finally {
-                        setCitiesLoading(false)
-                      }
-                    }
-                    setCityPickerVisible(true)
-                  }}
-                  style={{
-                    flexDirection: "row",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    borderWidth: 2,
-                    borderColor: tempState ? "#E8E8E8" : "#F5F5F3",
-                    borderRadius: 16,
-                    paddingHorizontal: 16,
-                    paddingVertical: 14,
-                    backgroundColor: tempState ? "#FFFFFF" : "#F5F5F3",
-                  }}
-                >
-                  <Text style={{ fontSize: 14, color: tempState ? "#1F1F1F" : "#7A7A7A", fontFamily: "Nunito" }}>
-                    {tempCity || "Select City"}
-                  </Text>
-                  <ChevronDown size={16} color="#7A7A7A" />
-                </TouchableOpacity>
-              </View>
-
-              {/* Exact Doorstep Address Input */}
-              <View style={{ marginBottom: 24 }}>
-                <Text style={{ fontSize: 13, fontWeight: "600", color: "#1F1F1F", fontFamily: "Poppins", marginBottom: 8 }}>
-                  Exact Doorstep Address (Optional)
-                </Text>
-                <TextInput
-                  value={tempAddress}
-                  onChangeText={setTempAddress}
-                  placeholder="Enter flat/house no, colony, landmark..."
-                  placeholderTextColor="#A3A3A3"
-                  style={{
-                    borderWidth: 2,
-                    borderColor: "#E8E8E8",
-                    borderRadius: 16,
-                    paddingHorizontal: 16,
-                    paddingVertical: 12,
-                    backgroundColor: "#FFFFFF",
-                    fontSize: 14,
-                    color: "#1F1F1F",
-                    fontFamily: "Nunito",
-                  }}
-                />
-              </View>
-   
-              {/* Buttons Row */}
-              <View style={{ gap: 12, paddingBottom: 16 }}>
-                <TouchableOpacity
-                  onPress={handleSaveLocation}
-                  disabled={!tempState || !tempCity}
-                  style={{
-                    backgroundColor: (!tempState || !tempCity) ? "#A3D3B8" : "#0B6B3A",
-                    borderRadius: 16,
-                    paddingVertical: 16,
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins", fontSize: 15 }}>
-                    Confirm Location
-                  </Text>
-                </TouchableOpacity>
-   
-                {(location.state || location.city) ? (
-                  <TouchableOpacity
-                    onPress={handleClearLocation}
-                    style={{
-                      backgroundColor: "#F5F5F3",
-                      borderRadius: 16,
-                      paddingVertical: 16,
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <Text style={{ color: "#EF4444", fontWeight: "bold", fontFamily: "Poppins", fontSize: 15 }}>
-                      Clear Filters
+                    backgroundColor: "#F7FAFC",
+                    borderRadius: 14,
+                    borderWidth: 1,
+                    borderColor: "#E2E8F0",
+                    paddingHorizontal: 12,
+                    marginBottom: 14,
+                    height: 44
+                  }}>
+                    <Search size={16} color="#A0AEC0" style={{ marginRight: 8 }} />
+                    <TextInput
+                      value={stateSearchQuery}
+                      onChangeText={setStateSearchQuery}
+                      placeholder="Search state..."
+                      placeholderTextColor="#A0AEC0"
+                      style={{ flex: 1, fontSize: 13, fontFamily: "Nunito", color: "#1A202C", paddingVertical: 0 }}
+                    />
+                    {stateSearchQuery ? (
+                      <TouchableOpacity onPress={() => setStateSearchQuery("")} style={{ padding: 4 }}>
+                        <X size={14} color="#718096" />
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+       
+                  <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false} nestedScrollEnabled={true} keyboardShouldPersistTaps="handled">
+                    {statesLoading ? (
+                      <ActivityIndicator size="small" color="#0B6B3A" style={{ paddingVertical: 24 }} />
+                    ) : (
+                      statesList
+                        .filter(s => s && s.name && s.name.toLowerCase().includes((stateSearchQuery || "").toLowerCase().trim()))
+                        .map((stateItem) => (
+                          <TouchableOpacity
+                            key={stateItem.iso2 || stateItem.id || stateItem.name}
+                            onPress={() => {
+                              const code = stateItem.iso2 || (stateItem.id && stateItem.id.includes(":") ? stateItem.id.split(":")[1] : stateItem.id) || "";
+                              handleSelectState(stateItem.name, code);
+                              setStateSearchQuery("")
+                            }}
+                            style={{ paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: "#F5F5F3", flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
+                          >
+                            <Text style={{ fontSize: 15, color: "#1F1F1F", fontFamily: "Nunito", fontWeight: tempState === stateItem.name ? "bold" : "normal" }}>{stateItem.name}</Text>
+                            {tempState === stateItem.name && <Check size={16} color="#0B6B3A" />}
+                          </TouchableOpacity>
+                        ))
+                    )}
+                  </ScrollView>
+                </View>
+              ) : cityPickerVisible ? (
+                /* CITY PICKER VIEW OVERLAY */
+                <View style={{ width: "100%" }}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                    <Text style={{ fontSize: 18, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>
+                      Select City {tempState ? `(${tempState})` : ""}
                     </Text>
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-            </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
+                    <TouchableOpacity onPress={() => {
+                      setCityPickerVisible(false)
+                      setCitySearchQuery("")
+                    }} style={{ padding: 4 }}>
+                      <X size={20} color="#1F1F1F" />
+                    </TouchableOpacity>
+                  </View>
 
-      {/* State Selection Overlay Modal */}
-      <Modal
-        visible={statePickerVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setStatePickerVisible(false)}
-      >
-        <Pressable 
-          style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.5)", justifyContent: "flex-end" }}
-          onPress={() => setStatePickerVisible(false)}
-        >
-          <Pressable 
-            style={{ 
-              backgroundColor: "#FFFFFF", 
-              borderTopLeftRadius: 32, 
-              borderTopRightRadius: 32, 
-              paddingHorizontal: 24, 
-              paddingTop: 24, 
-              paddingBottom: Platform.OS === "ios" ? 44 : 28, 
-              maxHeight: "80%" 
-            }}
-            onPress={(e) => e.stopPropagation()}
-          >
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-              <Text style={{ fontSize: 18, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>Select State</Text>
-              <TouchableOpacity onPress={() => setStatePickerVisible(false)} style={{ padding: 4 }}>
-                <X size={20} color="#1F1F1F" />
-              </TouchableOpacity>
-            </View>
- 
-            <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false} nestedScrollEnabled={true}>
-              {statesLoading ? (
-                <ActivityIndicator size="small" color="#0B6B3A" style={{ paddingVertical: 24 }} />
-              ) : (
-                statesList.filter(s => s && s.name).map((stateItem) => (
-                  <TouchableOpacity
-                    key={stateItem.iso2 || stateItem.id || stateItem.name}
-                    onPress={() => {
-                      const code = stateItem.iso2 || (stateItem.id && stateItem.id.includes(":") ? stateItem.id.split(":")[1] : stateItem.id) || "";
-                      handleSelectState(stateItem.name, code);
-                    }}
-                    style={{ paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: "#F5F5F3" }}
-                  >
-                    <Text style={{ fontSize: 16, color: "#1F1F1F", fontFamily: "Nunito" }}>{stateItem.name}</Text>
-                  </TouchableOpacity>
-                ))
-              )}
-            </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
+                  {/* City Search Bar */}
+                  <View style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    backgroundColor: "#F7FAFC",
+                    borderRadius: 14,
+                    borderWidth: 1,
+                    borderColor: "#E2E8F0",
+                    paddingHorizontal: 12,
+                    marginBottom: 14,
+                    height: 44
+                  }}>
+                    <Search size={16} color="#A0AEC0" style={{ marginRight: 8 }} />
+                    <TextInput
+                      value={citySearchQuery}
+                      onChangeText={setCitySearchQuery}
+                      placeholder="Search city or area..."
+                      placeholderTextColor="#A0AEC0"
+                      style={{ flex: 1, fontSize: 13, fontFamily: "Nunito", color: "#1A202C", paddingVertical: 0 }}
+                    />
+                    {citySearchQuery ? (
+                      <TouchableOpacity onPress={() => setCitySearchQuery("")} style={{ padding: 4 }}>
+                        <X size={14} color="#718096" />
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+       
+                  <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false} nestedScrollEnabled={true} keyboardShouldPersistTaps="handled">
+                    {citiesLoading ? (
+                      <ActivityIndicator size="small" color="#0B6B3A" style={{ paddingVertical: 24 }} />
+                    ) : (
+                      <>
+                        {citiesList
+                          .filter((c) => c && c.name && c.name.toLowerCase().includes((citySearchQuery || "").toLowerCase().trim()))
+                          .map((cityItem, idx) => (
+                            <TouchableOpacity
+                              key={idx}
+                              onPress={() => {
+                                handleSelectCity(cityItem.name)
+                                setCitySearchQuery("")
+                              }}
+                              style={{ paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: "#F5F5F3", flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
+                            >
+                              <Text style={{ fontSize: 15, color: "#1F1F1F", fontFamily: "Nunito", fontWeight: tempCity === cityItem.name ? "bold" : "normal" }}>
+                                {cityItem.name}
+                              </Text>
+                              {tempCity === cityItem.name && <Check size={16} color="#0B6B3A" />}
+                            </TouchableOpacity>
+                          ))}
 
-      {/* City Selection Overlay Modal */}
-      <Modal
-        visible={cityPickerVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setCityPickerVisible(false)}
-      >
-        <Pressable 
-          style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.5)", justifyContent: "flex-end" }}
-          onPress={() => setCityPickerVisible(false)}
-        >
-          <Pressable 
-            style={{ 
-              backgroundColor: "#FFFFFF", 
-              borderTopLeftRadius: 32, 
-              borderTopRightRadius: 32, 
-              paddingHorizontal: 24, 
-              paddingTop: 24, 
-              paddingBottom: Platform.OS === "ios" ? 44 : 28, 
-              maxHeight: "80%" 
-            }}
-            onPress={(e) => e.stopPropagation()}
-          >
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-              <Text style={{ fontSize: 18, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>Select City</Text>
-              <TouchableOpacity onPress={() => setCityPickerVisible(false)} style={{ padding: 4 }}>
-                <X size={20} color="#1F1F1F" />
-              </TouchableOpacity>
-            </View>
- 
-            <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false} nestedScrollEnabled={true}>
-              {citiesLoading ? (
-                <ActivityIndicator size="small" color="#0B6B3A" style={{ paddingVertical: 24 }} />
-              ) : citiesList.length === 0 ? (
-                <Text style={{ fontSize: 14, color: "#7A7A7A", textAlign: "center", paddingVertical: 24, fontFamily: "Nunito" }}>No cities found</Text>
+                        {/* Allow selecting custom city/area typed in search bar if not in list */}
+                        {citySearchQuery.trim().length > 0 && !citiesList.some(c => c?.name?.toLowerCase() === citySearchQuery.trim().toLowerCase()) && (
+                          <TouchableOpacity
+                            onPress={() => {
+                              handleSelectCity(citySearchQuery.trim())
+                              setCitySearchQuery("")
+                            }}
+                            style={{ paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: "#F5F5F3", flexDirection: "row", alignItems: "center", gap: 8 }}
+                          >
+                            <MapPin size={16} color="#0B6B3A" />
+                            <Text style={{ fontSize: 14, color: "#0B6B3A", fontFamily: "Poppins", fontWeight: "bold" }}>
+                              Use "{citySearchQuery.trim()}"
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                      </>
+                    )}
+                  </ScrollView>
+                </View>
               ) : (
-                citiesList.map((cityItem, idx) => (
-                  <TouchableOpacity
-                    key={idx}
-                    onPress={() => handleSelectCity(cityItem.name)}
-                    style={{ paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: "#F5F5F3" }}
-                  >
-                    <Text style={{ fontSize: 16, color: "#1F1F1F", fontFamily: "Nunito" }}>{cityItem.name}</Text>
-                  </TouchableOpacity>
-                ))
+                /* MAIN LOCATION SELECTOR CONTENT */
+                <View style={{ width: "100%", flex: 1 }}>
+                  {/* Modal Header */}
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                    <Text style={{ fontSize: 18, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>Select Delivery Location</Text>
+                    <TouchableOpacity onPress={() => setLocationModalVisible(false)} style={{ padding: 4 }}>
+                      <X size={20} color="#1F1F1F" />
+                    </TouchableOpacity>
+                  </View>
+
+                  <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 8 }}>
+                    {/* Pick on Map Button */}
+                    <TouchableOpacity
+                      onPress={() => {
+                        setLocationModalVisible(false)
+                        setIsMapModalVisible(true)
+                      }}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: "#0B6B3A",
+                        borderRadius: 16,
+                        paddingVertical: 12,
+                        gap: 8,
+                        marginBottom: 10,
+                      }}
+                    >
+                      <Navigation size={16} color="#FFFFFF" />
+                      <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins", fontSize: 14 }}>
+                        Pin / Pick Location on Map
+                      </Text>
+                    </TouchableOpacity>
+
+                    {/* Auto Detect Button */}
+                    <TouchableOpacity
+                      onPress={handleAutoDetectLocation}
+                      disabled={detectingLocation}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: "#EAF7EE",
+                        borderRadius: 16,
+                        paddingVertical: 12,
+                        gap: 8,
+                        marginBottom: 16,
+                      }}
+                    >
+                      {detectingLocation ? (
+                        <ActivityIndicator size="small" color="#0B6B3A" />
+                      ) : (
+                        <MapPin size={16} color="#0B6B3A" />
+                      )}
+                      <Text style={{ color: "#0B6B3A", fontWeight: "bold", fontFamily: "Poppins", fontSize: 14 }}>
+                        {detectingLocation ? "Detecting location..." : "Auto-Detect Current Location"}
+                      </Text>
+                    </TouchableOpacity>
+         
+                    {/* State Picker Box */}
+                    <View style={{ marginBottom: 16 }}>
+                      <Text style={{ fontSize: 13, fontWeight: "600", color: "#1F1F1F", fontFamily: "Poppins", marginBottom: 8 }}>State</Text>
+                      <TouchableOpacity
+                        onPress={() => setStatePickerVisible(true)}
+                        style={{
+                          flexDirection: "row",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          borderWidth: 2,
+                          borderColor: "#E8E8E8",
+                          borderRadius: 16,
+                          paddingHorizontal: 16,
+                          paddingVertical: 14,
+                          backgroundColor: "#FFFFFF",
+                        }}
+                      >
+                        <Text style={{ fontSize: 14, color: "#1F1F1F", fontFamily: "Nunito" }}>
+                          {tempState || "Select State"}
+                        </Text>
+                        <ChevronDown size={16} color="#7A7A7A" />
+                      </TouchableOpacity>
+                    </View>
+         
+                    {/* City Picker Box */}
+                    <View style={{ marginBottom: 16 }}>
+                      <Text style={{ fontSize: 13, fontWeight: "600", color: "#1F1F1F", fontFamily: "Poppins", marginBottom: 8 }}>City</Text>
+                      <TouchableOpacity
+                        onPress={() => {
+                          if (!tempState) {
+                            setStatePickerVisible(true)
+                            return
+                          }
+                          // Open city picker immediately (0ms delay)
+                          setCityPickerVisible(true)
+
+                          // If cities not loaded yet, prefill with fallbacks immediately and fetch full list in background
+                          if (citiesList.length === 0 && tempState) {
+                            if (tempStateIso && FALLBACK_LOCATIONS.cities[tempStateIso]) {
+                              setCitiesList(FALLBACK_LOCATIONS.cities[tempStateIso])
+                            }
+                            setCitiesLoading(true)
+                            api(`/api/locations/cities?state=${tempStateIso || "MH"}`)
+                              .then((cData) => {
+                                if (cData?.cities && cData.cities.length > 0) {
+                                  setCitiesList(cData.cities)
+                                }
+                              })
+                              .catch((err) => {
+                                console.warn("City background fetch err:", err)
+                              })
+                              .finally(() => {
+                                setCitiesLoading(false)
+                              })
+                          }
+                        }}
+                        style={{
+                          flexDirection: "row",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          borderWidth: 2,
+                          borderColor: tempState ? "#E8E8E8" : "#E8E8E8",
+                          borderRadius: 16,
+                          paddingHorizontal: 16,
+                          paddingVertical: 14,
+                          backgroundColor: "#FFFFFF",
+                        }}
+                      >
+                        <Text style={{ fontSize: 14, color: tempState ? "#1F1F1F" : "#7A7A7A", fontFamily: "Nunito" }}>
+                          {tempCity || (tempState ? "Select City" : "Select State First")}
+                        </Text>
+                        <ChevronDown size={16} color="#7A7A7A" />
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Exact Doorstep Address Input */}
+                    <View style={{ marginBottom: 24 }}>
+                      <Text style={{ fontSize: 13, fontWeight: "600", color: "#1F1F1F", fontFamily: "Poppins", marginBottom: 8 }}>
+                        Exact Doorstep Address (Optional)
+                      </Text>
+                      <TextInput
+                        value={tempAddress}
+                        onChangeText={setTempAddress}
+                        placeholder="Enter flat/house no, colony, landmark..."
+                        placeholderTextColor="#A3A3A3"
+                        style={{
+                          borderWidth: 2,
+                          borderColor: "#E8E8E8",
+                          borderRadius: 16,
+                          paddingHorizontal: 16,
+                          paddingVertical: 12,
+                          backgroundColor: "#FFFFFF",
+                          fontSize: 14,
+                          color: "#1F1F1F",
+                          fontFamily: "Nunito",
+                        }}
+                      />
+                    </View>
+         
+                    {/* Buttons Row */}
+                    <View style={{ gap: 12, paddingBottom: 16 }}>
+                      <TouchableOpacity
+                        onPress={handleSaveLocation}
+                        disabled={!tempState || !tempCity}
+                        style={{
+                          backgroundColor: (!tempState || !tempCity) ? "#A3D3B8" : "#0B6B3A",
+                          borderRadius: 16,
+                          paddingVertical: 16,
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins", fontSize: 15 }}>
+                          Confirm Location
+                        </Text>
+                      </TouchableOpacity>
+         
+                      {(location.state || location.city) ? (
+                        <TouchableOpacity
+                          onPress={handleClearLocation}
+                          style={{
+                            backgroundColor: "#F5F5F3",
+                            borderRadius: 16,
+                            paddingVertical: 16,
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <Text style={{ color: "#EF4444", fontWeight: "bold", fontFamily: "Poppins", fontSize: 15 }}>
+                            Clear Filters
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  </ScrollView>
+                </View>
               )}
-            </ScrollView>
-          </Pressable>
+            </Pressable>
         </Pressable>
       </Modal>
 
@@ -1887,8 +2266,10 @@ export default function HomeScreen() {
             ) : (
               <ScrollView showsVerticalScrollIndicator={false} className="flex-grow mb-4">
                 {alerts.map((alert) => (
-                  <View
+                  <TouchableOpacity
                     key={alert.id}
+                    activeOpacity={0.8}
+                    onPress={() => handleAlertClick(alert)}
                     className="p-4 bg-slate-50/75 rounded-2xl border border-slate-100 mb-3 flex-row gap-3 items-start"
                   >
                     <View className="w-8 h-8 rounded-xl bg-primary/10 items-center justify-center mt-0.5">
@@ -1914,13 +2295,24 @@ export default function HomeScreen() {
                     >
                       <Text className="text-[10px] font-poppins font-bold text-accent">Dismiss</Text>
                     </TouchableOpacity>
-                  </View>
+                  </TouchableOpacity>
                 ))}
               </ScrollView>
             )}
           </View>
         </View>
       </Modal>
+
+      <LocationMapModal
+        visible={isMapModalVisible}
+        onClose={() => setIsMapModalVisible(false)}
+        onConfirmLocation={handleConfirmMapLocation}
+        initialAddress={location.address || ""}
+        initialCity={location.city || ""}
+        initialState={location.state || ""}
+        initialLat={location.lat || null}
+        initialLng={location.lng || null}
+      />
     </SafeAreaView>
   )
 }

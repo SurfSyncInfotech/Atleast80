@@ -1,35 +1,49 @@
+import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import { Phone, Mail, MessageCircle, Clock, ArrowRight, Headphones } from "lucide-react"
 import StaticPageLayout from "../components/layout/StaticPageLayout"
 import Button from "../components/ui/Button"
-
-const CONTACT = {
-  phone: "+91 40 3559 4439",
-  phoneHref: "tel:+914035594439",
-  email: "contact@elifelo.com",
-}
-
-const CHANNELS = [
-  {
-    icon: Phone,
-    label: "Phone",
-    hint: "Order & seller support",
-    value: CONTACT.phone,
-    href: CONTACT.phoneHref,
-    gradient: "from-emerald-500 to-teal-600",
-  },
-  {
-    icon: Mail,
-    label: "Email",
-    hint: "Reply within 1 business day",
-    value: CONTACT.email,
-    href: `mailto:${CONTACT.email}`,
-    gradient: "from-primary to-primary-dark",
-  },
-]
+import { getPublicContactSettings } from "../lib/api"
 
 export default function ContactPage() {
   const navigate = useNavigate()
+  const [contact, setContact] = useState({
+    supportPhone: "+91 40 3559 4439",
+    supportEmail: "contact@elifelo.com",
+  })
+
+  useEffect(() => {
+    getPublicContactSettings()
+      .then((data) => {
+        if (data?.supportPhone || data?.supportEmail) {
+          setContact({
+            supportPhone: data.supportPhone || "+91 40 3559 4439",
+            supportEmail: data.supportEmail || "contact@elifelo.com",
+          })
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  const cleanPhone = contact.supportPhone.replace(/[^0-9+]/g, "")
+  const channels = [
+    {
+      icon: Phone,
+      label: "Phone",
+      hint: "Order & seller support",
+      value: contact.supportPhone,
+      href: `tel:${cleanPhone}`,
+      gradient: "from-emerald-500 to-teal-600",
+    },
+    {
+      icon: Mail,
+      label: "Email",
+      hint: "Reply within 1 business day",
+      value: contact.supportEmail,
+      href: `mailto:${contact.supportEmail}`,
+      gradient: "from-primary to-primary-dark",
+    },
+  ]
 
   return (
     <StaticPageLayout
@@ -39,7 +53,7 @@ export default function ContactPage() {
     >
       {/* Contact channels */}
       <div className="grid md:grid-cols-2 gap-4 md:gap-5 mb-10 max-w-3xl">
-        {CHANNELS.map((ch) => {
+        {channels.map((ch) => {
           const Icon = ch.icon
           const inner = (
             <>

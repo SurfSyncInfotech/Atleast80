@@ -20,5 +20,11 @@ export function toKitchenCard(kitchen) {
     offer: kitchen.offer,
     bestItem: kitchen.best_item,
     kitchenType: kitchen.kitchen_type || "veg",
+    festivalOffer: kitchen.festivalOffer?.active ? kitchen.festivalOffer : null,
+    festival_offer_enabled: kitchen.festival_offer_enabled,
+    festival_offer_title: kitchen.festival_offer_title,
+    festival_offer_category: kitchen.festival_offer_category,
+    festival_offer_discount_percent: kitchen.festival_offer_discount_percent,
+    festival_offer_image: kitchen.festival_offer_image,
   }
 }

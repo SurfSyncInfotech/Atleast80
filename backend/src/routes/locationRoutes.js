@@ -52,20 +52,28 @@ const ISO_STATE_MAP = Object.entries(STATE_ISO_MAP).reduce((acc, [name, code]) =
 const router = Router()
 
 const SURFSYNC_BASE = process.env.SURFSYNC_API_BASE || "http://backend.surfsyncinfotech.in/api/surfsync/v1"
-const SURFSYNC_API_KEY = process.env.SURFSYNC_API_KEY || "ssx_d779b565a8501493d86b83534b3f9e81cb71f9aab8b122f8"
+const SURFSYNC_API_KEY = process.env.SURFSYNC_API_KEY || "ssx_641e42540bd2ce19d5457e5344650250e7a34d96e632338a"
 const STATES_CACHE_TTL_MS = 24 * 60 * 60 * 1000
+const CITIES_CACHE_TTL_MS = 24 * 60 * 60 * 1000
 
 let statesCache = null
 let statesCacheAt = 0
 
-function getFallback(pathStr) {
+// Per-state cities cache: { [stateCode]: { data: [], cachedAt: timestamp } }
+const citiesCache = {}
+
+function getFallback(pathStr, stateCode = null) {
   try {
     const raw = fs.readFileSync(citiesFilePath, "utf8")
     const localData = JSON.parse(raw)
 
     const cityMatch = pathStr.match(/\/cities/)
     if (cityMatch) {
-      return localData.map((c, idx) => ({
+      let filtered = localData
+      if (stateCode) {
+        filtered = localData.filter((c) => (STATE_ISO_MAP[c.state] || "").toUpperCase() === stateCode.toUpperCase())
+      }
+      return filtered.map((c, idx) => ({
         id: c.id || `fallback-${idx}`,
         name: c.name,
         stateCode: STATE_ISO_MAP[c.state] || "MH",
@@ -117,34 +125,37 @@ async function surfSyncRequest(path, queryParams = {}) {
   try {
     const url = new URL(`${SURFSYNC_BASE}${path}`)
     Object.entries(queryParams).forEach(([key, val]) => {
-      url.searchParams.append(key, val)
+      if (val !== undefined && val !== null) {
+        url.searchParams.append(key, val)
+      }
     })
 
     const res = await fetch(url.toString(), {
       headers: { "X-API-Key": apiKey },
+      signal: AbortSignal.timeout(1500),
     })
 
     if (!res.ok) {
       console.warn(`SurfSync Location API error: ${res.status}. Falling back to local data.`)
-      return getFallback(path)
+      return getFallback(path, queryParams["filter[state]"])
     }
 
     const json = await res.json().catch(() => null)
-    if (!json) return getFallback(path)
+    if (!json) return getFallback(path, queryParams["filter[state]"])
 
     if (json.data && Array.isArray(json.data)) {
       if (path.includes("/states")) {
         return json.data.map((s) => ({
-          id: s.id,
+          id: s.id || s.stateCode,
           name: s.name,
-          iso2: s.stateCode
+          iso2: s.stateCode || s.code
         }))
       } else {
         return json.data.map((c) => ({
           id: c.id,
           name: c.name,
-          stateCode: c.stateCode,
-          stateName: c.stateName
+          stateCode: c.stateCode || c.state,
+          stateName: c.stateName || c.state
         }))
       }
     }
@@ -208,7 +219,14 @@ router.get("/cities", async (req, res) => {
 
   try {
     const q = req.query.q?.trim().toLowerCase()
-    const cities = await surfSyncRequest("/cities", { state: stateCode })
+
+    // Return from cache if available and fresh (skip cache if filtering by query)
+    const cached = citiesCache[stateCode]
+    if (!q && cached && Date.now() - cached.cachedAt < CITIES_CACHE_TTL_MS) {
+      return res.json({ cities: cached.data })
+    }
+
+    const cities = await surfSyncRequest("/cities", { "filter[state]": stateCode })
 
     const seen = new Set()
     const list = []
@@ -225,56 +243,112 @@ router.get("/cities", async (req, res) => {
       })
     }
 
-    res.json({ cities: list.sort((a, b) => a.name.localeCompare(b.name)) })
+    const sorted = list.sort((a, b) => a.name.localeCompare(b.name))
+
+    // Store in cache (only when not filtering by query)
+    if (!q) {
+      citiesCache[stateCode] = { data: sorted, cachedAt: Date.now() }
+    }
+
+    res.json({ cities: sorted })
   } catch (error) {
     console.error("Cities fetch error:", error)
     res.status(error.status || 500).json({ message: error.message || "Failed to fetch cities" })
   }
 })
 
+router.get("/reverse", async (req, res) => {
+  const lat = req.query.lat
+  const lng = req.query.lng || req.query.lon
+
+  console.log("[BACKEND LOCATION TRACE] GET /api/locations/reverse received", { lat, lng, ip: req.ip })
+
+  const parsedLat = parseFloat(lat)
+  const parsedLng = parseFloat(lng)
+
+  if (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLng) || parsedLat < -90 || parsedLat > 90 || parsedLng < -180 || parsedLng > 180) {
+    return res.status(400).json({ message: "Valid numeric lat and lng parameters are required" })
+  }
+
+  try {
+    const url = `${SURFSYNC_BASE}/reverse?lat=${lat}&lng=${lng}`
+    const response = await fetch(url, {
+      headers: { "X-API-Key": SURFSYNC_API_KEY }
+    })
+
+    if (!response.ok) {
+      console.warn("[BACKEND LOCATION TRACE] SurfSync service returned status:", response.status)
+      return res.status(response.status).json({ message: "SurfSync location service unavailable" })
+    }
+
+    const data = await response.json()
+    console.log("[BACKEND LOCATION TRACE] Reverse result:", {
+      city: data.city,
+      address: data.formattedAddress || data.displayName,
+      raw: data
+    })
+    res.json(data)
+  } catch (error) {
+    console.error("SurfSync reverse geocode error:", error)
+    res.status(500).json({ message: "Failed to reverse geocode location" })
+  }
+})
+
+router.get("/search", async (req, res) => {
+  const q = req.query.q?.trim()
+  if (!q) {
+    return res.status(400).json({ message: "Query parameter q is required" })
+  }
+
+  try {
+    const url = new URL(`${SURFSYNC_BASE}/search`)
+    url.searchParams.append("q", q)
+    if (req.query.state) url.searchParams.append("state", req.query.state)
+    if (req.query.limit) url.searchParams.append("limit", req.query.limit)
+
+    const response = await fetch(url.toString(), {
+      headers: { "X-API-Key": SURFSYNC_API_KEY }
+    })
+
+    if (!response.ok) {
+      return res.status(response.status).json({ message: "Search service unavailable" })
+    }
+
+    const data = await response.json()
+    res.json(data)
+  } catch (error) {
+    console.error("SurfSync location search error:", error)
+    res.status(500).json({ message: "Failed to search location" })
+  }
+})
+
 router.get("/detect", async (req, res) => {
   const lat = parseFloat(req.query.lat)
-  const lng = parseFloat(req.query.lng)
+  const lng = parseFloat(req.query.lng || req.query.lon)
 
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
     return res.status(400).json({ message: "lat and lng are required" })
   }
 
   try {
-    const geoRes = await fetch(
-      `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`
-    )
+    const url = `${SURFSYNC_BASE}/reverse?lat=${lat}&lng=${lng}`
+    const geoRes = await fetch(url, {
+      headers: { "X-API-Key": SURFSYNC_API_KEY }
+    })
     const geo = await geoRes.json().catch(() => ({}))
 
-    if (!geoRes.ok) {
-      return res.status(502).json({ message: "Could not resolve location" })
-    }
-
-    const rawCity = geo.city || geo.locality || geo.localityInfo?.administrative?.[2]?.name || ""
-    const rawState = geo.principalSubdivision || ""
-    const rawStateCode = geo.principalSubdivisionCode || ""
-
-    const states = await getStates()
-    const stateMatch = matchState(states, rawState, rawStateCode)
-
-    let city = rawCity
-    if (stateMatch?.iso2 && rawCity) {
-      const cities = await surfSyncRequest("/cities", { state: stateMatch.iso2 })
-      const cityMatch =
-        cities.find((c) => c.name?.toLowerCase() === rawCity.toLowerCase()) ||
-        cities.find((c) => c.name?.toLowerCase().includes(rawCity.toLowerCase())) ||
-        cities[0]
-      if (cityMatch?.name) city = cityMatch.name
-    }
+    const city = geo.city || geo.suburb || geo.district || ""
+    const state = geo.state || ""
 
     res.json({
-      state: stateMatch?.name || rawState,
-      stateCode: stateMatch?.iso2 || rawStateCode.replace(/^IN-/i, "") || null,
+      state,
+      stateCode: geo.countryCode || null,
       city,
+      formattedAddress: geo.formattedAddress || geo.displayName || ""
     })
   } catch (error) {
     console.error("Location detect error:", error)
-    res.status(error.status || 500).json({ message: error.message || "Failed to detect location" })
+    res.status(500).json({ message: "Failed to detect location" })
   }
 })
 

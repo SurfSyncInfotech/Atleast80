@@ -1,0 +1,25 @@
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@300;400;500;600;700;800&family=Poppins:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .font-poppins {
+    font-family: 'Poppins', sans-serif !important;
+  }
+  .font-nunito {
+    font-family: 'Nunito', sans-serif !important;
+  }
+}
+
+:root {
+  --font-display: 'Poppins', 'Nunito', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Remove default web browser focus outlines from input and textarea elements globally */
+input:focus, textarea:focus {
+  outline: none !important;
+  box-shadow: none !important;
+}

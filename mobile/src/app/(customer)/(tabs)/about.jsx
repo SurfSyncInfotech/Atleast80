@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { View, Text, ScrollView, TouchableOpacity, Image, Platform, Linking } from "react-native"
 import { useRouter } from "expo-router"
 import { SafeAreaView } from "react-native-safe-area-context"
@@ -8,6 +8,7 @@ import {
   ArrowLeft, ChevronRight
 } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
+import { getContactSettings } from "../../../lib/api"
 
 const stats = [
   { icon: ChefHat, label: "Home Kitchens", value: "500+", colors: ["#3B82F6", "#4F46E5"] },
@@ -33,17 +34,33 @@ const pillars = [
 export default function AboutScreen() {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState("story")
+  const [supportPhone, setSupportPhone] = useState("+91 40 3559 4439")
+  const [supportEmail, setSupportEmail] = useState("contact@elifelo.com")
+  const [supportAddress, setSupportAddress] = useState("Maharashtra, India")
+
+  useEffect(() => {
+    getContactSettings()
+      .then((data) => {
+        if (data?.supportPhone) setSupportPhone(data.supportPhone)
+        if (data?.supportEmail) setSupportEmail(data.supportEmail)
+        if (data?.supportAddress) setSupportAddress(data.supportAddress)
+      })
+      .catch((err) => {
+        console.log("Failed to fetch contact settings in About:", err)
+      })
+  }, [])
 
   const handleCall = () => {
-    Linking.openURL("tel:+919876543210").catch(err => console.log("Failed to call", err))
+    const cleanNum = supportPhone.replace(/[^0-9+]/g, "")
+    Linking.openURL(`tel:${cleanNum}`).catch(err => console.log("Failed to call", err))
   }
 
   const handleEmail = () => {
-    Linking.openURL("mailto:hello@atleast80.com").catch(err => console.log("Failed to email", err))
+    Linking.openURL(`mailto:${supportEmail}`).catch(err => console.log("Failed to email", err))
   }
 
   const handleMap = () => {
-    Linking.openURL("https://maps.google.com/?q=India").catch(err => console.log("Failed to open maps", err))
+    Linking.openURL(`https://maps.google.com/?q=${encodeURIComponent(supportAddress || "India")}`).catch(err => console.log("Failed to open maps", err))
   }
 
   return (
@@ -158,7 +175,7 @@ export default function AboutScreen() {
             </View>
 
             {/* Pillars */}
-            <View className="bg-white rounded-2xl border border-gray-light/35 p-4 mb-5 shadow-sm">
+            <View className="bg-white rounded-2xl border border-gray-light/35 p-4 shadow-sm">
               <Text className="font-poppins font-bold text-xs text-dark mb-3">Our Platform Pillars</Text>
               {pillars.map((item, index) => (
                 <View key={index} className="flex-row items-start gap-2.5 mb-2.5">
@@ -166,40 +183,6 @@ export default function AboutScreen() {
                   <Text className="font-nunito text-xs text-dark flex-1 leading-relaxed">{item}</Text>
                 </View>
               ))}
-            </View>
-
-            {/* Mission banner */}
-            <View className="relative rounded-2xl overflow-hidden min-h-[220px] justify-center bg-primary p-5 shadow-sm">
-              <Image
-                source={require("../../../../assets/images/indianwomen.png")}
-                style={{ position: "absolute", left: 0, right: 0, top: 0, bottom: 0, width: "100%", height: "100%", opacity: 0.25, borderRadius: 20 }}
-                resizeMode="cover"
-              />
-              <LinearGradient
-                colors={["rgba(11, 107, 58, 0.95)", "rgba(11, 107, 58, 0.70)"]}
-                style={{ position: "absolute", left: 0, right: 0, top: 0, bottom: 0, width: "100%", height: "100%" }}
-              />
-              <View className="relative z-10">
-                <Text className="font-poppins font-bold text-white text-base">Our Mission</Text>
-                <Text className="font-nunito text-white/85 text-xs mt-2 leading-relaxed">
-                  Make homemade food and daily ration accessible to every household in India — while empowering home kitchens to build sustainable, dignified livelihoods.
-                </Text>
-                <View className="flex-row gap-3 mt-5">
-                  <TouchableOpacity
-                    onPress={() => router.replace("/(customer)/search")}
-                    className="bg-white px-4 py-2 rounded-xl flex-row items-center gap-1 shadow-sm"
-                  >
-                    <Text className="text-primary font-poppins font-bold text-xs">Discover</Text>
-                    <ArrowRight size={11} color="#0B6B3A" strokeWidth={2.5} />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => router.replace("/(kitchen)/signup")}
-                    className="bg-white/15 border border-white/25 px-4 py-2 rounded-xl"
-                  >
-                    <Text className="text-white font-poppins font-bold text-xs">Register Kitchen</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
             </View>
           </View>
         )}
@@ -326,11 +309,11 @@ export default function AboutScreen() {
                     <Phone size={20} color="#0B6B3A" />
                   </View>
                   <Text style={{ fontSize: 11, fontFamily: "Poppins", fontWeight: "bold", color: "#1F1F1F", marginTop: 8 }}>Call Us</Text>
-                  <Text style={{ fontSize: 8, fontFamily: "Nunito", color: "#7A7A7A", marginTop: 2 }}>+91 98765 43210</Text>
+                  <Text style={{ fontSize: 8, fontFamily: "Nunito", color: "#7A7A7A", marginTop: 2 }} numberOfLines={1}>{supportPhone}</Text>
                 </TouchableOpacity>
 
                 {/* Email Button */}
-                <TouchableOpacity onPress={handleEmail} activeOpacity={0.8} style={{ alignItems: "center" }}>
+                <TouchableOpacity onPress={handleEmail} activeOpacity={0.8} style={{ alignItems: "center", maxWidth: 120 }}>
                   <View style={{
                     width: 50,
                     height: 50,
@@ -344,11 +327,11 @@ export default function AboutScreen() {
                     <Mail size={20} color="#2563EB" />
                   </View>
                   <Text style={{ fontSize: 11, fontFamily: "Poppins", fontWeight: "bold", color: "#1F1F1F", marginTop: 8 }}>Email Us</Text>
-                  <Text style={{ fontSize: 8, fontFamily: "Nunito", color: "#7A7A7A", marginTop: 2 }}>hello@atleast80.com</Text>
+                  <Text style={{ fontSize: 8, fontFamily: "Nunito", color: "#7A7A7A", marginTop: 2 }} numberOfLines={1}>{supportEmail}</Text>
                 </TouchableOpacity>
 
                 {/* Map Button */}
-                <TouchableOpacity onPress={handleMap} activeOpacity={0.8} style={{ alignItems: "center" }}>
+                <TouchableOpacity onPress={handleMap} activeOpacity={0.8} style={{ alignItems: "center", maxWidth: 100 }}>
                   <View style={{
                     width: 50,
                     height: 50,
@@ -362,7 +345,7 @@ export default function AboutScreen() {
                     <MapPin size={20} color="#D97706" />
                   </View>
                   <Text style={{ fontSize: 11, fontFamily: "Poppins", fontWeight: "bold", color: "#1F1F1F", marginTop: 8 }}>Locate Us</Text>
-                  <Text style={{ fontSize: 8, fontFamily: "Nunito", color: "#7A7A7A", marginTop: 2 }}>Maharashtra, India</Text>
+                  <Text style={{ fontSize: 8, fontFamily: "Nunito", color: "#7A7A7A", marginTop: 2 }} numberOfLines={1}>{supportAddress}</Text>
                 </TouchableOpacity>
               </View>
             </View>

@@ -106,10 +106,9 @@ export default function RescueDetailsScreen() {
   }
 
   const deliveryAddress = [user?.address, user?.city, user?.pincode].filter(Boolean).join(", ") || "Address not set"
-  const originalDeliveryFee = 30.00
-  const itemTotal = Number(order.itemTotal || 0)
-  const packingFee = Number(order.packingFee || 0)
-  const grandTotal = itemTotal + packingFee
+  const originalGrandTotal = Number(order.grandTotal || order.itemTotal || 0)
+  const deliveryDiscount = 30.00
+  const grandTotal = Math.max(0, originalGrandTotal - deliveryDiscount)
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#F9FAFC" }}>
@@ -176,25 +175,20 @@ export default function RescueDetailsScreen() {
           <Text style={{ fontSize: 14, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins", borderBottomWidth: 1, borderBottomColor: "#F5F5F5", paddingBottom: 8 }}>Payment Details</Text>
           
           <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-            <Text style={{ fontSize: 13, color: "#7A7A7A", fontFamily: "Nunito" }}>Items Total</Text>
-            <Text style={{ fontSize: 13, fontWeight: "600", color: "#1F1F1F", fontFamily: "Nunito" }}>₹{itemTotal}</Text>
-          </View>
-
-          <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-            <Text style={{ fontSize: 13, color: "#7A7A7A", fontFamily: "Nunito" }}>Packing Charges</Text>
-            <Text style={{ fontSize: 13, fontWeight: "600", color: "#1F1F1F", fontFamily: "Nunito" }}>₹{packingFee}</Text>
+            <Text style={{ fontSize: 13, color: "#7A7A7A", fontFamily: "Nunito" }}>Original Order Amount</Text>
+            <Text style={{ fontSize: 13, fontWeight: "600", color: "#1F1F1F", fontFamily: "Nunito" }}>₹{originalGrandTotal}</Text>
           </View>
 
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-            <Text style={{ fontSize: 13, color: "#7A7A7A", fontFamily: "Nunito" }}>Delivery Partner Fee</Text>
+            <Text style={{ fontSize: 13, color: "#7A7A7A", fontFamily: "Nunito" }}>Food Rescue Free Delivery Discount</Text>
             <View style={{ flexDirection: "row", gap: 6, alignItems: "center" }}>
-              <Text style={{ fontSize: 12, color: "#EF4444", textDecorationLine: "line-through", fontFamily: "Nunito" }}>₹{originalDeliveryFee}</Text>
-              <Text style={{ fontSize: 13, fontWeight: "bold", color: "#0B6B3A", fontFamily: "Nunito" }}>FREE</Text>
+              <Text style={{ fontSize: 12, color: "#EF4444", textDecorationLine: "line-through", fontFamily: "Nunito" }}>₹30</Text>
+              <Text style={{ fontSize: 13, fontWeight: "bold", color: "#0B6B3A", fontFamily: "Nunito" }}>-₹30 (FREE)</Text>
             </View>
           </View>
 
           <View style={{ flexDirection: "row", justifyContent: "space-between", borderTopWidth: 1, borderTopColor: "#F5F5F5", paddingTop: 10 }}>
-            <Text style={{ fontSize: 15, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>Grand Total</Text>
+            <Text style={{ fontSize: 15, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>Grand Total Payable</Text>
             <Text style={{ fontSize: 16, fontWeight: "bold", color: "#0B6B3A", fontFamily: "Poppins" }}>₹{grandTotal}</Text>
           </View>
         </View>

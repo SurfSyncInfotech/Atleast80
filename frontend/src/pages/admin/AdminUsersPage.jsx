@@ -53,9 +53,11 @@ export default function AdminUsersPage() {
   const [statusTarget, setStatusTarget] = useState(null) // { user, nextStatus }
   const [error, setError] = useState("")
 
-  const loadData = useCallback(async () => {
-    setLoading(true)
-    setError("")
+  const loadData = useCallback(async (showSpinner = true) => {
+    if (showSpinner) {
+      setLoading(true)
+      setError("")
+    }
     try {
       const params = new URLSearchParams({
         page: String(page),
@@ -70,16 +72,25 @@ export default function AdminUsersPage() {
       setPagination(data.pagination || { total: 0, page: 1, limit: pageSize, totalPages: 1 })
     } catch (err) {
       console.error(err)
-      setUsers([])
-      setError(err.message || "Failed to load users list")
+      if (showSpinner) {
+        setUsers([])
+        setError(err.message || "Failed to load users list")
+      }
     } finally {
-      setLoading(false)
+      if (showSpinner) setLoading(false)
     }
   }, [page, pageSize, search, statusFilter, activeTab])
 
   useEffect(() => {
-    loadData()
+    loadData(true)
   }, [loadData])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!deleteTarget && !statusTarget && !actionId) loadData(false)
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [loadData, deleteTarget, statusTarget, actionId])
 
   // Reset page when search or tab changes
   useEffect(() => {

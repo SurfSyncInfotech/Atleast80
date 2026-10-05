@@ -24,8 +24,10 @@ import {
 import Button from "../../components/ui/Button"
 import PasswordInput from "../../components/ui/PasswordInput"
 import StateCitySelect from "../../components/common/StateCitySelect"
+import LocationMapModal from "../../components/common/LocationMapModal"
 import { useAuth } from "../../context/AuthContext"
-import { getPartnerAgreement } from "../../lib/api"
+import { api, getPartnerAgreement } from "../../lib/api"
+import { validateBrowserLocation } from "../../lib/locationPreference"
 import { cn } from "../../lib/utils"
 
 const initialForm = {
@@ -65,7 +67,6 @@ export default function KitchenSignupPage() {
   const navigate = useNavigate()
   const { registerKitchen, verifyKitchenRegisterOtp, logoutKitchen } = useAuth()
   const [form, setForm] = useState(initialForm)
-  const [identifierType, setIdentifierType] = useState("phone")
   const [fssaiLicenseFile, setFssaiLicenseFile] = useState(null)
   const [step, setStep] = useState(1)
   const [error, setError] = useState("")
@@ -90,6 +91,16 @@ export default function KitchenSignupPage() {
   const [agreementAccepted, setAgreementAccepted] = useState(false)
   const [agreementViewed, setAgreementViewed] = useState(false)
   const [videoWatched, setVideoWatched] = useState(false)
+  const [pdfModalOpen, setPdfModalOpen] = useState(false)
+  const [pdfScrolledToBottom, setPdfScrolledToBottom] = useState(false)
+  const videoRef = useRef(null)
+
+  const handlePdfScroll = (e) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.target
+    if (scrollHeight - scrollTop <= clientHeight + 40) {
+      setPdfScrolledToBottom(true)
+    }
+  }
 
   const update = (field) => (e) => setForm({ ...form, [field]: e.target.value })
 
@@ -103,23 +114,31 @@ export default function KitchenSignupPage() {
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         try {
+          const validation = validateBrowserLocation(pos)
+          if (!validation.valid) {
+            setError(`Browser location is too coarse (~${Math.round((validation.accuracy || 0)/1000)} km). Please pick location on map or enter manually.`)
+            setDetectingLocation(false)
+            return
+          }
+
           const { latitude, longitude } = pos.coords
-          const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`,
-            { headers: { "User-Agent": "Atleast80Web/1.0" } }
-          )
-          const data = await res.json()
-          if (data?.address) {
-            const addr = data.address
-            const rawState = addr.state || ""
-            const rawCity = addr.city || addr.town || addr.village || addr.county || ""
+          console.trace("[REVERSE GEOCODE CALLED]", {
+            latitude,
+            longitude,
+            caller: "KitchenSignupPage.handleAutoDetectLocation"
+          })
+          const data = await api(`/api/locations/reverse?lat=${latitude}&lng=${longitude}`)
+          if (data) {
+            const addr = data.address || {}
+            const rawState = data.state || addr.state || ""
+            const rawCity = data.city || data.suburb || data.district || addr.city || addr.town || addr.village || addr.county || ""
             const state = rawState ? rawState.charAt(0).toUpperCase() + rawState.slice(1) : ""
             const city = rawCity ? rawCity.charAt(0).toUpperCase() + rawCity.slice(1) : ""
-            const road = addr.road || addr.suburb || addr.neighbourhood || ""
+            const road = data.suburb || addr.road || addr.suburb || addr.neighbourhood || ""
             const houseNumber = addr.house_number || ""
-            const postcode = addr.postcode || ""
+            const postcode = data.postcode || addr.postcode || ""
 
-            let streetAddress = [houseNumber, road].filter(Boolean).join(", ")
+            let streetAddress = data.formattedAddress || data.displayName || [houseNumber, road].filter(Boolean).join(", ")
             if (!streetAddress && data.display_name) {
               streetAddress = data.display_name.split(",").slice(0, 2).map((s) => s.trim()).join(", ")
             }
@@ -140,17 +159,35 @@ export default function KitchenSignupPage() {
           setDetectingLocation(false)
         }
       },
-      () => {
-        setError("Location permission denied. Please allow access or fill manually.")
+      (err) => {
+        if (err.code === 1) {
+          setError("Location permission denied. Please allow access or fill manually.")
+        } else if (err.code === 2) {
+          setError("Position unavailable. Please pick location on map or enter manually.")
+        } else if (err.code === 3) {
+          setError("Location detection timed out. Please pick location on map or enter manually.")
+        } else {
+          setError("Could not detect location. Please fill manually.")
+        }
         setDetectingLocation(false)
       },
-      { timeout: 12000, maximumAge: 300000, enableHighAccuracy: false }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     )
   }
 
-  const switchIdentifierType = (type) => {
-    setIdentifierType(type)
-    setForm((f) => ({ ...f, email: type === "email" ? f.email : "", phone: type === "phone" ? f.phone : "" }))
+  const [isMapModalOpen, setIsMapModalOpen] = useState(false)
+  const handleConfirmMapLocation = (data) => {
+    if (!data) return
+    const { address, city, state, pincode, latitude, longitude } = data
+    setForm((f) => ({
+      ...f,
+      address: address || f.address,
+      state: state || f.state,
+      city: city || f.city,
+      pincode: pincode || f.pincode,
+      latitude: latitude || f.latitude,
+      longitude: longitude || f.longitude
+    }))
   }
 
   const loadAgreement = async () => {
@@ -179,13 +216,16 @@ export default function KitchenSignupPage() {
       }
     }
     if (step === 2) {
-      const identifierValue = identifierType === "email" ? form.email.trim() : form.phone.trim()
-      if (!identifierValue || !form.password || !fssaiLicenseFile) {
-        setError(`${identifierType === "email" ? "Email" : "Phone"}, password, and FSSAI license upload are required`)
+      if (!form.phone.trim() || !form.email.trim() || !form.password || !fssaiLicenseFile) {
+        setError("Phone number, email address, password, and FSSAI license upload are required")
         return false
       }
-      if (identifierType === "phone" && form.phone.length !== 10) {
+      if (form.phone.trim().length !== 10) {
         setError("Phone number must be 10 digits")
+        return false
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+        setError("Please enter a valid email address")
         return false
       }
       if (form.password.length < 6) {
@@ -550,60 +590,26 @@ export default function KitchenSignupPage() {
                       title="Create your account"
                       subtitle="You'll use these credentials to manage your kitchen"
                     />
-                    <div>
-                      <label className="font-poppins text-sm font-medium text-dark-light block mb-2">
-                        Register with <span className="text-accent">*</span>
-                      </label>
-                      <div className="flex gap-2 mb-3">
-                        <button
-                          type="button"
-                          onClick={() => switchIdentifierType("phone")}
-                          className={cn(
-                            "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border font-poppins text-sm font-medium transition-colors",
-                            identifierType === "phone"
-                              ? "bg-primary text-white border-primary"
-                              : "bg-white border-gray-light text-gray hover:border-primary/40"
-                          )}
-                        >
-                          <Phone size={15} /> Phone
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => switchIdentifierType("email")}
-                          className={cn(
-                            "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border font-poppins text-sm font-medium transition-colors",
-                            identifierType === "email"
-                              ? "bg-primary text-white border-primary"
-                              : "bg-white border-gray-light text-gray hover:border-primary/40"
-                          )}
-                        >
-                          <Mail size={15} /> Email
-                        </button>
-                      </div>
-                      {identifierType === "phone" ? (
-                        <Field label="Phone" required icon={Phone}>
-                          <input
-                            className={inputClass}
-                            value={form.phone}
-                            onChange={update("phone")}
-                            placeholder="10-digit mobile number"
-                            maxLength={10}
-                            required
-                          />
-                        </Field>
-                      ) : (
-                        <Field label="Email" required icon={Mail}>
-                          <input
-                            type="email"
-                            className={inputClass}
-                            value={form.email}
-                            onChange={update("email")}
-                            placeholder="kitchen@example.com"
-                            required
-                          />
-                        </Field>
-                      )}
-                    </div>
+                    <Field label="Phone Number" required icon={Phone}>
+                      <input
+                        className={inputClass}
+                        value={form.phone}
+                        onChange={update("phone")}
+                        placeholder="10-digit mobile number"
+                        maxLength={10}
+                        required
+                      />
+                    </Field>
+                    <Field label="Email Address" required icon={Mail}>
+                      <input
+                        type="email"
+                        className={inputClass}
+                        value={form.email}
+                        onChange={update("email")}
+                        placeholder="kitchen@example.com"
+                        required
+                      />
+                    </Field>
                     <div>
                       <label className="font-poppins text-sm font-medium text-dark-light block mb-2">
                         Password <span className="text-accent">*</span>
@@ -663,6 +669,17 @@ export default function KitchenSignupPage() {
                       title="Location & kitchen details"
                       subtitle="Customers and admin will verify this information"
                     />
+
+                    {/* Map Pin Button */}
+                    <button
+                      type="button"
+                      onClick={() => setIsMapModalOpen(true)}
+                      className="w-full flex items-center justify-center gap-2 bg-[#0B6B3A] text-white py-3 px-4 rounded-xl font-poppins font-bold text-xs hover:bg-primary-dark transition-colors shadow-sm"
+                    >
+                      <MapPin size={15} />
+                      Pin / Pick Location on Map
+                    </button>
+
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <label className="font-poppins text-sm font-medium text-dark-light">
@@ -746,7 +763,8 @@ export default function KitchenSignupPage() {
                         <SummaryRow label="Speciality" value={form.speciality} />
                         <SummaryRow label="Signature Dish" value={form.bestItem} />
                         <SummaryRow label="FSSAI" value={fssaiLicenseFile?.name || "Not uploaded"} />
-                        <SummaryRow label="Contact" value={identifierType === "email" ? form.email : form.phone} />
+                        <SummaryRow label="Phone" value={form.phone} />
+                        <SummaryRow label="Email" value={form.email} />
                         <SummaryRow label="Location" value={`${form.address}, ${form.city}, ${form.state} - ${form.pincode}`} />
                         <SummaryRow label="Hours" value={form.openingTime} />
                       </div>
@@ -790,13 +808,12 @@ export default function KitchenSignupPage() {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  window.open(agreement.url, "_blank");
-                                  setAgreementViewed(true);
-                                  setError("");
+                                  setPdfModalOpen(true)
+                                  setError("")
                                 }}
                                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-primary text-primary font-poppins text-xs font-semibold hover:bg-primary/5 transition-colors cursor-pointer"
                               >
-                                <FileText size={14} /> Open Partner Agreement PDF
+                                <FileText size={14} /> Open & Scroll Partner Agreement PDF
                               </button>
                               {agreementViewed ? (
                                 <span className="text-xs text-primary font-poppins font-semibold bg-primary/10 px-2.5 py-1 rounded-full">
@@ -804,7 +821,7 @@ export default function KitchenSignupPage() {
                                 </span>
                               ) : (
                                 <span className="text-xs text-amber-600 font-poppins font-semibold bg-amber-50 px-2.5 py-1 rounded-full border border-amber-100">
-                                  Required
+                                  Required (Scroll to end)
                                 </span>
                               )}
                             </div>
@@ -818,40 +835,40 @@ export default function KitchenSignupPage() {
                                 Watch Mandatory Training Video
                               </h3>
                               <p className="font-nunito text-xs text-gray">
-                                Learn about our hygiene standards, delivery process, and dashboard management tools.
+                                Learn about our hygiene standards, delivery process, and dashboard management tools. Must watch till end.
                               </p>
 
                               <div className="rounded-xl overflow-hidden bg-black max-w-[480px]">
                                 <video
+                                  ref={videoRef}
                                   src={agreement.videoUrl}
                                   controls
-                                  onPlay={() => {
-                                    setVideoWatched(true);
-                                    setError("");
+                                  onEnded={() => {
+                                    setVideoWatched(true)
+                                    setError("")
+                                  }}
+                                  onTimeUpdate={(e) => {
+                                    const v = e.target
+                                    if (v.duration && v.currentTime >= v.duration - 0.8) {
+                                      setVideoWatched(true)
+                                      setError("")
+                                    }
                                   }}
                                   className="w-full h-auto max-h-[260px]"
                                 />
                               </div>
 
                               <div className="flex items-center gap-3">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    window.open(agreement.videoUrl, "_blank");
-                                    setVideoWatched(true);
-                                    setError("");
-                                  }}
-                                  className="inline-flex items-center gap-2 text-xs text-gray font-nunito hover:underline"
-                                >
-                                  Open video in new tab
-                                </button>
+                                <span className="text-xs text-gray font-nunito italic">
+                                  Must watch video to completion to get tick
+                                </span>
                                 {videoWatched ? (
                                   <span className="text-xs text-primary font-poppins font-semibold bg-primary/10 px-2.5 py-1 rounded-full">
                                     ✓ Watched
                                   </span>
                                 ) : (
                                   <span className="text-xs text-amber-600 font-poppins font-semibold bg-amber-50 px-2.5 py-1 rounded-full border border-amber-100">
-                                    Required
+                                    Required (Watch till end)
                                   </span>
                                 )}
                               </div>
@@ -1154,6 +1171,83 @@ export default function KitchenSignupPage() {
           </div>
         </div>
       )}
+      {/* PDF Viewer Modal */}
+      {pdfModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-3xl shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between pb-4 border-b border-gray-100">
+              <div>
+                <h3 className="font-poppins font-bold text-lg text-dark">Partner Agreement Document</h3>
+                <p className="font-nunito text-xs text-gray mt-0.5">
+                  Please scroll to the very bottom of the document to unlock confirmation.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPdfModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray hover:text-dark hover:bg-gray-200 transition-colors cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Scrollable Container */}
+            <div
+              onScroll={handlePdfScroll}
+              className="flex-1 overflow-y-auto my-4 border border-gray-200 rounded-2xl p-4 bg-gray-50 space-y-4"
+              style={{ maxHeight: "60vh" }}
+            >
+              <iframe
+                src={agreement?.url}
+                title="Partner Agreement PDF"
+                className="w-full h-[700px] rounded-xl border border-gray-200 bg-white shadow-sm"
+              />
+              <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-center">
+                <p className="font-poppins font-semibold text-xs text-emerald-800">
+                  ✓ You have reached the end of the Partner Agreement
+                </p>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between pt-3 border-t border-gray-100">
+              <span className="font-nunito text-xs text-gray">
+                {pdfScrolledToBottom ? "✓ Document fully reviewed" : "Scroll to bottom of box to unlock button"}
+              </span>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setPdfModalOpen(false)}
+                  className="px-5 py-2.5 bg-gray-100 rounded-xl font-poppins font-semibold text-xs text-gray-700 hover:bg-gray-200 transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  disabled={!pdfScrolledToBottom}
+                  onClick={() => {
+                    setAgreementViewed(true)
+                    setPdfModalOpen(false)
+                    setError("")
+                  }}
+                  className="px-5 py-2.5 bg-primary text-white rounded-xl font-poppins font-semibold text-xs hover:bg-primary-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                >
+                  Confirm & Mark as Reviewed
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Location Map Modal */}
+      <LocationMapModal
+        isOpen={isMapModalOpen}
+        onClose={() => setIsMapModalOpen(false)}
+        onConfirmLocation={handleConfirmMapLocation}
+        initialAddress={form.address}
+        initialCity={form.city}
+        initialState={form.state}
+      />
     </div>
   )
 }

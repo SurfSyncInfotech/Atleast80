@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { X, ChevronLeft, ChevronRight, Plus, Minus, Play } from "lucide-react"
+import { X, ChevronLeft, ChevronRight, Plus, Minus, Play, ShoppingBag } from "lucide-react"
+import { useNavigate } from "react-router-dom"
 import { useCart } from "../../context/CartContext"
 import { resolveMediaUrl } from "../../lib/media"
 import { cn } from "../../lib/utils"
@@ -9,8 +10,24 @@ const PLACEHOLDER =
   "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=800&h=600&fit=crop"
 
 export default function MenuItemDetailModal({ item, onClose, adminView = false }) {
+  const navigate = useNavigate()
   const { addItem, removeItem, getItemQty } = useCart()
   const [activeImage, setActiveImage] = useState(0)
+
+  const handleBuyNow = () => {
+    if (!item) return
+    const qty = getItemQty(item.id)
+    if (qty === 0) {
+      const added = addItem(item)
+      if (added !== false) {
+        onClose?.()
+        navigate("/checkout")
+      }
+    } else {
+      onClose?.()
+      navigate("/checkout")
+    }
+  }
 
   useEffect(() => {
     if (item) setActiveImage(0)
@@ -39,6 +56,7 @@ export default function MenuItemDetailModal({ item, onClose, adminView = false }
   const approvalStatus = item?.approvalStatus || item?.approval_status
   const adminComment = item?.reviewComment || item?.review_comment
   const kitchenLabel = item?.kitchen || item?.kitchen_name
+  const isAvailable = item?.is_available !== false && item?.is_available !== 0 && item?.isAvailable !== false && item?.isAvailable !== 0
 
   const prevImage = () => setActiveImage((i) => (i === 0 ? displayImages.length - 1 : i - 1))
   const nextImage = () => setActiveImage((i) => (i === displayImages.length - 1 ? 0 : i + 1))
@@ -246,37 +264,67 @@ export default function MenuItemDetailModal({ item, onClose, adminView = false }
             )}
           </div>
 
-          {/* Footer — price + add to cart */}
-          <div className="flex-shrink-0 border-t border-gray-100 p-4 sm:p-5 bg-white flex items-center justify-between gap-4">
-            <p className="font-poppins font-bold text-dark text-xl">₹{Number(item.price)}</p>
-            {!adminView && (
-              qty > 0 ? (
-                <div className="flex items-center gap-3 bg-primary/10 border border-primary/20 rounded-xl px-3 py-2">
-                  <button
-                    onClick={() => removeItem(item.id)}
-                    className="text-primary cursor-pointer p-1"
-                    aria-label="Decrease quantity"
-                  >
-                    <Minus size={18} />
-                  </button>
-                  <span className="font-poppins font-bold text-primary text-base min-w-[20px] text-center">
-                    {qty}
+          {/* Footer — price + add to cart & buy now */}
+          <div className="flex-shrink-0 border-t border-gray-100 p-4 sm:p-5 bg-white flex items-center justify-between gap-3">
+            <div>
+              {item.discountPercent && item.offerPrice ? (
+                <div className="flex flex-col">
+                  <div className="flex items-center gap-2">
+                    <span className="font-poppins font-bold text-primary text-xl">₹{Number(item.offerPrice)}</span>
+                    <span className="font-poppins text-gray-400 line-through text-sm">₹{Number(item.originalPrice || item.price)}</span>
+                  </div>
+                  <span className="text-[10px] font-poppins font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded w-fit mt-0.5">
+                    🎉 {item.discountPercent}% OFF {item.festivalOfferTitle ? `(${item.festivalOfferTitle})` : ""}
                   </span>
-                  <button
-                    onClick={() => addItem(item)}
-                    className="text-primary cursor-pointer p-1"
-                    aria-label="Increase quantity"
-                  >
-                    <Plus size={18} />
-                  </button>
                 </div>
               ) : (
-                <button
-                  onClick={() => addItem(item)}
-                  className="bg-primary text-white font-poppins font-semibold text-sm px-6 py-2.5 rounded-xl hover:bg-primary-dark transition-colors cursor-pointer"
-                >
-                  Add to cart
-                </button>
+                <p className="font-poppins font-bold text-dark text-xl">₹{Number(item.price)}</p>
+              )}
+            </div>
+            {!adminView && (
+              !isAvailable ? (
+                <div className="bg-red-50 text-red-700 font-poppins font-bold text-xs sm:text-sm px-4 py-2.5 rounded-xl border border-red-200 cursor-not-allowed flex items-center gap-1.5">
+                  Currently Unavailable
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  {qty > 0 ? (
+                    <div className="flex items-center gap-2 bg-primary/10 border border-primary/20 rounded-xl px-2.5 py-1.5">
+                      <button
+                        onClick={() => removeItem(item.id)}
+                        className="text-primary cursor-pointer p-1"
+                        aria-label="Decrease quantity"
+                      >
+                        <Minus size={16} />
+                      </button>
+                      <span className="font-poppins font-bold text-primary text-sm min-w-[18px] text-center">
+                        {qty}
+                      </span>
+                      <button
+                        onClick={() => addItem(item)}
+                        className="text-primary cursor-pointer p-1"
+                        aria-label="Increase quantity"
+                      >
+                        <Plus size={16} />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => addItem(item)}
+                      className="bg-white border border-primary/30 text-primary font-poppins font-bold text-xs sm:text-sm px-4 py-2.5 rounded-xl hover:bg-primary/5 transition-colors cursor-pointer"
+                    >
+                      Add to cart
+                    </button>
+                  )}
+
+                  <button
+                    onClick={handleBuyNow}
+                    className="bg-primary text-white font-poppins font-bold text-xs sm:text-sm px-4 sm:px-5 py-2.5 rounded-xl hover:bg-primary-dark transition-all cursor-pointer shadow-md flex items-center gap-1.5"
+                  >
+                    <ShoppingBag size={15} />
+                    Buy Now
+                  </button>
+                </div>
               )
             )}
           </div>

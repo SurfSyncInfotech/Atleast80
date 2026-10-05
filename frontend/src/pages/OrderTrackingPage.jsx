@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { motion } from "framer-motion"
-import { ArrowLeft, CheckCircle, ChefHat, Bike, Home, Star, Clock, Check, Phone } from "lucide-react"
+import { motion, AnimatePresence } from "framer-motion"
+import { ArrowLeft, CheckCircle, ChefHat, Bike, Home, Star, Clock, Check, Phone, AlertTriangle } from "lucide-react"
 import Button from "../components/ui/Button"
 import { api } from "../lib/api"
 import { resolveMediaUrl } from "../lib/media"
@@ -162,17 +162,44 @@ export default function OrderTrackingPage() {
     return () => clearInterval(interval)
   }, [order, loadOrder])
 
-  const handleCancelOrder = async () => {
-    if (!window.confirm("Are you sure you want to cancel this order?")) return
+  const [cancelModalOpen, setCancelModalOpen] = useState(false)
+  const [cancelSuccessMsg, setCancelSuccessMsg] = useState("")
+
+  const openCancelModal = () => {
+    setCancelSuccessMsg("")
+    setCancelModalOpen(true)
+  }
+
+  const confirmCancelOrder = async () => {
     setCancelling(true)
     try {
       const data = await api(`/api/orders/${order.id}/cancel`, {
         method: "PATCH",
       })
       setOrder(data.order)
-      alert("Order cancelled successfully")
+
+      const isOutForDelivery = order.status === "out_for_delivery"
+      const isOnline = ["online", "upi", "razorpay"].includes(order.paymentMethod)
+      const deliveryFee = Number(order.deliveryFee) > 0 ? Number(order.deliveryFee) : 30
+      const refundAmt = Math.max(0, Number(order.grandTotal) - deliveryFee)
+
+      let successMsg = ""
+      if (isOutForDelivery) {
+        if (isOnline) {
+          successMsg = `Your order has been cancelled. Note: ₹${deliveryFee} delivery charge is non-refundable for rider trip. The remaining ₹${refundAmt} will be refunded to your account within 24-48 hours.`
+        } else {
+          successMsg = `Your order has been cancelled. Advance ₹${deliveryFee} delivery charge is non-refundable for rider trip.`
+        }
+      } else if (isOnline) {
+        successMsg = `Your order has been cancelled. Your full payment of ₹${order.grandTotal} will be refunded to your account within 24-48 hours.`
+      } else {
+        successMsg = `Your order has been cancelled. Your ₹30 advance delivery charge will be refunded to your account within 24-48 hours.`
+      }
+
+      setCancelSuccessMsg(successMsg)
     } catch (err) {
       alert(err.message || "Failed to cancel order")
+      setCancelModalOpen(false)
     } finally {
       setCancelling(false)
     }
@@ -251,6 +278,38 @@ export default function OrderTrackingPage() {
           </motion.div>
         )}
 
+        {/* Doorstep Cancellation OTP Card */}
+        {(order.cancellationOtp || order.cancellation_otp) && order.status !== "cancelled" && (
+          <div className="bg-red-50 border border-red-200 rounded-[24px] p-5 text-center shadow-xs space-y-2">
+            <h4 className="font-poppins font-bold text-xs text-red-700 uppercase tracking-wider">
+              🔑 Doorstep Cancellation OTP
+            </h4>
+            <div className="font-poppins font-black text-3xl text-red-600 tracking-widest">
+              {order.cancellationOtp || order.cancellation_otp}
+            </div>
+            <p className="font-nunito text-xs text-red-800 leading-relaxed max-w-md mx-auto">
+              {["online", "upi", "razorpay"].includes(order.paymentMethod)
+                ? `Doorstep cancellation requested. Note: ₹30 delivery fee is non-refundable for rider trip, and ₹${Math.max(0, Number(order.grandTotal) - 30)} will be refunded to your account within 24-48 hours. Share this OTP with rider to confirm:`
+                : "Doorstep cancellation requested. Note: ₹30 advance delivery fee is non-refundable for rider trip. Share this OTP with rider to confirm:"}
+            </p>
+          </div>
+        )}
+
+        {/* Delivery Verification OTP Card */}
+        {order.deliveryOtp && order.status !== "delivered" && order.status !== "cancelled" && (
+          <div className="bg-[#EAF7EE] border border-[#D6EAE7] rounded-[24px] p-4 px-5 flex items-center justify-between shadow-xs">
+            <div>
+              <h4 className="font-poppins font-bold text-xs text-[#0B6B3A]">Delivery Verification OTP</h4>
+              <p className="font-nunito text-[11px] text-gray-600 mt-0.5">Share this code with the rider at your door</p>
+            </div>
+            <div className="bg-white border-2 border-[#0B6B3A] rounded-xl px-4 py-1.5 shadow-xs">
+              <span className="font-poppins font-extrabold text-lg text-[#0B6B3A] tracking-wider">
+                {order.deliveryOtp}
+              </span>
+            </div>
+          </div>
+        )}
+
         {!isCancelled && (
           <div className="bg-white rounded-[24px] p-5 shadow-sm border border-gray-100">
             <h3 className="font-poppins font-bold text-dark text-base mb-6">Order Status</h3>
@@ -268,7 +327,7 @@ export default function OrderTrackingPage() {
                         className={cn(
                           "absolute left-[17px] top-[36px] w-[2px] z-0",
                           "h-[calc(100%+12px)]",
-                          isCompleted ? "bg-[#0B6B3A]" : "bg-gray-200"
+                          done ? "bg-[#0B6B3A]" : "bg-gray-200"
                         )}
                       />
                     )}
@@ -277,13 +336,17 @@ export default function OrderTrackingPage() {
                     <div
                       className={cn(
                         "w-9 h-9 rounded-xl flex items-center justify-center z-10 flex-shrink-0 transition-all",
-                        isCompleted ? "bg-[#0B6B3A] text-white" : active ? "bg-white border-2 border-[#0B6B3A]" : "bg-[#FAF6F0]"
+                        done ? "bg-[#0B6B3A] text-white" : "bg-[#FAF6F0]"
                       )}
                     >
-                      {isCompleted ? (
-                        <Check size={14} className="stroke-[3]" />
+                      {done ? (
+                        active ? (
+                          <Icon size={14} className="stroke-[2.5]" />
+                        ) : (
+                          <Check size={14} className="stroke-[3]" />
+                        )
                       ) : (
-                        <Icon size={14} className={active ? "text-[#0B6B3A]" : "text-[#8D7355]"} />
+                        <Icon size={14} className="text-[#8D7355]" />
                       )}
                     </div>
 
@@ -292,7 +355,9 @@ export default function OrderTrackingPage() {
                       className={cn(
                         "flex-1 border rounded-[20px] p-3 flex items-center justify-between transition-all",
                         active
-                          ? "bg-[#EAF7EE] border-[#D6EAE7]"
+                          ? "bg-[#EAF7EE] border-[#0B6B3A] border-2 shadow-sm"
+                          : done
+                          ? "bg-[#F0FDF4] border-[#DCFCE7]"
                           : "bg-[#FAF6F0] border-[#EADEC9]"
                       )}
                     >
@@ -313,26 +378,15 @@ export default function OrderTrackingPage() {
                         >
                           {step.desc}
                         </p>
-                        {active && (
-                          <span className="inline-block mt-2 bg-[#0B6B3A] text-white text-[9px] font-poppins font-bold px-2 py-0.5 rounded-lg">
-                            In Progress
-                          </span>
-                        )}
                       </div>
-                      <div
-                        className={cn(
-                          "w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0",
-                          isCompleted || active ? "bg-[#EADEC9]" : "bg-gray-200"
-                        )}
-                      >
-                        <Check
-                          size={10}
-                          className={cn(
-                            "stroke-[3]",
-                            isCompleted || active ? "text-[#8D7355]" : "text-gray-400"
-                          )}
-                        />
-                      </div>
+
+                      {active ? (
+                        <span className="bg-[#0B6B3A] text-white text-[10px] font-poppins font-bold px-2.5 py-1 rounded-lg shrink-0">
+                          {step.id === "out_for_delivery" ? "ON THE WAY" : "IN PROGRESS"}
+                        </span>
+                      ) : done ? (
+                        <Check size={16} className="text-[#0B6B3A] stroke-[2.5] shrink-0" />
+                      ) : null}
                     </div>
                   </div>
                 )
@@ -380,9 +434,23 @@ export default function OrderTrackingPage() {
               </div>
             ))}
           </div>
-          <div className="border-t border-gray-100 mt-4 pt-3 flex justify-between font-poppins font-bold text-dark text-base">
-            <span>Total</span>
-            <span>₹{order.grandTotal}</span>
+          <div className="border-t border-gray-100 mt-4 pt-3 space-y-2 text-sm font-nunito">
+            <div className="flex justify-between text-gray-600">
+              <span>Item Total</span>
+              <span className="font-semibold text-dark">₹{order.itemTotal}</span>
+            </div>
+            <div className="flex justify-between text-gray-600">
+              <span>Taxes & GST</span>
+              <span className="font-semibold text-dark">₹{order.gstAmount !== undefined && order.gstAmount !== null ? order.gstAmount : Number((order.itemTotal * 0.05).toFixed(2))}</span>
+            </div>
+            <div className="flex justify-between text-gray-600">
+              <span>Delivery Fee</span>
+              <span className="font-semibold text-dark">{order.deliveryFee === 0 ? "Free" : `₹${order.deliveryFee}`}</span>
+            </div>
+            <div className="border-t border-gray-100 pt-2.5 flex justify-between font-poppins font-bold text-dark text-base">
+              <span>Grand Total</span>
+              <span className="text-primary">₹{order.grandTotal}</span>
+            </div>
           </div>
         </div>
 
@@ -420,21 +488,106 @@ export default function OrderTrackingPage() {
           onReviewSubmitted={(review) => setOrder((o) => ({ ...o, review }))}
         />
 
-        {["pending", "confirmed", "preparing"].includes(order.status) && (
+        {["pending", "confirmed", "preparing", "out_for_delivery"].includes(order.status) && (
           <Button
             variant="outline"
-            className="w-full text-red-600 border-red-200 hover:bg-red-50 hover:border-red-300"
-            onClick={handleCancelOrder}
+            className="w-full text-red-600 border-red-200 hover:bg-red-50 hover:border-red-300 font-poppins font-bold rounded-full py-3"
+            onClick={openCancelModal}
             disabled={cancelling}
           >
             {cancelling ? "Cancelling..." : "Cancel Order"}
           </Button>
         )}
 
-        <Button variant="outline" className="w-full" onClick={() => navigate("/home")}>
+        <Button variant="outline" className="w-full font-poppins font-bold rounded-full py-3" onClick={() => navigate("/home")}>
           Back to Home
         </Button>
       </div>
+
+      {/* Custom Refund & Cancellation Modal */}
+      <AnimatePresence>
+        {cancelModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-[28px] p-6 max-w-sm w-full shadow-2xl text-center"
+            >
+              {cancelSuccessMsg ? (
+                <div>
+                  <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
+                    <CheckCircle className="w-8 h-8 text-emerald-600" />
+                  </div>
+                  <h3 className="font-poppins font-bold text-lg text-dark">
+                    Order Cancelled 🛑
+                  </h3>
+                  <p className="font-nunito text-sm text-gray-600 mt-2 leading-relaxed">
+                    {cancelSuccessMsg}
+                  </p>
+                  <button
+                    onClick={() => {
+                      setCancelModalOpen(false)
+                      setCancelSuccessMsg("")
+                    }}
+                    className="mt-6 w-full py-3 bg-[#0B6B3A] text-white rounded-full font-poppins font-bold text-sm hover:bg-[#09572e] transition-colors cursor-pointer"
+                  >
+                    OK, Got It
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+                    <AlertTriangle className="w-8 h-8 text-red-600" />
+                  </div>
+                  <h3 className="font-poppins font-bold text-lg text-dark">
+                    {order?.status === "out_for_delivery" ? "Cancel In-Transit Order?" : "Cancel Order?"}
+                  </h3>
+                  <p className="font-nunito text-sm text-gray-600 mt-2 leading-relaxed">
+                    {(() => {
+                      const isOutForDelivery = order?.status === "out_for_delivery"
+                      const isOnline = ["online", "upi", "razorpay"].includes(order?.paymentMethod)
+                      const deliveryFee = Number(order?.deliveryFee) > 0 ? Number(order?.deliveryFee) : 30
+                      const refundAmt = Math.max(0, Number(order?.grandTotal || 0) - deliveryFee)
+
+                      if (isOutForDelivery) {
+                        if (isOnline) {
+                          return `Since the order is out for delivery, ₹${deliveryFee} delivery fee is non-refundable for rider trip. Your remaining ₹${refundAmt} will be refunded within 24-48 hours.`
+                        }
+                        return `Since the order is out for delivery, your advance ₹${deliveryFee} delivery fee is non-refundable to cover rider trip expenses.`
+                      }
+
+                      if (isOnline) {
+                        return `Are you sure you want to cancel? Your full payment of ₹${order?.grandTotal} will be refunded within 24-48 hours.`
+                      }
+
+                      return `Are you sure you want to cancel? Your ₹30 advance delivery charge will be refunded within 24-48 hours.`
+                    })()}
+                  </p>
+
+                  <div className="mt-6 space-y-2.5">
+                    <button
+                      onClick={confirmCancelOrder}
+                      disabled={cancelling}
+                      className="w-full py-3 bg-red-600 text-white rounded-full font-poppins font-bold text-sm hover:bg-red-700 transition-colors disabled:opacity-50 cursor-pointer"
+                    >
+                      {cancelling ? "Cancelling..." : "Yes, Cancel Order"}
+                    </button>
+
+                    <button
+                      onClick={() => setCancelModalOpen(false)}
+                      disabled={cancelling}
+                      className="w-full py-3 bg-gray-100 text-gray-700 rounded-full font-poppins font-bold text-sm hover:bg-gray-200 transition-colors disabled:opacity-50 cursor-pointer"
+                    >
+                      Keep Order
+                    </button>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

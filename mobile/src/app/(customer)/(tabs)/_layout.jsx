@@ -1,6 +1,7 @@
 import { Tabs } from "expo-router"
 import { Home, Compass, ChefHat, Clipboard, User } from "lucide-react-native"
 import { View, Text, Platform } from "react-native"
+import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useAuth } from "../../../context/AuthContext"
 
 function initials(name) {
@@ -9,6 +10,7 @@ function initials(name) {
 
 export default function CustomerTabsLayout() {
   const { isCustomer, user } = useAuth()
+  const insets = useSafeAreaInsets()
 
   return (
     <Tabs
@@ -19,8 +21,8 @@ export default function CustomerTabsLayout() {
         tabBarStyle: {
           backgroundColor: "#FFFFFF",
           borderTopWidth: 0,
-          height: Platform.OS === "ios" ? 88 : 72,
-          paddingBottom: Platform.OS === "ios" ? 28 : 12,
+          height: Platform.OS === "ios" ? 88 : Platform.OS === "web" ? 70 : Math.max(68, 60 + insets.bottom),
+          paddingBottom: Platform.OS === "ios" ? 28 : Platform.OS === "web" ? 12 : Math.max(8, insets.bottom + 4),
           paddingTop: 8,
           ...Platform.select({
             web: {
@@ -39,7 +41,7 @@ export default function CustomerTabsLayout() {
           fontFamily: "Nunito",
           fontSize: 10,
           fontWeight: "600",
-          marginBottom: Platform.OS === "web" ? 2 : 0,
+          marginBottom: 0,
         },
       }}
     >

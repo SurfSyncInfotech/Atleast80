@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import {
   Wallet,
   CreditCard,
@@ -14,6 +14,7 @@ import {
   Calendar,
   Settings,
   AlertCircle,
+  AlertTriangle,
   Building2,
   Bike,
   Check,
@@ -21,11 +22,18 @@ import {
   FileSpreadsheet,
   IndianRupee,
   ShieldCheck,
-  ChevronRight
+  ChevronRight,
+  Copy
 } from "lucide-react"
 import AdminLayout from "../../components/layout/AdminLayout"
 import { api } from "../../lib/api"
 import { cn } from "../../lib/utils"
+
+function formatCurrency(val) {
+  if (val === null || val === undefined || isNaN(Number(val))) return "0"
+  const num = Number(val)
+  return Number(num.toFixed(2)).toString()
+}
 
 export default function AdminPaymentsPage() {
   const [activeTab, setActiveTab] = useState("overview")
@@ -37,13 +45,20 @@ export default function AdminPaymentsPage() {
   const [loadingTxns, setLoadingTxns] = useState(false)
   const [txnSearch, setTxnSearch] = useState("")
   const [txnMethod, setTxnMethod] = useState("all")
+  const [txnKitchenId, setTxnKitchenId] = useState("all")
   const [txnPage, setTxnPage] = useState(1)
   const [txnTotalPages, setTxnTotalPages] = useState(1)
+  const [kitchensList, setKitchensList] = useState([])
 
   // Remittances State
   const [remittances, setRemittances] = useState([])
   const [loadingRemittances, setLoadingRemittances] = useState(false)
   const [verifyingId, setVerifyingId] = useState(null)
+
+  // Refunds State
+  const [refundsList, setRefundsList] = useState([])
+  const [loadingRefunds, setLoadingRefunds] = useState(false)
+  const [updatingRefundId, setUpdatingRefundId] = useState(null)
 
   // Settlements State
   const [settlementsData, setSettlementsData] = useState({ kitchenPayouts: [], riderPayouts: [], settlementsHistory: [] })
@@ -59,66 +74,125 @@ export default function AdminPaymentsPage() {
   const [savingSettings, setSavingSettings] = useState(false)
   const [settingsSuccess, setSettingsSuccess] = useState("")
 
-  const loadSummary = async () => {
-    setLoadingSummary(true)
+  const loadSummary = async (silent = false) => {
+    if (!silent) setLoadingSummary(true)
     try {
       const data = await api("/api/admin/payments/summary")
       setSummary(data.summary)
-      setKitchenFreq(data.summary.kitchenPayoutFrequency || "weekly")
-      setRiderFreq(data.summary.riderPayoutFrequency || "weekly")
+      if (!silent) {
+        setKitchenFreq(data.summary.kitchenPayoutFrequency || "weekly")
+        setRiderFreq(data.summary.riderPayoutFrequency || "weekly")
+      }
     } catch (err) {
       console.error("Failed to load summary:", err)
     } finally {
-      setLoadingSummary(false)
+      if (!silent) setLoadingSummary(false)
     }
   }
 
-  const loadTransactions = async () => {
-    setLoadingTxns(true)
+  const loadKitchensList = async () => {
     try {
-      const data = await api(`/api/admin/payments/transactions?page=${txnPage}&search=${encodeURIComponent(txnSearch)}&method=${txnMethod}`)
+      const data = await api("/api/admin/kitchens?status=approved&limit=200")
+      setKitchensList(data.kitchens || [])
+    } catch (err) {
+      console.error("Failed to load kitchens list:", err)
+    }
+  }
+
+  const loadTransactions = async (silent = false) => {
+    if (!silent) setLoadingTxns(true)
+    try {
+      const kitchenParam = txnKitchenId !== "all" ? `&kitchenId=${txnKitchenId}` : ""
+      const data = await api(`/api/admin/payments/transactions?page=${txnPage}&search=${encodeURIComponent(txnSearch)}&method=${txnMethod}${kitchenParam}`)
       setTransactions(data.transactions || [])
       setTxnTotalPages(data.pagination?.totalPages || 1)
     } catch (err) {
       console.error("Failed to load transactions:", err)
     } finally {
-      setLoadingTxns(false)
+      if (!silent) setLoadingTxns(false)
     }
   }
 
-  const loadRemittances = async () => {
-    setLoadingRemittances(true)
+  const loadRemittances = async (silent = false) => {
+    if (!silent) setLoadingRemittances(true)
     try {
       const data = await api("/api/admin/payments/remittances")
       setRemittances(data.remittances || [])
     } catch (err) {
       console.error("Failed to load remittances:", err)
     } finally {
-      setLoadingRemittances(false)
+      if (!silent) setLoadingRemittances(false)
     }
   }
 
-  const loadSettlements = async () => {
-    setLoadingSettlements(true)
+  const loadSettlements = async (silent = false) => {
+    if (!silent) setLoadingSettlements(true)
     try {
       const data = await api("/api/admin/payments/settlements")
       setSettlementsData(data)
     } catch (err) {
       console.error("Failed to load settlements:", err)
     } finally {
-      setLoadingSettlements(false)
+      if (!silent) setLoadingSettlements(false)
+    }
+  }
+
+  const loadRefunds = async (silent = false) => {
+    if (!silent) setLoadingRefunds(true)
+    try {
+      const data = await api("/api/admin/payments/refunds")
+      setRefundsList(data.refunds || [])
+    } catch (err) {
+      console.error("Failed to load refunds:", err)
+    } finally {
+      if (!silent) setLoadingRefunds(false)
+    }
+  }
+
+  const handleMarkRefunded = async (orderId) => {
+    if (!window.confirm("Process Razorpay Auto-Refund for this cancelled order?")) return
+    setUpdatingRefundId(orderId)
+    try {
+      const res = await api(`/api/admin/payments/refunds/${orderId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ refundStatus: "refunded" })
+      })
+      alert(`Refund Processed Successfully! ₹${res.refundAmount || ''} has been refunded to customer & notification sent.`)
+      await loadRefunds()
+    } catch (err) {
+      alert(err.message || "Failed to update refund status")
+    } finally {
+      setUpdatingRefundId(null)
     }
   }
 
   useEffect(() => {
     loadSummary()
+    loadKitchensList()
   }, [])
 
   useEffect(() => {
     if (activeTab === "overview") loadTransactions()
     if (activeTab === "remittances") loadRemittances()
     if (activeTab === "settlements") loadSettlements()
-  }, [activeTab, txnPage, txnMethod])
+    if (activeTab === "refunds") loadRefunds()
+  }, [activeTab, txnPage, txnMethod, txnKitchenId])
+
+  const pollPaymentsRef = useRef(() => {})
+  pollPaymentsRef.current = () => {
+    if (payModal.open || verifyingId || updatingRefundId || submittingPay || savingSettings) return
+    loadSummary(true)
+    loadKitchensList()
+    if (activeTab === "overview") loadTransactions(true)
+    if (activeTab === "remittances") loadRemittances(true)
+    if (activeTab === "settlements") loadSettlements(true)
+    if (activeTab === "refunds") loadRefunds(true)
+  }
+
+  useEffect(() => {
+    const interval = setInterval(() => pollPaymentsRef.current(), 3000)
+    return () => clearInterval(interval)
+  }, [])
 
   const handleVerifyRemittance = async (id, status) => {
     let rejectionReason = ""
@@ -172,7 +246,9 @@ export default function AdminPaymentsPage() {
           entityId: isKitchen ? item.kitchenId : item.riderId,
           periodType: isKitchen ? kitchenFreq : riderFreq,
           grossAmount: isKitchen ? item.grossSales : item.totalDeliveryFees,
+          gstDeductions: isKitchen ? item.gstDeduction : 0,
           commissionDeductions: isKitchen ? item.commissionDeduction : 0,
+          riderFeeDeductions: isKitchen ? item.riderFeeDeduction : 0,
           netPayout: item.netPayout,
           utrNumber: utrNumber.trim(),
           notes: payNotes.trim() || undefined,
@@ -186,6 +262,54 @@ export default function AdminPaymentsPage() {
       await loadSummary()
     } catch (err) {
       alert(err.message || "Failed to record payout")
+    } finally {
+      setSubmittingPay(false)
+    }
+  }
+
+  const handleRazorpayXPayout = async () => {
+    if (!payModal.item) return
+    const isKitchen = payModal.type === "kitchen"
+    const item = payModal.item
+    const entityName = isKitchen ? item.kitchenName : item.riderName
+    const isBank = item.payoutMode === "bank"
+    const isMissingDetails = isBank
+      ? (!item.bankAccountNumber || !item.bankIfsc)
+      : (!item.upiId)
+
+    if (isMissingDetails) {
+      alert(`Cannot execute Instant Pay: ${entityName} has not provided required ${isBank ? "Bank Account details (Account Number & IFSC Code)" : "UPI ID / VPA"}. Please ask partner to update payout details.`)
+      return
+    }
+
+    const confirmPay = window.confirm(`Execute instant RazorpayX payout of ₹${item.netPayout} to ${entityName}?`)
+    if (!confirmPay) return
+
+    setSubmittingPay(true)
+    try {
+      const data = await api("/api/admin/payments/settlements/razorpayx-pay", {
+        method: "POST",
+        body: JSON.stringify({
+          entityType: payModal.type,
+          entityId: isKitchen ? item.kitchenId : item.riderId,
+          periodType: isKitchen ? kitchenFreq : riderFreq,
+          grossAmount: isKitchen ? item.grossSales : item.totalDeliveryFees,
+          gstDeductions: isKitchen ? item.gstDeduction : 0,
+          commissionDeductions: isKitchen ? item.commissionDeduction : 0,
+          riderFeeDeductions: isKitchen ? item.riderFeeDeduction : 0,
+          netPayout: item.netPayout,
+          notes: payNotes.trim() || undefined,
+        }),
+      })
+
+      alert(data.message + ` (UTR: ${data.utrNumber})`)
+      setPayModal({ open: false, item: null, type: null })
+      setUtrNumber("")
+      setPayNotes("")
+      await loadSettlements()
+      await loadSummary()
+    } catch (err) {
+      alert(err.message || "Failed to execute RazorpayX instant payout")
     } finally {
       setSubmittingPay(false)
     }
@@ -324,6 +448,7 @@ export default function AdminPaymentsPage() {
             { id: "overview", label: "Transactions & Audit Log", icon: CreditCard },
             { id: "remittances", label: "Rider EOD Cash Remittances", icon: Banknote, badge: summary?.pendingRemittancesCount },
             { id: "settlements", label: "Kitchen & Rider Settlements", icon: Wallet },
+            { id: "refunds", label: "Refund Pending / Cancelled Orders", icon: RefreshCw },
             { id: "settings", label: "Settlement Settings", icon: Settings },
           ].map((tab) => {
             const Icon = tab.icon
@@ -372,6 +497,21 @@ export default function AdminPaymentsPage() {
                     className="w-full pl-9 pr-3 py-2 rounded-xl border border-gray-200 font-nunito text-xs focus:outline-none focus:border-primary bg-white"
                   />
                 </div>
+                {/* Kitchen Filter */}
+                <select
+                  value={txnKitchenId}
+                  onChange={(e) => {
+                    setTxnKitchenId(e.target.value)
+                    setTxnPage(1)
+                  }}
+                  className="px-3 py-2 rounded-xl border border-gray-200 font-nunito text-xs bg-white text-dark focus:outline-none min-w-[150px]"
+                >
+                  <option value="all">All Kitchens</option>
+                  {kitchensList.map((k) => (
+                    <option key={k.id} value={k.id}>{k.name}</option>
+                  ))}
+                </select>
+                {/* Payment Method Filter */}
                 <select
                   value={txnMethod}
                   onChange={(e) => {
@@ -433,7 +573,9 @@ export default function AdminPaymentsPage() {
                             {t.paymentMethod === "online" ? "UPI Online" : "COD Cash"}
                           </span>
                         </td>
-                        <td className="py-3.5 px-4 font-poppins font-bold text-sm text-primary">₹{t.grandTotal}</td>
+                        <td className="py-3.5 px-4 font-poppins font-bold text-xs text-primary">
+                          {t.displayPaymentStatus || `₹${t.grandTotal}`}
+                        </td>
                         <td className="py-3.5 px-4 text-gray">{t.createdAt ? new Date(t.createdAt).toLocaleString("en-IN") : "—"}</td>
                       </tr>
                     ))}
@@ -545,7 +687,7 @@ export default function AdminPaymentsPage() {
                   <h2 className="font-poppins font-bold text-lg text-dark flex items-center gap-2">
                     <Building2 size={20} className="text-primary" /> Kitchen Payout Settlements ({kitchenFreq.toUpperCase()})
                   </h2>
-                  <p className="font-nunito text-xs text-gray">Net payout after 10% platform commission and Rider delivery fee deduction.</p>
+                  <p className="font-nunito text-xs text-gray">Net payout after deducting GST (18%), platform commission (0% 6-Mo Promo), and Rider delivery fee.</p>
                 </div>
               </div>
 
@@ -561,8 +703,10 @@ export default function AdminPaymentsPage() {
                         <th className="py-3 px-4">Kitchen</th>
                         <th className="py-3 px-4">City</th>
                         <th className="py-3 px-4">Owner Contact</th>
+                        <th className="py-3 px-4">Payout Method</th>
                         <th className="py-3 px-4">Gross Sales</th>
-                        <th className="py-3 px-4">Comm. (10%)</th>
+                        <th className="py-3 px-4">GST (18%)</th>
+                        <th className="py-3 px-4">Platform Fee</th>
                         <th className="py-3 px-4">Rider Fee</th>
                         <th className="py-3 px-4">Net Payable Payout</th>
                         <th className="py-3 px-4 text-right">Action</th>
@@ -577,10 +721,37 @@ export default function AdminPaymentsPage() {
                             <p className="font-semibold text-dark">{k.ownerName}</p>
                             <p className="text-gray text-[11px]">{k.ownerPhone}</p>
                           </td>
-                          <td className="py-3.5 px-4 font-poppins font-bold text-dark">₹{k.grossSales}</td>
-                          <td className="py-3.5 px-4 font-poppins font-semibold text-red-600">-₹{k.commissionDeduction}</td>
-                          <td className="py-3.5 px-4 font-poppins font-semibold text-red-600">-₹{k.riderFeeDeduction || 0}</td>
-                          <td className="py-3.5 px-4 font-poppins font-bold text-emerald-700 text-sm">₹{k.netPayout}</td>
+                          <td className="py-3.5 px-4">
+                            {k.payoutMode === "bank" ? (
+                              <div className="space-y-0.5">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-poppins font-bold text-[10px]">
+                                  <Building2 size={10} /> Bank Account
+                                </span>
+                                <p className="font-mono text-[11px] font-semibold text-dark truncate max-w-[150px]">{k.bankAccountNumber || "N/A"}</p>
+                                <p className="text-gray text-[10px] uppercase font-mono">{k.bankIfsc}</p>
+                              </div>
+                            ) : (
+                              <div className="space-y-0.5">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-poppins font-bold text-[10px]">
+                                  <Wallet size={10} /> Instant UPI
+                                </span>
+                                <p className="font-mono text-[11px] font-semibold text-dark truncate max-w-[150px]">{k.upiId || "N/A"}</p>
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 font-poppins font-bold text-dark">₹{formatCurrency(k.grossSales)}</td>
+                          <td className="py-3.5 px-4 font-poppins font-semibold text-amber-700">-₹{formatCurrency(k.gstDeduction)}</td>
+                          <td className="py-3.5 px-4 font-poppins font-semibold">
+                            {k.isPromoActive ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-poppins font-bold text-[10px]">
+                                0% (6-Mo Free)
+                              </span>
+                            ) : (
+                              <span className="text-red-600">-₹{formatCurrency(k.commissionDeduction)}</span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 font-poppins font-semibold text-red-600">-₹{formatCurrency(k.riderFeeDeduction || 0)}</td>
+                          <td className="py-3.5 px-4 font-poppins font-bold text-emerald-700 text-sm">₹{formatCurrency(k.netPayout)}</td>
                           <td className="py-3.5 px-4 text-right">
                             {k.netPayout > 0 ? (
                               <button
@@ -630,6 +801,7 @@ export default function AdminPaymentsPage() {
                       <tr className="border-b border-gray-100 bg-gray-50/70 text-[11px] font-poppins font-bold text-gray uppercase tracking-wider">
                         <th className="py-3 px-4">Rider</th>
                         <th className="py-3 px-4">Phone</th>
+                        <th className="py-3 px-4">Payout Method</th>
                         <th className="py-3 px-4">Completed Deliveries</th>
                         <th className="py-3 px-4">Delivery Fees Earned</th>
                         <th className="py-3 px-4">Unsettled Cash Holding</th>
@@ -642,10 +814,28 @@ export default function AdminPaymentsPage() {
                         <tr key={r.riderId} className="hover:bg-gray-50/50 transition-colors">
                           <td className="py-3.5 px-4 font-poppins font-bold text-dark">{r.riderName}</td>
                           <td className="py-3.5 px-4 text-gray">{r.riderPhone}</td>
+                          <td className="py-3.5 px-4">
+                            {r.payoutMode === "bank" ? (
+                              <div className="space-y-0.5">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-poppins font-bold text-[10px]">
+                                  <Building2 size={10} /> Bank Account
+                                </span>
+                                <p className="font-mono text-[11px] font-semibold text-dark truncate max-w-[150px]">{r.bankAccountNumber || "N/A"}</p>
+                                <p className="text-gray text-[10px] uppercase font-mono">{r.bankIfsc}</p>
+                              </div>
+                            ) : (
+                              <div className="space-y-0.5">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-poppins font-bold text-[10px]">
+                                  <Wallet size={10} /> Instant UPI
+                                </span>
+                                <p className="font-mono text-[11px] font-semibold text-dark truncate max-w-[150px]">{r.upiId || "N/A"}</p>
+                              </div>
+                            )}
+                          </td>
                           <td className="py-3.5 px-4 font-semibold text-dark">{r.completedDeliveries}</td>
-                          <td className="py-3.5 px-4 font-poppins font-bold text-dark">₹{r.totalDeliveryFees}</td>
+                          <td className="py-3.5 px-4 font-poppins font-bold text-dark">₹{formatCurrency(r.totalDeliveryFees)}</td>
                           <td className="py-3.5 px-4 font-poppins font-semibold text-amber-700">
-                            ₹{r.cashHolding}
+                            ₹{formatCurrency(r.cashHolding)}
                             {r.cashHolding > 0 && (
                               <button
                                 type="button"
@@ -657,7 +847,7 @@ export default function AdminPaymentsPage() {
                               </button>
                             )}
                           </td>
-                          <td className="py-3.5 px-4 font-poppins font-bold text-blue-700 text-sm">₹{r.netPayout}</td>
+                          <td className="py-3.5 px-4 font-poppins font-bold text-blue-700 text-sm">₹{formatCurrency(r.netPayout)}</td>
                           <td className="py-3.5 px-4 text-right">
                             {r.netPayout > 0 ? (
                               <button
@@ -715,9 +905,9 @@ export default function AdminPaymentsPage() {
                               {h.entityType}
                             </span>
                           </td>
-                          <td className="py-3 px-4 text-dark font-semibold">₹{h.grossAmount}</td>
-                          <td className="py-3 px-4 text-red-600">-₹{h.commissionDeductions}</td>
-                          <td className="py-3 px-4 font-poppins font-bold text-emerald-700">₹{h.netPayout}</td>
+                          <td className="py-3 px-4 text-dark font-semibold">₹{formatCurrency(h.grossAmount)}</td>
+                          <td className="py-3 px-4 text-red-600">-₹{formatCurrency((h.commissionDeductions || 0) + (h.gstDeduction || 0) + (h.riderFeeDeduction || 0))}</td>
+                          <td className="py-3 px-4 font-poppins font-bold text-emerald-700">₹{formatCurrency(h.netPayout)}</td>
                           <td className="py-3 px-4 font-mono font-bold text-dark">{h.utrNumber}</td>
                           <td className="py-3 px-4 text-gray">{h.paidAt ? new Date(h.paidAt).toLocaleString("en-IN") : "—"}</td>
                         </tr>
@@ -731,7 +921,106 @@ export default function AdminPaymentsPage() {
         )}
 
         {/* ========================================================= */}
-        {/* TAB 4: SETTLEMENT SETTINGS */}
+        {/* TAB 4: REFUND PENDING / CANCELLED ORDERS */}
+        {/* ========================================================= */}
+        {activeTab === "refunds" && (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden p-5 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+              <div>
+                <h2 className="font-poppins font-bold text-dark text-base flex items-center gap-2">
+                  <RefreshCw size={20} className="text-red-600" />
+                  Pre-Cooking Cancelled Orders — Pending Refunds List
+                </h2>
+                <p className="font-nunito text-xs text-gray mt-0.5">
+                  Orders cancelled BEFORE cooking started. Refund amounts represent advance fees (₹30 for COD) or full amounts (Prepaid) owed to customer.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={loadRefunds}
+                className="px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-dark font-poppins font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                <RefreshCw size={13} className={cn(loadingRefunds && "animate-spin")} />
+                Refresh List
+              </button>
+            </div>
+
+            {loadingRefunds ? (
+              <div className="text-center py-16">
+                <RefreshCw size={24} className="animate-spin text-primary mx-auto mb-2" />
+                <p className="font-nunito text-xs text-gray">Loading pending refunds list...</p>
+              </div>
+            ) : refundsList.length === 0 ? (
+              <div className="text-center py-16 bg-gray-50/50 rounded-xl">
+                <CheckCircle size={36} className="text-emerald-500 mx-auto mb-2" />
+                <p className="font-poppins font-bold text-dark text-sm">No Pending Customer Refunds!</p>
+                <p className="font-nunito text-gray text-xs mt-1">All pre-cooking cancelled orders have been settled/refunded.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-gray-100 bg-gray-50/70 text-[11px] font-poppins font-bold text-gray uppercase tracking-wider">
+                      <th className="py-3 px-4">Order Details</th>
+                      <th className="py-3 px-4">Customer</th>
+                      <th className="py-3 px-4">Kitchen</th>
+                      <th className="py-3 px-4">Method</th>
+                      <th className="py-3 px-4">Amount to Refund</th>
+                      <th className="py-3 px-4">Cancelled Date</th>
+                      <th className="py-3 px-4">Refund Status</th>
+                      <th className="py-3 px-4 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50 font-nunito text-xs text-dark">
+                    {refundsList.map((r) => (
+                      <tr key={r.id} className="hover:bg-gray-50/50 transition-colors">
+                        <td className="py-3.5 px-4 font-poppins font-bold text-dark">{r.orderNumber}</td>
+                        <td className="py-3.5 px-4">
+                          <p className="font-semibold text-dark">{r.customerName}</p>
+                          <p className="text-gray text-[11px]">{r.customerPhone}</p>
+                        </td>
+                        <td className="py-3.5 px-4 text-dark font-medium">{r.kitchenName}</td>
+                        <td className="py-3.5 px-4">
+                          <span className={cn("font-poppins font-bold text-[10px] px-2.5 py-1 rounded-lg uppercase tracking-wide", r.paymentMethod === "online" ? "bg-emerald-100 text-emerald-800 border border-emerald-200" : "bg-amber-100 text-amber-800 border border-amber-200")}>
+                            {r.paymentMethod === "online" ? "UPI Online" : "COD Cash"}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 font-poppins font-bold text-sm text-red-600">
+                          ₹{r.refundAmount} {r.paymentMethod === "cod" && "(Advance)"}
+                        </td>
+                        <td className="py-3.5 px-4 text-gray">{r.cancelDate ? new Date(r.cancelDate).toLocaleString("en-IN") : "—"}</td>
+                        <td className="py-3.5 px-4">
+                          <span className={cn("font-poppins font-bold text-[10px] px-2.5 py-1 rounded-lg uppercase tracking-wide", r.refundStatus === "refunded" ? "bg-emerald-100 text-emerald-800 border border-emerald-200" : "bg-amber-100 text-amber-800 border border-amber-200")}>
+                            {r.refundStatus === "refunded" ? "Refunded" : "Pending Refund"}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          {r.refundStatus !== "refunded" ? (
+                            <button
+                              type="button"
+                              onClick={() => handleMarkRefunded(r.id)}
+                              disabled={updatingRefundId === r.id}
+                              className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-poppins font-bold text-xs hover:bg-emerald-700 cursor-pointer shadow-sm disabled:opacity-50"
+                            >
+                              {updatingRefundId === r.id ? "Updating..." : "Mark Refunded"}
+                            </button>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-gray-100 text-gray-500 font-poppins font-semibold text-xs">
+                              <CheckCircle size={13} className="text-emerald-600" /> Processed
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ========================================================= */}
+        {/* TAB 5: SETTLEMENT SETTINGS */}
         {/* ========================================================= */}
         {activeTab === "settings" && (
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 max-w-2xl space-y-6">
@@ -848,14 +1137,143 @@ export default function AdminPaymentsPage() {
                 <span className="font-poppins font-bold text-2xl text-emerald-700">₹{payModal.item.netPayout}</span>
               </div>
 
+              {/* Recipient Bank / UPI Details Card for Admin Transfer */}
+              <div className="p-4 rounded-xl bg-gray-50 border border-gray-200 space-y-2">
+                <div className="flex items-center justify-between pb-1.5 border-b border-gray-200/60">
+                  <span className="font-poppins font-bold text-xs text-dark flex items-center gap-1.5">
+                    {payModal.item.payoutMode === "bank" ? <Building2 size={14} className="text-blue-600" /> : <Wallet size={14} className="text-emerald-600" />}
+                    Preferred Method: {payModal.item.payoutMode === "bank" ? "Direct Bank Transfer" : "Instant UPI VPA"}
+                  </span>
+                </div>
+
+                {payModal.item.payoutMode === "bank" ? (
+                  <div className="space-y-1.5 text-xs font-nunito">
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray">Account Holder:</span>
+                      <span className="font-semibold text-dark">{payModal.item.bankAccountName || "Not provided"}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray">Bank Name:</span>
+                      <span className="font-semibold text-dark">{payModal.item.bankName || "Not provided"}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray">Account Number:</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono font-bold text-dark">{payModal.item.bankAccountNumber || "N/A"}</span>
+                        {payModal.item.bankAccountNumber && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(payModal.item.bankAccountNumber)
+                              alert("Account Number copied to clipboard!")
+                            }}
+                            className="p-1 text-gray-500 hover:text-primary rounded hover:bg-gray-200 cursor-pointer"
+                            title="Copy Account Number"
+                          >
+                            <Copy size={12} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray">IFSC Code:</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono font-bold uppercase text-dark">{payModal.item.bankIfsc || "N/A"}</span>
+                        {payModal.item.bankIfsc && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(payModal.item.bankIfsc)
+                              alert("IFSC Code copied to clipboard!")
+                            }}
+                            className="p-1 text-gray-500 hover:text-primary rounded hover:bg-gray-200 cursor-pointer"
+                            title="Copy IFSC Code"
+                          >
+                            <Copy size={12} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 text-xs font-nunito">
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray">Primary UPI ID / VPA:</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono font-bold text-dark">{payModal.item.upiId || "Not provided"}</span>
+                        {payModal.item.upiId && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(payModal.item.upiId)
+                              alert("UPI ID copied to clipboard!")
+                            }}
+                            className="p-1 text-gray-500 hover:text-primary rounded hover:bg-gray-200 cursor-pointer"
+                            title="Copy UPI ID"
+                          >
+                            <Copy size={12} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* RazorpayX Instant Transfer Button */}
+              {(() => {
+                const item = payModal.item
+                const isBank = item.payoutMode === "bank"
+                const isMissingDetails = isBank
+                  ? (!item.bankAccountNumber || !item.bankIfsc)
+                  : (!item.upiId)
+
+                return (
+                  <div className="pt-1 border-t border-gray-100">
+                    {isMissingDetails && (
+                      <div className="mb-3 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-nunito flex items-center gap-2">
+                        <AlertTriangle size={16} className="text-amber-600 flex-shrink-0" />
+                        <span>
+                          <strong>Payout Details Missing:</strong> Partner has not provided required {isBank ? "Bank Account Number / IFSC Code" : "UPI ID / VPA"}. Instant Pay is disabled.
+                        </span>
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={handleRazorpayXPayout}
+                      disabled={submittingPay || isMissingDetails}
+                      className={cn(
+                        "w-full py-3 rounded-xl font-poppins font-bold text-sm shadow-md flex items-center justify-center gap-2 transition-all",
+                        isMissingDetails
+                          ? "bg-gray-200 text-gray-400 cursor-not-allowed border border-gray-300 shadow-none opacity-80"
+                          : "bg-gradient-to-r from-blue-600 to-indigo-700 text-white hover:from-blue-700 hover:to-indigo-800 cursor-pointer disabled:opacity-50"
+                      )}
+                    >
+                      <Wallet size={16} /> {submittingPay ? "Executing Payout..." : isMissingDetails ? "Instant Pay Unavailable (Details Missing)" : "🚀 Instant Pay via RazorpayX"}
+                    </button>
+                    {!isMissingDetails && (
+                      <p className="font-nunito text-[11px] text-gray text-center mt-1">
+                        Transfers ₹{item.netPayout} directly to {isBank ? "Bank Account" : "UPI ID"} via RazorpayX.
+                      </p>
+                    )}
+                  </div>
+                )
+              })()}
+
+              <div className="relative flex py-1 items-center">
+                <div className="flex-grow border-t border-gray-200"></div>
+                <span className="flex-shrink mx-3 font-poppins font-bold text-[10px] text-gray uppercase tracking-wider">or Record Manual Transfer</span>
+                <div className="flex-grow border-t border-gray-200"></div>
+              </div>
+
               <div>
-                <label className="font-nunito text-xs font-semibold text-dark block mb-1">Transaction UTR / Reference No. <span className="text-red-500">*</span></label>
+                <label className="font-nunito text-xs font-semibold text-dark block mb-1">Transaction UTR / Reference No.</label>
                 <input
                   type="text"
                   value={utrNumber}
                   onChange={(e) => setUtrNumber(e.target.value)}
                   placeholder="e.g. 329182749102"
-                  required
                   className="w-full px-4 py-2.5 rounded-xl border border-gray-200 font-mono font-bold text-dark text-sm focus:outline-none focus:border-primary bg-white"
                 />
               </div>
@@ -882,9 +1300,9 @@ export default function AdminPaymentsPage() {
                 <button
                   type="submit"
                   disabled={submittingPay}
-                  className="flex-1 px-4 py-2.5 rounded-xl bg-primary text-white font-poppins font-semibold text-sm hover:bg-primary-dark cursor-pointer disabled:opacity-50"
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-gray-900 text-white font-poppins font-semibold text-sm hover:bg-black cursor-pointer disabled:opacity-50"
                 >
-                  {submittingPay ? "Recording..." : "Confirm & Save Payout"}
+                  {submittingPay ? "Saving..." : "Save Manual UTR"}
                 </button>
               </div>
             </form>

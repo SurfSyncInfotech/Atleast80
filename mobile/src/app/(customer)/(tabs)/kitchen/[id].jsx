@@ -1,24 +1,44 @@
 import { useState, useEffect, useRef } from "react"
-import { View, Text, ScrollView, Image, TouchableOpacity, ActivityIndicator, Platform, Linking, Modal, TextInput, Pressable, Alert, KeyboardAvoidingView } from "react-native"
+import { View, Text, ScrollView, Image, TouchableOpacity, ActivityIndicator, Platform, Linking, Modal, TextInput, Pressable, Alert, Keyboard, useWindowDimensions, KeyboardAvoidingView } from "react-native"
 import { useLocalSearchParams, useRouter } from "expo-router"
 import { SafeAreaView } from "react-native-safe-area-context"
-import { ArrowLeft, Star, ShieldCheck, Clock, Share2, MapPin, Phone, UtensilsCrossed, ShoppingBag, Sparkles, X, ChefHat, ArrowRight, ClipboardList, CheckCircle, MessageSquare, Send, RotateCw } from "lucide-react-native"
+import { ArrowLeft, Star, ShieldCheck, Clock, Share2, MapPin, Phone, UtensilsCrossed, ShoppingBag, Sparkles, X, ChefHat, ArrowRight, ClipboardList, CheckCircle, MessageSquare, Send, RotateCw, ChevronLeft, ChevronRight } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import MenuListItem from "../../../../components/common/MenuListItem"
 import MenuItemDetailModal from "../../../../components/common/MenuItemDetailModal"
+import FloatingCart from "../../../../components/common/FloatingCart"
 import { useCart } from "../../../../context/CartContext"
 import { useAuth } from "../../../../context/AuthContext"
 import { api } from "../../../../lib/api"
 import { resolveMenuItemMedia, resolveMediaUrl } from "../../../../lib/media"
 import { cn } from "../../../../lib/utils"
 
+import { useVideoPlayer, VideoView } from "expo-video"
+
 const KITCHEN_TYPE = { veg: "Pure Veg", non_veg: "Non-Veg", both: "Veg & Non-Veg" }
 
 const tabs = [
   { id: "food", label: "Food", icon: UtensilsCrossed },
   { id: "grocery", label: "Ration", icon: ShoppingBag },
-  { id: "combo", label: "Combo", icon: Sparkles },
+  { id: "offer", label: "Offer", icon: Sparkles },
+  { id: "hygiene", label: "Check Hygiene", icon: ShieldCheck },
 ]
+
+function HygieneVideoPlayer({ src }) {
+  const player = useVideoPlayer(src, (p) => {
+    if (p) {
+      p.showNowPlayingNotification = false
+      p.staysActiveInBackground = false
+      p.audioMixingMode = "mixWithOthers"
+      p.loop = false
+    }
+  })
+  return (
+    <View className="w-full h-52 rounded-2xl overflow-hidden bg-black border border-emerald-200 mb-3">
+      <VideoView player={player} style={{ width: "100%", height: "100%" }} allowsFullscreen nativeControls />
+    </View>
+  )
+}
 
 function showAlert(title, message) {
   if (Platform.OS === "web") {
@@ -28,18 +48,45 @@ function showAlert(title, message) {
   }
 }
 
+const FESTIVAL_DEFAULT_IMG = require("../../../../../assets/images/festival_offer_default.jpg")
+
+function FestivalOfferThumb({ uri, style, resizeMode = "cover", blurRadius = 0 }) {
+  const [hasError, setHasError] = useState(false)
+  const isDefaultOrEmpty = !uri || typeof uri !== "string" || uri.includes("festival_offer_default") || hasError
+
+  if (isDefaultOrEmpty) {
+    return <Image source={FESTIVAL_DEFAULT_IMG} style={style} resizeMode={resizeMode} blurRadius={blurRadius} />
+  }
+
+  return (
+    <Image
+      source={{ uri }}
+      style={style}
+      resizeMode={resizeMode}
+      blurRadius={blurRadius}
+      onError={() => setHasError(true)}
+    />
+  )
+}
+
 export default function KitchenDetailScreen() {
   const { id } = useLocalSearchParams()
   const router = useRouter()
   const chatScrollViewRef = useRef(null)
+  const enquiryFormScrollRef = useRef(null)
+  const { height: windowHeight } = useWindowDimensions()
+  const modalSheetHeight = Math.max(480, Math.round((windowHeight || 700) * 0.85))
+
   const [activeTab, setActiveTab] = useState("food")
   const [kitchen, setKitchen] = useState(null)
   const [menu, setMenu] = useState([])
   const [loading, setLoading] = useState(true)
   const [selectedItem, setSelectedItem] = useState(null)
-  const { requireCustomer, addItem, clearCart } = useCart()
+  const [selectedOfferImageIndex, setSelectedOfferImageIndex] = useState(0)
+  const { requireCustomer, addItem, removeItem, getItemQty, clearCart } = useCart()
 
   const [enquiryModalVisible, setEnquiryModalVisible] = useState(false)
+  const [showChat, setShowChat] = useState(false)
   const [enquiryMessage, setEnquiryMessage] = useState("")
   const [enquiryValue, setEnquiryValue] = useState("")
   const [enquiryPeopleCount, setEnquiryPeopleCount] = useState("")
@@ -51,6 +98,23 @@ export default function KitchenDetailScreen() {
   const [chatModalVisible, setChatModalVisible] = useState(false)
   const [chatMessages, setChatMessages] = useState([])
   const [chatInput, setChatInput] = useState("")
+  const [hygieneData, setHygieneData] = useState(null)
+  const [keyboardHeight, setKeyboardHeight] = useState(0)
+
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow"
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide"
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e.endCoordinates ? e.endCoordinates.height : 0)
+    })
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0)
+    })
+    return () => {
+      showSub.remove()
+      hideSub.remove()
+    }
+  }, [])
 
   const { user, loading: authLoading } = useAuth()
   const hasActiveEnquiry = activeEnquiry && activeEnquiry.status !== "completed"
@@ -66,13 +130,16 @@ export default function KitchenDetailScreen() {
           ? api(`/api/bulk-enquiries/kitchen/${id}`).catch(() => null)
           : Promise.resolve(null)
 
-        const [kitchenRes, menuRes, enquiryRes] = await Promise.all([
+        const [kitchenRes, menuRes, enquiryRes, hygieneRes] = await Promise.all([
           api(`/api/kitchens/${id}`),
           api(`/api/menu/kitchen/${id}`),
           fetchEnquiry,
+          api(`/api/hygiene/kitchen/${id}`).catch(() => null),
         ])
 
         if (cancelled) return
+
+        setHygieneData(hygieneRes)
 
         if (enquiryRes && enquiryRes.enquiry) {
           setActiveEnquiry(enquiryRes.enquiry)
@@ -102,17 +169,58 @@ export default function KitchenDetailScreen() {
           cover: k.cover_image || null,
           isFreshFoodActive: k.is_fresh_food_active ?? 1,
           isGroceryActive: k.is_grocery_active ?? 1,
+          festivalOffer: k.festivalOffer?.active ? k.festivalOffer : null,
+          festival_offer_image: k.festival_offer_image || null,
+          festival_offer_image_2: k.festival_offer_image_2 || null,
         }
         setKitchen(mappedKitchen)
 
-        const mappedMenu = (menuRes.items || []).map((item) =>
-          resolveMenuItemMedia({
+        const festOffer = mappedKitchen.festivalOffer
+
+        const mappedMenu = (menuRes.items || []).map((item) => {
+          const isGrocery = item.category === "grocery"
+          const pkgType = item.packaging_type || item.packagingType || "packaged"
+          const defaultGst = isGrocery ? (pkgType === "loose" ? 0 : 5) : 5
+          const gst = item.gst_rate !== undefined && item.gst_rate !== null
+            ? Number(item.gst_rate)
+            : (item.gstRate !== undefined && item.gstRate !== null ? Number(item.gstRate) : defaultGst)
+
+          const originalPrice = Number(item.price)
+          let offerPrice = null
+          let discountPercent = null
+          let festivalOfferTitle = null
+
+          if (festOffer?.active && Number(festOffer.discountPercent) > 0) {
+            const isCatMatch =
+              festOffer.category === "both" ||
+              (festOffer.category === "food" && (item.category || "food") === "food") ||
+              (festOffer.category === "grocery" && item.category === "grocery")
+
+            if (isCatMatch) {
+              discountPercent = Number(festOffer.discountPercent)
+              offerPrice = Number(Math.max(1, originalPrice * (1 - discountPercent / 100)).toFixed(2))
+              festivalOfferTitle = festOffer.title
+            }
+          }
+
+          return resolveMenuItemMedia({
+            ...item,
             id: item.id,
             name: item.name,
+            localName: item.local_name || item.localName || null,
+            local_name: item.local_name || item.localName || null,
             description: item.description,
-            price: Number(item.price),
+            price: originalPrice,
+            originalPrice,
+            offerPrice,
+            discountPercent,
+            festivalOfferTitle,
             category: item.category || "food",
             itemType: item.item_type || "veg",
+            packagingType: pkgType,
+            packaging_type: pkgType,
+            gstRate: gst,
+            gst_rate: gst,
             offer: item.offer || null,
             image: item.image,
             images: item.images,
@@ -121,8 +229,10 @@ export default function KitchenDetailScreen() {
             kitchenId: k.id,
             isCombo: item.isCombo || item.is_combo,
             comboItems: item.comboItems || [],
+            isAvailable: item.is_available === 1 || item.is_available === true || item.isAvailable === true,
+            is_available: item.is_available,
           })
-        )
+        })
         setMenu(mappedMenu)
 
         // Set default active tab dynamically based on availability
@@ -152,6 +262,118 @@ export default function KitchenDetailScreen() {
     }
   }, [id, authLoading, user])
 
+  // Live Sync Polling for Menu Items every 3 seconds
+  useEffect(() => {
+    if (!id) return
+    let isCurrent = true
+
+    const syncMenu = async () => {
+      try {
+        const [kitchenRes, menuRes] = await Promise.all([
+          api(`/api/kitchens/${id}`).catch(() => null),
+          api(`/api/menu/kitchen/${id}`).catch(() => null),
+        ])
+        if (!isCurrent) return
+
+        let currentKitchen = kitchen
+        if (kitchenRes?.kitchen) {
+          const k = kitchenRes.kitchen
+          currentKitchen = {
+            id: k.id,
+            name: k.name,
+            speciality: k.speciality || "",
+            rating: Number(k.rating) || 4.5,
+            deliveryTime: k.delivery_time || "30 min",
+            hygieneScore: k.hygiene_score || 0,
+            hygieneVerified: (k.hygiene_score || 0) >= 80,
+            offer: k.offer,
+            description: k.description,
+            city: k.city,
+            state: k.state,
+            address: k.address,
+            pincode: k.pincode,
+            openingTime: k.opening_time,
+            kitchenType: k.kitchen_type,
+            phone: k.phone,
+            image: k.image || null,
+            cover: k.cover_image || null,
+            isFreshFoodActive: k.is_fresh_food_active ?? 1,
+            isGroceryActive: k.is_grocery_active ?? 1,
+            festivalOffer: k.festivalOffer?.active ? k.festivalOffer : null,
+            festival_offer_image: k.festival_offer_image || null,
+            festival_offer_image_2: k.festival_offer_image_2 || null,
+          }
+          setKitchen(currentKitchen)
+        }
+
+        if (menuRes?.items) {
+          setMenu(() => {
+            const kName = currentKitchen?.name || ""
+            const kId = currentKitchen?.id || id
+            const festOffer = currentKitchen?.festivalOffer
+
+            return (menuRes.items || []).map((item) => {
+              const originalPrice = Number(item.price)
+              let offerPrice = null
+              let discountPercent = null
+              let festivalOfferTitle = null
+
+              if (festOffer?.active && Number(festOffer.discountPercent) > 0) {
+                const isCatMatch =
+                  festOffer.category === "both" ||
+                  (festOffer.category === "food" && (item.category || "food") === "food") ||
+                  (festOffer.category === "grocery" && item.category === "grocery")
+
+                if (isCatMatch) {
+                  discountPercent = Number(festOffer.discountPercent)
+                  offerPrice = Number(Math.max(1, originalPrice * (1 - discountPercent / 100)).toFixed(2))
+                  festivalOfferTitle = festOffer.title
+                }
+              }
+
+              return resolveMenuItemMedia({
+                id: item.id,
+                name: item.name,
+                localName: item.local_name || item.localName || null,
+                local_name: item.local_name || item.localName || null,
+                description: item.description,
+                price: originalPrice,
+                originalPrice,
+                offerPrice,
+                discountPercent,
+                festivalOfferTitle,
+                category: item.category || "food",
+                itemType: item.item_type || "veg",
+                packagingType: item.packaging_type || item.packagingType || "packaged",
+                packaging_type: item.packaging_type || item.packagingType || "packaged",
+                gstRate: item.gst_rate ?? item.gstRate,
+                gst_rate: item.gst_rate ?? item.gstRate,
+                offer: item.offer || null,
+                image: item.image,
+                images: item.images,
+                videos: item.videos,
+                kitchen: kName,
+                kitchenId: kId,
+                isCombo: item.isCombo || item.is_combo,
+                comboItems: item.comboItems || [],
+                isAvailable: item.is_available === 1 || item.is_available === true || item.isAvailable === true,
+                is_available: item.is_available,
+              })
+            })
+          })
+        }
+      } catch (err) {
+        // silent sync error handling
+      }
+    }
+
+    const interval = setInterval(syncMenu, 3000)
+    return () => {
+      isCurrent = false
+      clearInterval(interval)
+    }
+  }, [id, kitchen?.name, kitchen?.id])
+
   const handleRefreshEnquiry = async () => {
     if (!id || authLoading || !user) return
     setRefreshingEnquiry(true)
@@ -167,6 +389,71 @@ export default function KitchenDetailScreen() {
     } finally {
       setRefreshingEnquiry(false)
     }
+  }
+
+  useEffect(() => {
+    if (!id || authLoading || !user?.id || !activeEnquiry?.id || activeEnquiry.status === "completed") return
+
+    let cancelled = false
+
+    const pollEnquiry = async () => {
+      try {
+        const enquiryRes = await api(`/api/bulk-enquiries/kitchen/${id}`).catch(() => null)
+        if (cancelled) return
+
+        if (enquiryRes && enquiryRes.enquiry) {
+          setActiveEnquiry(enquiryRes.enquiry)
+        } else {
+          setActiveEnquiry(null)
+        }
+      } catch (e) {
+        if (!cancelled) {
+          console.warn("Failed to poll enquiry:", e)
+        }
+      }
+    }
+
+    pollEnquiry()
+    const interval = setInterval(pollEnquiry, 5000)
+
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [id, authLoading, user?.id, activeEnquiry?.id, activeEnquiry?.status])
+
+  useEffect(() => {
+    if (!id || activeTab !== "hygiene") return
+
+    let cancelled = false
+
+    const pollHygieneStatus = async () => {
+      try {
+        const data = await api(`/api/hygiene/kitchen/${id}`).catch(() => null)
+        if (!cancelled) {
+          setHygieneData(data)
+        }
+      } catch (e) {
+        if (!cancelled) {
+          console.warn("Failed to poll hygiene status:", e)
+        }
+      }
+    }
+
+    pollHygieneStatus()
+    const interval = setInterval(pollHygieneStatus, 5000)
+
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [id, activeTab])
+
+  const handleCloseEnquiryModal = () => {
+    Keyboard.dismiss()
+    setEnquiryModalVisible(false)
+    setShowChat(false)
+    setEnquiryError("")
   }
 
   const submitEnquiry = async () => {
@@ -192,7 +479,7 @@ export default function KitchenDetailScreen() {
       const data = await api("/api/bulk-enquiries", {
         method: "POST",
         body: JSON.stringify({
-          kitchenId: kitchen.id,
+          kitchenId: kitchen?.id || id,
           message: enquiryMessage.trim(),
           estimatedValue: val,
           peopleCount: pCount,
@@ -202,6 +489,7 @@ export default function KitchenDetailScreen() {
       if (data.enquiry) {
         setActiveEnquiry(data.enquiry)
       }
+      Keyboard.dismiss()
       setEnquiryModalVisible(false)
       setEnquiryMessage("")
       setEnquiryValue("")
@@ -220,7 +508,7 @@ export default function KitchenDetailScreen() {
       await api(`/api/bulk-enquiries/${activeEnquiry.id}/accept`, {
         method: "POST",
       })
-      const updated = await api(`/api/bulk-enquiries/kitchen/${kitchen.id}`)
+      const updated = await api(`/api/bulk-enquiries/kitchen/${kitchen?.id || id}`)
       setActiveEnquiry(updated.enquiry)
       showAlert("Success", "You have accepted the quotation.")
     } catch (err) {
@@ -233,7 +521,7 @@ export default function KitchenDetailScreen() {
       await api(`/api/bulk-enquiries/${activeEnquiry.id}/reject`, {
         method: "POST",
       })
-      const updated = await api(`/api/bulk-enquiries/kitchen/${kitchen.id}`)
+      const updated = await api(`/api/bulk-enquiries/kitchen/${kitchen?.id || id}`)
       setActiveEnquiry(updated.enquiry)
       showAlert("Success", "You have rejected the quotation. You can now coordinate with the seller.")
     } catch (err) {
@@ -254,11 +542,11 @@ export default function KitchenDetailScreen() {
     clearCart()
     addItem(bulkItem)
     setEnquiryModalVisible(false)
-    router.push("/(customer)/checkout")
+    router.push("/checkout")
   }
 
   useEffect(() => {
-    if (!chatModalVisible || !activeEnquiry?.id) return
+    if ((!chatModalVisible && !showChat) || !activeEnquiry?.id) return
 
     let active = true
 
@@ -280,7 +568,7 @@ export default function KitchenDetailScreen() {
       active = false
       clearInterval(interval)
     }
-  }, [chatModalVisible, activeEnquiry?.id])
+  }, [chatModalVisible, showChat, activeEnquiry?.id])
 
   const handleSendChatMessage = async () => {
     if (!chatInput.trim() || !activeEnquiry?.id) return
@@ -298,7 +586,7 @@ export default function KitchenDetailScreen() {
   }
 
   const handleChatWithSeller = () => {
-    setChatModalVisible(true)
+    setShowChat(true)
   }
 
   const handleDeleteEnquiry = async () => {
@@ -330,9 +618,18 @@ export default function KitchenDetailScreen() {
     }
   }
 
-  const foodItems = menu.filter((i) => i.category === "food" && !(i.isCombo || i.is_combo))
-  const groceryItems = menu.filter((i) => i.category === "grocery" && !(i.isCombo || i.is_combo))
-  const comboItems = menu.filter((i) => i.isCombo || i.is_combo)
+  const foodItems = menu.filter((i) => i.category === "food")
+  const groceryItems = menu.filter((i) => i.category === "grocery")
+  const festivalOffer = kitchen?.festivalOffer
+  const isOfferActive = Boolean(festivalOffer?.active)
+  const festivalOfferItems = isOfferActive
+    ? menu.filter((item) => {
+        if (festivalOffer.category === "both") return true
+        if (festivalOffer.category === "food") return (item.category || "food") === "food"
+        if (festivalOffer.category === "grocery") return item.category === "grocery"
+        return true
+      })
+    : []
   const offerItems = menu.filter((i) => i.offer)
   const offerCount = (kitchen?.offer ? 1 : 0) + offerItems.length
 
@@ -346,11 +643,19 @@ export default function KitchenDetailScreen() {
       const isGroceryActive = kitchen?.isGroceryActive ?? 1
       return isGroceryActive !== 0 && groceryItems.length > 0
     }
-    if (tab.id === "combo") {
-      return comboItems.length > 0
+    if (tab.id === "offer") {
+      return Boolean(kitchen?.festivalOffer?.active)
     }
     return true
   })
+
+  useEffect(() => {
+    if (loading || !kitchen) return
+    const isCurrentTabVisible = filteredTabs.some((t) => t.id === activeTab)
+    if (!isCurrentTabVisible && filteredTabs.length > 0) {
+      setActiveTab(filteredTabs[0].id)
+    }
+  }, [filteredTabs, activeTab, loading, kitchen])
 
   if (loading || !kitchen) {
     return (
@@ -522,14 +827,7 @@ export default function KitchenDetailScreen() {
                   <Text className="font-nunito font-semibold text-gray/80 text-xs flex-1">{kitchen.openingTime}</Text>
                 </View>
               ) : null}
-              {kitchen.phone ? (
-                <View className="flex-row items-center gap-2.5">
-                  <View className="w-7 h-7 rounded-lg bg-[#EBF5FB] items-center justify-center border border-[#D6E6F2]">
-                    <Phone size={11} color="#2980B9" />
-                  </View>
-                  <Text className="font-nunito font-semibold text-gray/80 text-xs flex-1">{kitchen.phone}</Text>
-                </View>
-              ) : null}
+              
             </View>
           </View>
         </View>
@@ -764,6 +1062,115 @@ export default function KitchenDetailScreen() {
           </View>
         )}
 
+        {/* Festival Specials Banner CTA (Exact HomePage style) */}
+        {kitchen?.festivalOffer?.active && activeTab !== "offer" ? (
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={() => setActiveTab("offer")}
+            className="mx-4 mt-3"
+          >
+            <LinearGradient
+              colors={["#D97706", "#EA580C", "#E11D48"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={{
+                borderRadius: 24,
+                padding: 16,
+                position: "relative",
+                overflow: "hidden",
+                ...Platform.select({
+                  web: {
+                    boxShadow: "0px 8px 20px rgba(234, 88, 12, 0.25)",
+                  },
+                  default: {
+                    shadowColor: "#EA580C",
+                    shadowOffset: { width: 0, height: 6 },
+                    shadowOpacity: 0.25,
+                    shadowRadius: 10,
+                    elevation: 4,
+                  },
+                }),
+              }}
+            >
+              {/* Background Circular Watermark */}
+              <View
+                style={{
+                  position: "absolute",
+                  top: -15,
+                  right: -15,
+                  width: 110,
+                  height: 110,
+                  borderRadius: 55,
+                  overflow: "hidden",
+                  opacity: 0.22,
+                  borderWidth: 2,
+                  borderColor: "rgba(255, 255, 255, 0.4)",
+                }}
+              >
+                <FestivalOfferThumb
+                  uri={resolveMediaUrl(kitchen.festivalOffer.image || kitchen.festival_offer_image)}
+                  style={{ width: "100%", height: "100%" }}
+                  resizeMode="cover"
+                />
+              </View>
+
+              {/* Top Badges */}
+              <View className="flex-row items-center justify-between mb-2.5 relative z-10">
+                <View className="bg-white/20 border border-white/30 px-2.5 py-0.5 rounded-full">
+                  <Text className="text-white text-[10px] font-poppins font-bold uppercase tracking-wider">
+                    {kitchen.festivalOffer.category === "both" ? "🍲 Food & Ration" : kitchen.festivalOffer.category === "grocery" ? "🌾 Ration Only" : "🍲 Homemade Food"}
+                  </Text>
+                </View>
+                <View className="bg-white px-2.5 py-0.5 rounded-full shadow-sm">
+                  <Text className="text-[#E11D48] text-[11px] font-poppins font-black uppercase">
+                    Flat {kitchen.festivalOffer.discountPercent}% OFF
+                  </Text>
+                </View>
+              </View>
+
+              {/* Kitchen Name & Offer Title Row */}
+              <View className="flex-row items-center gap-3 my-1 relative z-10">
+                <View className="w-11 h-11 rounded-2xl bg-white p-0.5 overflow-hidden shadow-sm flex-shrink-0">
+                  <Image
+                    source={{ uri: resolveMediaUrl(kitchen.logo || kitchen.image) || "https://images.unsplash.com/photo-1556910103-1c02745aae4d?w=200&h=200&fit=crop" }}
+                    style={{ width: "100%", height: "100%", borderRadius: 12 }}
+                    resizeMode="cover"
+                  />
+                </View>
+                <View className="flex-1 min-w-0">
+                  <Text className="font-poppins font-bold text-white text-base leading-tight truncate" numberOfLines={1}>
+                    {kitchen.name}
+                  </Text>
+                  <Text className="font-nunito text-amber-200 text-xs font-semibold mt-0.5 truncate" numberOfLines={1}>
+                    ✨ {kitchen.festivalOffer.title}
+                  </Text>
+                </View>
+                {/* Floating Preview Pill */}
+                <View className="w-10 h-10 rounded-xl overflow-hidden border border-white/40 shadow-xs flex-shrink-0 bg-white/20">
+                  <FestivalOfferThumb
+                    uri={resolveMediaUrl(kitchen.festivalOffer.image || kitchen.festival_offer_image)}
+                    style={{ width: "100%", height: "100%" }}
+                    resizeMode="cover"
+                  />
+                </View>
+              </View>
+
+              {/* Description */}
+              <Text className="font-nunito text-white/90 text-xs mt-1 mb-3 leading-relaxed relative z-10" numberOfLines={2}>
+                {kitchen.festivalOffer.description || "Handcrafted festive delicacies and special packages available for a limited time."}
+              </Text>
+
+              {/* Action Button */}
+              <View className="bg-white rounded-xl py-2.5 px-3.5 flex-row items-center justify-between shadow-sm relative z-10">
+                <Text className="font-poppins font-bold text-xs text-[#0a1f13]">
+                  Unlock Secret Festival Menu
+                </Text>
+                <ArrowRight size={14} color="#EA580C" />
+              </View>
+            </LinearGradient>
+          </TouchableOpacity>
+        ) : null}
+
         {/* Navigation Tabs (Food / Ration / Offers) */}
         <View className="px-4 mt-4">
           <View
@@ -832,7 +1239,15 @@ export default function KitchenDetailScreen() {
                 <View className="flex-row flex-wrap -mx-1.5">
                   {foodItems.map((item) => (
                     <View key={item.id} className="w-1/2 p-1.5">
-                      <MenuListItem item={item} onOpen={setSelectedItem} variant="grid" />
+                      <MenuListItem
+                        item={item}
+                        onOpen={setSelectedItem}
+                        onNavigateToCart={() => router.push("/cart")}
+                        onAddToCart={addItem}
+                        onRemoveFromCart={removeItem}
+                        getItemQty={getItemQty}
+                        variant="grid"
+                      />
                     </View>
                   ))}
                 </View>
@@ -855,7 +1270,15 @@ export default function KitchenDetailScreen() {
                 <View className="flex-row flex-wrap -mx-1.5">
                   {groceryItems.map((item) => (
                     <View key={item.id} className="w-1/2 p-1.5">
-                      <MenuListItem item={item} onOpen={setSelectedItem} variant="grid" />
+                      <MenuListItem
+                        item={item}
+                        onOpen={setSelectedItem}
+                        onNavigateToCart={() => router.push("/cart")}
+                        onAddToCart={addItem}
+                        onRemoveFromCart={removeItem}
+                        getItemQty={getItemQty}
+                        variant="grid"
+                      />
                     </View>
                   ))}
                 </View>
@@ -863,81 +1286,513 @@ export default function KitchenDetailScreen() {
             </View>
           ) : null}
 
-          {activeTab === "combo" ? (
+          {activeTab === "offer" && kitchen?.festivalOffer?.active ? (
             <View>
-              <Text className="font-poppins font-extrabold text-dark text-lg mb-0.5">Combos & Packages</Text>
-              <Text className="font-nunito font-semibold text-gray/80 text-[11px] mb-5">
-                Constituent items in one package · {comboItems.length} combos
-              </Text>
-              {comboItems.length === 0 ? (
-                <View className="py-12 items-center">
-                  <Sparkles size={36} color="#E8E8E8" />
-                  <Text className="font-nunito text-gray text-xs mt-2">No combos listed yet</Text>
-                </View>
-              ) : (
-                <View className="flex-row flex-wrap -mx-1.5">
-                  {comboItems.map((item) => (
-                    <View key={item.id} className="w-1/2 p-1.5">
-                      <MenuListItem item={item} onOpen={setSelectedItem} variant="grid" />
+              {/* Festival Offer Showcase */}
+              {(() => {
+                const fest = kitchen.festivalOffer
+                const offerImages = [
+                  fest.image || kitchen.festival_offer_image || "/festival_offer_default.jpg",
+                  fest.image2 || kitchen.festival_offer_image_2,
+                ].filter(Boolean)
+                const activeOfferImg = offerImages[selectedOfferImageIndex] || offerImages[0]
+                const offerImgSrc = resolveMediaUrl(activeOfferImg)
+                return (
+                  <View>
+                    <View
+                      className="bg-white rounded-3xl border border-amber-200 overflow-hidden mb-4"
+                      style={{
+                        ...Platform.select({
+                          web: {
+                            boxShadow: "0px 8px 20px rgba(234, 88, 12, 0.15)",
+                          },
+                          default: {
+                            shadowColor: "#EA580C",
+                            shadowOffset: { width: 0, height: 6 },
+                            shadowOpacity: 0.15,
+                            shadowRadius: 10,
+                            elevation: 4,
+                          },
+                        }),
+                      }}
+                    >
+                      {/* Top Header Bar with Title & Badges */}
+                      <LinearGradient
+                        colors={["#D97706", "#EA580C", "#E11D48"]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 0 }}
+                        style={{ padding: 14, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
+                      >
+                        <View style={{ flex: 1, paddingRight: 10 }}>
+                          <View className="flex-row items-center gap-1.5 mb-1">
+                            <Sparkles size={12} color="#FEF3C7" />
+                            <Text className="text-amber-100 text-[10px] font-poppins font-extrabold uppercase tracking-wider">
+                              {fest.category === "both" ? "Food & Ration Fest" : fest.category === "grocery" ? "Ration Fest" : "Fresh Food Fest"}
+                            </Text>
+                          </View>
+                          <Text className="font-poppins font-black text-white text-base leading-tight" numberOfLines={2}>
+                            {fest.title}
+                          </Text>
+                        </View>
+                        <View className="bg-white px-3 py-1 rounded-full shadow-sm">
+                          <Text className="text-[#E11D48] text-xs font-poppins font-black uppercase">
+                            Flat {fest.discountPercent}% OFF
+                          </Text>
+                        </View>
+                      </LinearGradient>
+
+                      {/* Clean Full Uncropped Poster Image with Blurred Background Fill */}
+                      <View style={{ width: "100%", height: 260, position: "relative", overflow: "hidden", backgroundColor: "#1c1917", alignItems: "center", justifyContent: "center", borderBottomWidth: 1, borderBottomColor: "#fde68a" }}>
+                        {/* Blurred Background Layer to fill sides */}
+                        <View style={{ position: "absolute", top: -20, left: -20, right: -20, bottom: -20, opacity: 0.6 }}>
+                          <FestivalOfferThumb
+                            key={`blur-${activeOfferImg}`}
+                            uri={offerImgSrc}
+                            style={{ width: "100%", height: "100%" }}
+                            resizeMode="cover"
+                            blurRadius={Platform.OS === "ios" ? 25 : 16}
+                          />
+                        </View>
+                        <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.3)" }} />
+
+                        {/* Foreground Sharp Poster */}
+                        <View style={{ width: "100%", height: "100%", padding: 8, alignItems: "center", justifyContent: "center", zIndex: 10 }}>
+                          <FestivalOfferThumb
+                            key={`sharp-${activeOfferImg}`}
+                            uri={offerImgSrc}
+                            style={{ width: "100%", height: "100%", borderRadius: 12 }}
+                            resizeMode="contain"
+                          />
+                        </View>
+
+                        {/* < > Arrow Controls if 2 images exist */}
+                        {offerImages.length > 1 ? (
+                          <>
+                            {/* Left Arrow Button */}
+                            <TouchableOpacity
+                              activeOpacity={0.8}
+                              onPress={() => {
+                                setSelectedOfferImageIndex((prev) => (prev > 0 ? prev - 1 : offerImages.length - 1))
+                              }}
+                              style={{
+                                position: "absolute",
+                                left: 10,
+                                top: "50%",
+                                marginTop: -20,
+                                zIndex: 30,
+                                width: 38,
+                                height: 38,
+                                borderRadius: 19,
+                                backgroundColor: "rgba(0,0,0,0.6)",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                borderWidth: 1,
+                                borderColor: "rgba(255,255,255,0.3)",
+                              }}
+                            >
+                              <ChevronLeft size={22} color="#ffffff" strokeWidth={2.5} />
+                            </TouchableOpacity>
+
+                            {/* Right Arrow Button */}
+                            <TouchableOpacity
+                              activeOpacity={0.8}
+                              onPress={() => {
+                                setSelectedOfferImageIndex((prev) => (prev < offerImages.length - 1 ? prev + 1 : 0))
+                              }}
+                              style={{
+                                position: "absolute",
+                                right: 10,
+                                top: "50%",
+                                marginTop: -20,
+                                zIndex: 30,
+                                width: 38,
+                                height: 38,
+                                borderRadius: 19,
+                                backgroundColor: "rgba(0,0,0,0.6)",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                borderWidth: 1,
+                                borderColor: "rgba(255,255,255,0.3)",
+                              }}
+                            >
+                              <ChevronRight size={22} color="#ffffff" strokeWidth={2.5} />
+                            </TouchableOpacity>
+
+                            {/* Dots Indicator at bottom */}
+                            <View
+                              style={{
+                                position: "absolute",
+                                bottom: 8,
+                                left: 0,
+                                right: 0,
+                                zIndex: 30,
+                                flexDirection: "row",
+                                alignItems: "center",
+                                justifyContent: "center",
+                              }}
+                            >
+                              <View
+                                style={{
+                                  flexDirection: "row",
+                                  alignItems: "center",
+                                  gap: 5,
+                                  backgroundColor: "rgba(0,0,0,0.65)",
+                                  paddingHorizontal: 8,
+                                  paddingVertical: 3.5,
+                                  borderRadius: 12,
+                                  borderWidth: 1,
+                                  borderColor: "rgba(255,255,255,0.2)",
+                                }}
+                              >
+                                {offerImages.map((_, idx) => (
+                                  <View
+                                    key={idx}
+                                    style={{
+                                      width: selectedOfferImageIndex === idx ? 16 : 5,
+                                      height: 5,
+                                      borderRadius: 2.5,
+                                      backgroundColor: selectedOfferImageIndex === idx ? "#F59E0B" : "rgba(255,255,255,0.6)",
+                                    }}
+                                  />
+                                ))}
+                              </View>
+                            </View>
+                          </>
+                        ) : null}
+                      </View>
+
+                      {/* Details & Subtext Bottom Container */}
+                      <View className="p-4 bg-white">
+                        <Text className="font-nunito text-gray-800 text-xs font-semibold leading-relaxed">
+                          Enjoy <Text className="font-extrabold text-amber-700">{fest.discountPercent}% Instant Discount</Text> on all{" "}
+                          <Text className="font-bold text-dark">
+                            {fest.category === "both" ? "Fresh Food & Ration items" : fest.category === "food" ? "Fresh Food items" : "Grocery & Ration items"}
+                          </Text>
+                        </Text>
+
+                        {fest.description ? (
+                          <View className="bg-amber-50 rounded-xl p-2.5 mt-2 border border-amber-200/70">
+                            <Text className="font-nunito text-gray-700 text-xs italic">
+                              "{fest.description}"
+                            </Text>
+                          </View>
+                        ) : null}
+
+                        {fest.endDate ? (
+                          <View className="flex-row items-center gap-1.5 mt-2.5 pt-2 border-t border-gray-100">
+                            <Clock size={12} color="#92400E" />
+                            <Text className="font-nunito text-[11px] text-amber-900 font-semibold">
+                              Offer Valid till: {new Date(fest.endDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
                     </View>
-                  ))}
-                </View>
-              )}
+                    {/* Section Header for Discounted Items */}
+                    <View className="mt-6 mb-3 flex-row items-center justify-between">
+                      <View>
+                        <Text className="font-poppins font-extrabold text-dark text-base">
+                          Special Offer Dishes & Items
+                        </Text>
+                        <Text className="font-nunito font-semibold text-gray/80 text-[11px] mt-0.5">
+                          {festivalOfferItems.length} items with {fest.discountPercent}% festival discount applied
+                        </Text>
+                      </View>
+                      <View className="bg-amber-100 px-2.5 py-0.5 rounded-full border border-amber-300">
+                        <Text className="text-amber-800 text-[9px] font-poppins font-bold uppercase">
+                          {fest.discountPercent}% OFF
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Items Grid */}
+                    {festivalOfferItems.length === 0 ? (
+                      <View className="py-12 items-center bg-amber-50/50 rounded-2xl border border-dashed border-amber-200 p-6">
+                        <Sparkles size={32} color="#EA580C" />
+                        <Text className="font-poppins font-bold text-dark text-xs mt-3">No menu items under this category</Text>
+                        <Text className="font-nunito text-[11px] text-gray text-center mt-1">
+                          Browse our food and ration tabs for regular items.
+                        </Text>
+                      </View>
+                    ) : (
+                      <View className="flex-row flex-wrap -mx-1.5">
+                        {festivalOfferItems.map((item) => (
+                          <View key={item.id} className="w-1/2 p-1.5">
+                            <MenuListItem
+                              item={item}
+                              onOpen={setSelectedItem}
+                              onNavigateToCart={() => router.push("/cart")}
+                              onAddToCart={addItem}
+                              onRemoveFromCart={removeItem}
+                              getItemQty={getItemQty}
+                              variant="grid"
+                            />
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                )
+              })()}
             </View>
-             ) : null}
+          ) : null}
+
+          {activeTab === "hygiene" ? (
+            <View>
+              <View className="flex-row items-center gap-2 mb-1">
+                <ShieldCheck size={20} color="#0B6B3A" />
+                <Text className="font-poppins font-extrabold text-dark text-lg">Today's Hygiene Video</Text>
+              </View>
+              <Text className="font-nunito font-semibold text-gray/80 text-[11px] mb-5">
+                Daily recorded video from {kitchen?.name} showing clean cooking area, washing area & refrigerator
+              </Text>
+
+              {(() => {
+                const approvedVideo = hygieneData?.approvedVideo || hygieneData?.video || (hygieneData?.videos && hygieneData.videos.find(v => v.status === "approved")) || (hygieneData?.compliant && hygieneData?.videos?.[0])
+                if (!approvedVideo?.mediaUrl) {
+                  return (
+                    <View className="py-12 items-center bg-gray-50 rounded-3xl border border-dashed border-gray-200 p-6">
+                      <ShieldCheck size={36} color="#CCCCCC" />
+                      <Text className="font-poppins font-bold text-dark text-xs mt-3">No approved hygiene video for today</Text>
+                      <Text className="font-nunito text-[11px] text-gray text-center mt-1">
+                        This kitchen's daily video is either awaiting upload or under admin verification.
+                      </Text>
+                    </View>
+                  )
+                }
+                return (
+                  <View className="bg-emerald-50/50 p-4 rounded-3xl border border-emerald-200">
+                    <View className="flex-row items-center gap-1.5 mb-3 bg-emerald-600 self-start px-3 py-1 rounded-full">
+                      <CheckCircle size={12} color="#FFFFFF" />
+                      <Text className="font-poppins font-bold text-[10px] text-white uppercase">Verified & Approved by Admin</Text>
+                    </View>
+
+                    <HygieneVideoPlayer src={resolveMediaUrl(approvedVideo.mediaUrl)} />
+
+                    <View className="flex-row justify-between items-center mt-1">
+                      <Text className="font-poppins font-bold text-xs text-dark">Daily Kitchen Check</Text>
+                      <Text className="font-nunito text-[10px] text-gray">
+                        {approvedVideo.recordedAt ? new Date(approvedVideo.recordedAt).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}
+                      </Text>
+                    </View>
+                  </View>
+                )
+              })()}
+            </View>
+          ) : null}
         </View>
       </ScrollView>
+
+      {/* Floating Cart Bar */}
+      <FloatingCart onNavigateToCart={() => router.push("/cart")} />
 
       {/* Bulk Order Enquiry Modal Dialog */}
       <Modal
         visible={enquiryModalVisible}
         animationType="slide"
         transparent={true}
-        onRequestClose={() => setEnquiryModalVisible(false)}
+        statusBarTranslucent={true}
+        onRequestClose={handleCloseEnquiryModal}
       >
-        <Pressable
-          style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.5)", justifyContent: "flex-end" }}
-          onPress={() => setEnquiryModalVisible(false)}
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={{ flex: 1 }}
         >
-          <Pressable
-            style={{
-              backgroundColor: "#FFFFFF",
-              borderTopLeftRadius: 32,
-              borderTopRightRadius: 32,
-              paddingHorizontal: 24,
-              paddingTop: 24,
-              paddingBottom: Platform.OS === "ios" ? 44 : 28,
-              maxHeight: "85%"
-            }}
-            onPress={(e) => e.stopPropagation()}
+          <View
+            style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.65)", justifyContent: "flex-end" }}
           >
-            {/* Modal Header */}
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 18, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>
-                  {hasActiveEnquiry ? "Enquiry Details" : "Bulk Order Enquiry"}
-                </Text>
-                <Text style={{ fontSize: 11, color: "#7A7A7A", fontFamily: "Nunito", marginTop: 2 }}>
-                  {kitchen.name}
-                </Text>
-              </View>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-                {hasActiveEnquiry && (
-                  <TouchableOpacity onPress={handleRefreshEnquiry} disabled={refreshingEnquiry} style={{ padding: 4 }}>
-                    {refreshingEnquiry ? (
-                      <ActivityIndicator size="small" color="#0B6B3A" />
-                    ) : (
-                      <RotateCw size={18} color="#0B6B3A" />
-                    )}
+            <Pressable
+              style={{
+                position: "absolute",
+                top: 0,
+                bottom: 0,
+                left: 0,
+                right: 0,
+              }}
+              onPress={handleCloseEnquiryModal}
+            />
+            <View
+              style={{
+                backgroundColor: "#FFFFFF",
+                borderTopLeftRadius: 28,
+                borderTopRightRadius: 28,
+                height: showChat ? "85%" : undefined,
+                maxHeight: "88%",
+                width: "100%",
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden"
+              }}
+            >
+            {showChat ? (
+              <View style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+                {/* Chat Header */}
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: "#F1F1EF" }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
+                    <TouchableOpacity onPress={() => setShowChat(false)} style={{ padding: 4, marginRight: 2 }}>
+                      <ArrowLeft size={20} color="#0B6B3A" />
+                    </TouchableOpacity>
+                    <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: "#EAF7EE", alignItems: "center", justifyContent: "center" }}>
+                      <ChefHat size={18} color="#0B6B3A" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 15, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F" }} numberOfLines={1}>
+                        {kitchen?.name || "Kitchen"}
+                      </Text>
+                      <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#8A8A8A" }}>
+                        Enquiry Chat #{activeEnquiry?.id}
+                      </Text>
+                    </View>
+                  </View>
+                  <TouchableOpacity onPress={handleCloseEnquiryModal} style={{ padding: 4 }}>
+                    <X size={20} color="#7A7A7A" />
                   </TouchableOpacity>
-                )}
-                <TouchableOpacity onPress={() => setEnquiryModalVisible(false)} style={{ padding: 4 }}>
-                  <X size={20} color="#1F1F1F" />
-                </TouchableOpacity>
-              </View>
-            </View>
+                </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled={true}>
+                {/* Message History */}
+                <ScrollView 
+                  ref={chatScrollViewRef}
+                  style={{ flex: 1, backgroundColor: "#ECE5DD" }}
+                  onContentSizeChange={() => chatScrollViewRef.current?.scrollToEnd({ animated: true })}
+                  contentContainerStyle={{ padding: 16, gap: 12, backgroundColor: "#ECE5DD", flexGrow: 1 }}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  {chatMessages.length === 0 ? (
+                    <View style={{ paddingVertical: 40, alignItems: "center", justifyContent: "center" }}>
+                      <Text style={{ fontSize: 13, fontFamily: "Nunito", color: "#8A8A8A", textAlign: "center" }}>
+                        No messages yet. Send a message to start discussion about your quotation!
+                      </Text>
+                    </View>
+                  ) : (
+                    chatMessages.map((msg) => {
+                      const isMe = msg.sender_id === user?.id
+                      const msgDate = new Date(msg.created_at)
+                      const timeStr = isNaN(msgDate.getTime()) ? "" : msgDate.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
+                      
+                      return (
+                        <View 
+                          key={msg.id} 
+                          style={{ 
+                            alignSelf: isMe ? "flex-end" : "flex-start",
+                            maxWidth: "75%",
+                            backgroundColor: isMe ? "#DCF8C6" : "#FFFFFF",
+                            paddingHorizontal: 14,
+                            paddingVertical: 8,
+                            borderRadius: 12,
+                            borderBottomRightRadius: isMe ? 2 : 12,
+                            borderBottomLeftRadius: isMe ? 12 : 2,
+                            shadowColor: "#000000",
+                            shadowOffset: { width: 0, height: 1 },
+                            shadowOpacity: 0.12,
+                            shadowRadius: 1,
+                            elevation: 1,
+                          }}
+                        >
+                          {!isMe && (
+                            <Text style={{ fontSize: 10, fontWeight: "bold", color: "#0B6B3A", fontFamily: "Poppins", marginBottom: 2 }}>
+                              {msg.sender_name} ({msg.sender_role})
+                            </Text>
+                          )}
+                          <Text style={{ fontSize: 13, color: "#303030", fontFamily: "Nunito" }}>
+                            {msg.message}
+                          </Text>
+                          {timeStr ? (
+                            <Text style={{ fontSize: 9, color: "#8A8A8A", fontFamily: "Nunito", alignSelf: "flex-end", marginTop: 4 }}>
+                              {timeStr}
+                            </Text>
+                          ) : null}
+                        </View>
+                      )
+                    })
+                  )}
+                </ScrollView>
+
+                {/* Input Footer */}
+                <View style={{ 
+                  flexDirection: "row", 
+                  alignItems: "center", 
+                  paddingHorizontal: 16, 
+                  paddingVertical: 12, 
+                  paddingBottom: (Platform.OS === "android" ? keyboardHeight : 0) + 12,
+                  borderTopWidth: 1, 
+                  borderTopColor: "#F1F1EF", 
+                  backgroundColor: "#FFFFFF",
+                  gap: 10
+                }}>
+                  <TextInput
+                    style={{
+                      flex: 1,
+                      backgroundColor: "#F7F7F5",
+                      borderRadius: 20,
+                      paddingHorizontal: 16,
+                      paddingVertical: 10,
+                      fontSize: 14,
+                      fontFamily: "Nunito",
+                      color: "#1F1F1F",
+                      maxHeight: 100,
+                    }}
+                    multiline
+                    placeholder="Type a message..."
+                    placeholderTextColor="#7A7A7A"
+                    value={chatInput}
+                    onChangeText={setChatInput}
+                  />
+                  <TouchableOpacity 
+                    onPress={handleSendChatMessage}
+                    disabled={!chatInput.trim()}
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 20,
+                      backgroundColor: chatInput.trim() ? "#0B6B3A" : "#E8E8E8",
+                      alignItems: "center",
+                      justifyContent: "center"
+                    }}
+                  >
+                    <Send size={16} color="#FFFFFF" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <View style={{ width: "100%", flexShrink: 1, display: "flex", flexDirection: "column" }}>
+                {/* Modal Header */}
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: "#F1F1EF" }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 18, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>
+                      {hasActiveEnquiry ? "Enquiry Details" : "Bulk Order Enquiry"}
+                    </Text>
+                    <Text style={{ fontSize: 11, color: "#7A7A7A", fontFamily: "Nunito", marginTop: 2 }}>
+                      {kitchen?.name || "Kitchen"}
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                    {hasActiveEnquiry && (
+                      <TouchableOpacity onPress={handleRefreshEnquiry} disabled={refreshingEnquiry} style={{ padding: 4 }}>
+                        {refreshingEnquiry ? (
+                          <ActivityIndicator size="small" color="#0B6B3A" />
+                        ) : (
+                          <RotateCw size={18} color="#0B6B3A" />
+                        )}
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity onPress={handleCloseEnquiryModal} style={{ padding: 4 }}>
+                      <X size={20} color="#1F1F1F" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+            <ScrollView
+              ref={enquiryFormScrollRef}
+              style={{ flexShrink: 1 }}
+              showsVerticalScrollIndicator={false}
+              nestedScrollEnabled={true}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ 
+                paddingHorizontal: 20, 
+                paddingTop: 16, 
+                paddingBottom: (Platform.OS === "android" ? keyboardHeight : 0) + (Platform.OS === "ios" ? 34 : 24) 
+              }}
+            >
               {!hasActiveEnquiry ? (
                 // Submit Form Screen
                 <View>
@@ -975,6 +1830,11 @@ export default function KitchenDetailScreen() {
                       placeholderTextColor="#7A7A7A"
                       value={enquiryValue}
                       onChangeText={setEnquiryValue}
+                      onFocus={() => {
+                        setTimeout(() => {
+                          enquiryFormScrollRef.current?.scrollTo({ y: 0, animated: true });
+                        }, 100);
+                      }}
                     />
                   </View>
 
@@ -1000,6 +1860,11 @@ export default function KitchenDetailScreen() {
                       placeholderTextColor="#7A7A7A"
                       value={enquiryPeopleCount}
                       onChangeText={setEnquiryPeopleCount}
+                      onFocus={() => {
+                        setTimeout(() => {
+                          enquiryFormScrollRef.current?.scrollTo({ y: 50, animated: true });
+                        }, 100);
+                      }}
                     />
                   </View>
 
@@ -1027,6 +1892,11 @@ export default function KitchenDetailScreen() {
                       placeholderTextColor="#7A7A7A"
                       value={enquiryMessage}
                       onChangeText={setEnquiryMessage}
+                      onFocus={() => {
+                        setTimeout(() => {
+                          enquiryFormScrollRef.current?.scrollToEnd({ animated: true });
+                        }, 100);
+                      }}
                     />
                   </View>
 
@@ -1328,7 +2198,7 @@ export default function KitchenDetailScreen() {
                       alignItems: "center",
                       justifyContent: "center",
                       marginTop: 12,
-                      marginBottom: 20,
+                      marginBottom: 4,
                     }}
                   >
                     <Text style={{ color: "#C0392B", fontWeight: "bold", fontFamily: "Poppins", fontSize: 14 }}>
@@ -1338,12 +2208,22 @@ export default function KitchenDetailScreen() {
                 </View>
               )}
             </ScrollView>
-          </Pressable>
-        </Pressable>
+              </View>
+            )}
+            </View>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Menu Item Detail Modal */}
-      <MenuItemDetailModal item={selectedItem} onClose={() => setSelectedItem(null)} />
+      <MenuItemDetailModal
+        item={selectedItem}
+        onClose={() => setSelectedItem(null)}
+        onNavigateToCart={() => router.push("/cart")}
+        onAddToCart={addItem}
+        onRemoveFromCart={removeItem}
+        getItemQty={getItemQty}
+      />
 
       {/* Success Submission Popup */}
       <Modal
@@ -1378,158 +2258,171 @@ export default function KitchenDetailScreen() {
       <Modal
         visible={chatModalVisible}
         transparent
+        statusBarTranslucent={true}
         animationType="slide"
-        onRequestClose={() => setChatModalVisible(false)}
+        onRequestClose={() => { Keyboard.dismiss(); setChatModalVisible(false); }}
       >
-        <Pressable 
-          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}
-          onPress={() => setChatModalVisible(false)}
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={{ flex: 1 }}
         >
-          <Pressable 
-            style={{ 
-              backgroundColor: "#FFFFFF", 
-              borderTopLeftRadius: 28, 
-              borderTopRightRadius: 28, 
-              height: "80%", 
-              width: "100%" 
-            }}
-            onPress={(e) => e.stopPropagation()}
+          <View 
+            style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "flex-end" }}
           >
-            {/* Header */}
-            <View style={{ 
-              flexDirection: "row", 
-              alignItems: "center", 
-              justifyContent: "space-between", 
-              paddingHorizontal: 20, 
-              paddingVertical: 16, 
-              borderBottomWidth: 1, 
-              borderBottomColor: "#F1F1EF" 
-            }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
-                <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "#EAF7EE", alignItems: "center", justifyContent: "center" }}>
-                  <ChefHat size={20} color="#0B6B3A" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 15, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F" }} numberOfLines={1}>
-                    {kitchen?.name}
-                  </Text>
-                  <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#8A8A8A" }}>
-                    Enquiry Chat #{activeEnquiry?.id}
-                  </Text>
-                </View>
-              </View>
-              <TouchableOpacity onPress={() => setChatModalVisible(false)} style={{ padding: 4 }}>
-                <X size={20} color="#7A7A7A" />
-              </TouchableOpacity>
-            </View>
-
-            {/* Message History */}
-            <ScrollView 
-              ref={chatScrollViewRef}
-              onContentSizeChange={() => chatScrollViewRef.current?.scrollToEnd({ animated: true })}
-              contentContainerStyle={{ padding: 20, gap: 12, backgroundColor: "#ECE5DD", flexGrow: 1 }}
+            <Pressable 
+              style={{
+                position: "absolute",
+                top: 0,
+                bottom: 0,
+                left: 0,
+                right: 0,
+              }}
+              onPress={() => { Keyboard.dismiss(); setChatModalVisible(false); }}
+            />
+            <View 
+              style={{ 
+                backgroundColor: "#FFFFFF", 
+                borderTopLeftRadius: 28, 
+                borderTopRightRadius: 28, 
+                height: "85%",
+                maxHeight: "88%",
+                width: "100%",
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden"
+              }}
             >
-              {chatMessages.length === 0 ? (
-                <View style={{ paddingVertical: 40, alignItems: "center", justifyContent: "center" }}>
-                  <Text style={{ fontSize: 13, fontFamily: "Nunito", color: "#8A8A8A", textAlign: "center" }}>
-                    No messages yet. Send a message to start discussion about your quotation!
-                  </Text>
-                </View>
-              ) : (
-                chatMessages.map((msg) => {
-                  const isMe = msg.sender_id === user?.id
-                  const msgDate = new Date(msg.created_at)
-                  const timeStr = isNaN(msgDate.getTime()) ? "" : msgDate.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
-                  
-                  return (
-                    <View 
-                      key={msg.id} 
-                      style={{ 
-                        alignSelf: isMe ? "flex-end" : "flex-start",
-                        maxWidth: "75%",
-                        backgroundColor: isMe ? "#DCF8C6" : "#FFFFFF",
-                        paddingHorizontal: 14,
-                        paddingVertical: 8,
-                        borderRadius: 12,
-                        borderBottomRightRadius: isMe ? 2 : 12,
-                        borderBottomLeftRadius: isMe ? 12 : 2,
-                        shadowColor: "#000000",
-                        shadowOffset: { width: 0, height: 1 },
-                        shadowOpacity: 0.12,
-                        shadowRadius: 1,
-                        elevation: 1,
-                      }}
-                    >
-                      {!isMe && (
-                        <Text style={{ fontSize: 10, fontWeight: "bold", color: "#0B6B3A", fontFamily: "Poppins", marginBottom: 2 }}>
-                          {msg.sender_name} ({msg.sender_role})
-                        </Text>
-                      )}
-                      <Text style={{ fontSize: 13, color: "#303030", fontFamily: "Nunito" }}>
-                        {msg.message}
-                      </Text>
-                      {timeStr ? (
-                        <Text style={{ fontSize: 9, color: "#8A8A8A", fontFamily: "Nunito", alignSelf: "flex-end", marginTop: 4 }}>
-                          {timeStr}
-                        </Text>
-                      ) : null}
+                {/* Header */}
+                <View style={{ 
+                  flexDirection: "row", 
+                  alignItems: "center", 
+                  justifyContent: "space-between", 
+                  paddingHorizontal: 20, 
+                  paddingVertical: 16, 
+                  borderBottomWidth: 1, 
+                  borderBottomColor: "#F1F1EF" 
+                }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
+                    <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "#EAF7EE", alignItems: "center", justifyContent: "center" }}>
+                      <ChefHat size={20} color="#0B6B3A" />
                     </View>
-                  )
-                })
-              )}
-            </ScrollView>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 15, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F" }} numberOfLines={1}>
+                        {kitchen?.name}
+                      </Text>
+                    </View>
+                  </View>
+                  <TouchableOpacity onPress={() => { Keyboard.dismiss(); setChatModalVisible(false); }} style={{ padding: 4 }}>
+                    <X size={20} color="#7A7A7A" />
+                  </TouchableOpacity>
+                </View>
 
-            {/* Input Footer */}
-            <KeyboardAvoidingView 
-              behavior={Platform.OS === "ios" ? "padding" : "height"}
-              keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
-            >
-              <View style={{ 
-                flexDirection: "row", 
-                alignItems: "center", 
-                paddingHorizontal: 16, 
-                paddingVertical: 12, 
-                borderTopWidth: 1, 
-                borderTopColor: "#F1F1EF", 
-                backgroundColor: "#FFFFFF",
-                gap: 10
-              }}>
-                <TextInput
-                  style={{
-                    flex: 1,
-                    backgroundColor: "#F7F7F5",
-                    borderRadius: 20,
-                    paddingHorizontal: 16,
-                    paddingVertical: 10,
-                    fontSize: 14,
-                    fontFamily: "Nunito",
-                    color: "#1F1F1F",
-                    maxHeight: 100,
-                  }}
-                  multiline
-                  placeholder="Type a message..."
-                  placeholderTextColor="#7A7A7A"
-                  value={chatInput}
-                  onChangeText={setChatInput}
-                />
-                <TouchableOpacity 
-                  onPress={handleSendChatMessage}
-                  disabled={!chatInput.trim()}
-                  style={{
-                    width: 40,
-                    height: 40,
-                    borderRadius: 20,
-                    backgroundColor: chatInput.trim() ? "#0B6B3A" : "#E8E8E8",
-                    alignItems: "center",
-                    justifyContent: "center"
-                  }}
+                {/* Message History */}
+                <ScrollView 
+                  ref={chatScrollViewRef}
+                  style={{ flex: 1, backgroundColor: "#ECE5DD" }}
+                  onContentSizeChange={() => chatScrollViewRef.current?.scrollToEnd({ animated: true })}
+                  contentContainerStyle={{ padding: 20, gap: 12, backgroundColor: "#ECE5DD", flexGrow: 1 }}
+                  keyboardShouldPersistTaps="handled"
                 >
-                  <Send size={16} color="#FFFFFF" />
-                </TouchableOpacity>
+                  {chatMessages.length === 0 ? (
+                    <View style={{ paddingVertical: 40, alignItems: "center", justifyContent: "center" }}>
+                      <Text style={{ fontSize: 13, fontFamily: "Nunito", color: "#8A8A8A", textAlign: "center" }}>
+                        No messages yet. Send a message to start discussion about your quotation!
+                      </Text>
+                    </View>
+                  ) : (
+                    chatMessages.map((msg) => {
+                      const isMe = msg.sender_id === user?.id
+                      const msgDate = new Date(msg.created_at)
+                      const timeStr = isNaN(msgDate.getTime()) ? "" : msgDate.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
+                      
+                      return (
+                        <View 
+                          key={msg.id} 
+                          style={{ 
+                            alignSelf: isMe ? "flex-end" : "flex-start",
+                            maxWidth: "75%",
+                            backgroundColor: isMe ? "#DCF8C6" : "#FFFFFF",
+                            paddingHorizontal: 14,
+                            paddingVertical: 8,
+                            borderRadius: 12,
+                            borderBottomRightRadius: isMe ? 2 : 12,
+                            borderBottomLeftRadius: isMe ? 12 : 2,
+                            shadowColor: "#000000",
+                            shadowOffset: { width: 0, height: 1 },
+                            shadowOpacity: 0.12,
+                            shadowRadius: 1,
+                            elevation: 1,
+                          }}
+                        >
+                          {!isMe && (
+                            <Text style={{ fontSize: 10, fontWeight: "bold", color: "#0B6B3A", fontFamily: "Poppins", marginBottom: 2 }}>
+                              {msg.sender_name} ({msg.sender_role})
+                            </Text>
+                          )}
+                          <Text style={{ fontSize: 13, color: "#303030", fontFamily: "Nunito" }}>
+                            {msg.message}
+                          </Text>
+                          {timeStr ? (
+                            <Text style={{ fontSize: 9, color: "#8A8A8A", fontFamily: "Nunito", alignSelf: "flex-end", marginTop: 4 }}>
+                              {timeStr}
+                            </Text>
+                          ) : null}
+                        </View>
+                      )
+                    })
+                  )}
+                </ScrollView>
+
+                {/* Input Footer */}
+                <View style={{ 
+                  flexDirection: "row", 
+                  alignItems: "center", 
+                  paddingHorizontal: 16, 
+                  paddingVertical: 12, 
+                  paddingBottom: (Platform.OS === "android" ? keyboardHeight : 0) + 12,
+                  borderTopWidth: 1, 
+                  borderTopColor: "#F1F1EF", 
+                  backgroundColor: "#FFFFFF",
+                  gap: 10
+                }}>
+                  <TextInput
+                    style={{
+                      flex: 1,
+                      backgroundColor: "#F7F7F5",
+                      borderRadius: 20,
+                      paddingHorizontal: 16,
+                      paddingVertical: 10,
+                      fontSize: 14,
+                      fontFamily: "Nunito",
+                      color: "#1F1F1F",
+                      maxHeight: 100,
+                    }}
+                    multiline
+                    placeholder="Type a message..."
+                    placeholderTextColor="#7A7A7A"
+                    value={chatInput}
+                    onChangeText={setChatInput}
+                  />
+                  <TouchableOpacity 
+                    onPress={handleSendChatMessage}
+                    disabled={!chatInput.trim()}
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 20,
+                      backgroundColor: chatInput.trim() ? "#0B6B3A" : "#E8E8E8",
+                      alignItems: "center",
+                      justifyContent: "center"
+                    }}
+                  >
+                    <Send size={16} color="#FFFFFF" />
+                  </TouchableOpacity>
+                </View>
               </View>
-            </KeyboardAvoidingView>
-          </Pressable>
-        </Pressable>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   )

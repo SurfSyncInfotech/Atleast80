@@ -1,72 +1,22 @@
-import { useEffect, useRef, useState } from "react"
-import { Upload, Trash2, Image, Video, ShieldCheck, Send } from "lucide-react"
+import { useRef, useState } from "react"
+import { Upload, Trash2, Image as ImageIcon, ShieldCheck, Send } from "lucide-react"
 import Button from "../ui/Button"
-import { api, uploadFiles } from "../../lib/api"
+import { useAuth } from "../../context/AuthContext"
+import { api, uploadKitchenImages } from "../../lib/api"
+import { resolveMediaUrl } from "../../lib/media"
 import { cn } from "../../lib/utils"
-
-function PendingPreview({ item, onRemove }) {
-  const isVideo = item.file.type.startsWith("video/")
-
-  return (
-    <div className="relative group rounded-xl overflow-hidden border-2 border-dashed border-primary/40 bg-primary/5 aspect-square">
-      {isVideo ? (
-        <video src={item.previewUrl} className="w-full h-full object-cover" muted />
-      ) : (
-        <img src={item.previewUrl} alt="" className="w-full h-full object-cover" />
-      )}
-      <div className="absolute top-2 left-2 w-7 h-7 rounded-lg bg-black/50 flex items-center justify-center">
-        {isVideo ? <Video size={14} className="text-white" /> : <Image size={14} className="text-white" />}
-      </div>
-      <span className="absolute bottom-2 left-2 right-2 text-center text-[10px] font-nunito font-medium text-white bg-primary/90 rounded-md py-0.5 px-1">
-        Not submitted
-      </span>
-      <button
-        type="button"
-        onClick={() => onRemove(item.id)}
-        className="absolute top-2 right-2 w-7 h-7 rounded-lg bg-red-600/90 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-        aria-label="Remove"
-      >
-        <Trash2 size={14} />
-      </button>
-    </div>
-  )
-}
 
 export default function HygieneUploadSection({ compact = false, onChange }) {
   const inputRef = useRef(null)
-  const pendingRef = useRef([])
-  const [items, setItems] = useState([])
+  const { kitchen, refreshKitchen } = useAuth()
   const [pendingFiles, setPendingFiles] = useState([])
-  const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const [deletingUrl, setDeletingUrl] = useState(null)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
 
-  pendingRef.current = pendingFiles
-
-  const load = async () => {
-    setLoading(true)
-    try {
-      const data = await api("/api/stories/verification/me")
-      setItems(data.stories || [])
-      onChange?.(data.stories?.length || 0)
-    } catch {
-      setItems([])
-      onChange?.(0)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    load()
-  }, [])
-
-  useEffect(() => {
-    return () => {
-      pendingRef.current.forEach((item) => URL.revokeObjectURL(item.previewUrl))
-    }
-  }, [])
+  const existingImages = kitchen?.kitchenImages || []
+  const totalCount = existingImages.length + pendingFiles.length
 
   const handleFileSelect = (e) => {
     const files = Array.from(e.target.files || [])
@@ -75,7 +25,20 @@ export default function HygieneUploadSection({ compact = false, onChange }) {
     setError("")
     setSuccess("")
 
-    const next = files.map((file) => ({
+    const remainingAllowed = 5 - existingImages.length
+    if (remainingAllowed <= 0) {
+      setError("Maximum 5 cooking area setup photos allowed.")
+      return
+    }
+
+    const selected = files.slice(0, remainingAllowed)
+    const combinedCount = existingImages.length + selected.length
+
+    if (combinedCount < 2) {
+      setError("At least 2 cooking area setup photos are required. Please select at least 2 photos.")
+    }
+
+    const next = selected.map((file) => ({
       id: `${file.name}-${file.size}-${Date.now()}-${Math.random()}`,
       file,
       previewUrl: URL.createObjectURL(file),
@@ -95,37 +58,47 @@ export default function HygieneUploadSection({ compact = false, onChange }) {
 
   const handleSubmit = async () => {
     if (pendingFiles.length === 0) return
+    if (existingImages.length === 0 && pendingFiles.length < 2) {
+      setError("At least 2 cooking area setup photos are required for submission.")
+      return
+    }
 
     setSubmitting(true)
     setError("")
     setSuccess("")
     try {
-      await uploadFiles(
-        "/api/stories/verification",
-        pendingFiles.map((p) => p.file)
-      )
+      await uploadKitchenImages(pendingFiles.map((p) => p.file))
       pendingFiles.forEach((item) => URL.revokeObjectURL(item.previewUrl))
       setPendingFiles([])
-      setSuccess(`${pendingFiles.length} file(s) submitted for admin review.`)
-      await load()
+      await refreshKitchen()
+      setSuccess("Cooking area setup photos uploaded successfully for admin review!")
+      onChange?.(kitchen?.kitchenImages?.length || pendingFiles.length)
     } catch (err) {
-      setError(err.message || "Submit failed")
+      setError(err.message || "Upload failed")
     } finally {
       setSubmitting(false)
     }
   }
 
-  const handleDelete = async (id) => {
+  const handleDeleteExisting = async (url) => {
+    if (!window.confirm("Delete this cooking area setup photo?")) return
+
+    setDeletingUrl(url)
+    setError("")
     try {
-      await api(`/api/stories/verification/${id}`, { method: "DELETE" })
-      await load()
+      await api("/api/kitchens/me/images", {
+        method: "DELETE",
+        body: JSON.stringify({ imageUrl: url }),
+      }, "kitchen")
+      await refreshKitchen()
+      setSuccess("Photo deleted")
+      onChange?.(kitchen?.kitchenImages?.length ? kitchen.kitchenImages.length - 1 : 0)
     } catch (err) {
-      setError(err.message || "Failed to remove file")
+      setError(err.message || "Failed to delete photo")
+    } finally {
+      setDeletingUrl(null)
     }
   }
-
-  const hasPending = pendingFiles.length > 0
-  const hasSubmitted = items.length > 0
 
   return (
     <div
@@ -141,15 +114,14 @@ export default function HygieneUploadSection({ compact = false, onChange }) {
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="font-poppins font-semibold text-dark">
-              {compact ? "Hygiene verification" : "Upload hygiene proof to get approved"}
+              Cooking Area Setup Photos
             </h3>
             <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-800 border border-amber-200 text-[10px] font-poppins font-bold uppercase tracking-wide px-2.5 py-0.5">
-              Required for approval
+              Min 2 Required for Approval
             </span>
           </div>
           <p className="font-nunito text-sm text-gray mt-1 leading-relaxed">
-            Add clear photos and short videos of your kitchen, cooking area, and food preparation.
-            Click <strong>Submit</strong> when ready — our admin team will review your media.
+            Upload at least 2 clear photos of your cooking area and kitchen setup. Admin will review these photos to verify your kitchen.
           </p>
         </div>
       </div>
@@ -169,7 +141,7 @@ export default function HygieneUploadSection({ compact = false, onChange }) {
       <input
         ref={inputRef}
         type="file"
-        accept="image/*,video/*"
+        accept="image/*"
         multiple
         className="hidden"
         onChange={handleFileSelect}
@@ -181,88 +153,73 @@ export default function HygieneUploadSection({ compact = false, onChange }) {
           size="sm"
           variant="outline"
           onClick={() => inputRef.current?.click()}
-          disabled={submitting}
+          disabled={submitting || existingImages.length >= 5}
         >
           <Upload size={16} />
-          Add photos & videos
+          Add Photos
         </Button>
 
         <Button
           type="button"
           size="sm"
           onClick={handleSubmit}
-          disabled={submitting || !hasPending}
+          disabled={submitting || pendingFiles.length === 0}
         >
           <Send size={16} />
-          {submitting ? "Submitting..." : "Submit for review"}
+          {submitting ? "Uploading..." : "Submit Photos for Review"}
         </Button>
       </div>
 
-      {loading ? (
-        <p className="font-nunito text-sm text-gray">Loading uploads...</p>
-      ) : !hasPending && !hasSubmitted ? (
+      {existingImages.length === 0 && pendingFiles.length === 0 ? (
         <div className="rounded-xl border border-dashed border-gray-200 bg-cream/50 p-6 text-center">
-          <p className="font-nunito text-sm text-gray">No hygiene media added yet.</p>
+          <ImageIcon size={32} className="mx-auto text-gray-400 mb-2" />
+          <p className="font-nunito text-sm font-semibold text-dark">No cooking area setup photos uploaded yet.</p>
           <p className="font-nunito text-xs text-gray mt-1">
-            Add at least one photo or video, then click Submit for admin review.
+            Please upload at least 2 clear photos of your cooking area for Admin review.
           </p>
         </div>
       ) : (
-        <div className="space-y-5">
-          {hasPending && (
-            <div>
-              <p className="font-poppins text-xs font-semibold text-primary mb-2 uppercase tracking-wide">
-                Ready to submit ({pendingFiles.length})
-              </p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                {pendingFiles.map((item) => (
-                  <PendingPreview key={item.id} item={item} onRemove={removePending} />
-                ))}
-              </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+          {existingImages.map((url, idx) => (
+            <div key={url} className="relative group rounded-xl overflow-hidden border border-emerald-300 bg-emerald-50 aspect-square">
+              <img src={resolveMediaUrl(url)} alt={`Cooking area ${idx + 1}`} className="w-full h-full object-cover" />
+              <span className="absolute top-2 left-2 text-[10px] font-poppins font-bold text-white bg-emerald-700 rounded px-1.5 py-0.5 shadow-sm">
+                Setup {idx + 1}
+              </span>
+              <button
+                type="button"
+                onClick={() => handleDeleteExisting(url)}
+                disabled={deletingUrl === url}
+                className="absolute top-2 right-2 w-7 h-7 rounded-lg bg-white/90 text-red-600 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer shadow-sm"
+                aria-label="Remove"
+              >
+                <Trash2 size={14} />
+              </button>
             </div>
-          )}
+          ))}
 
-          {hasSubmitted && (
-            <div>
-              <p className="font-poppins text-xs font-semibold text-gray mb-2 uppercase tracking-wide">
-                Submitted ({items.length})
-              </p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                {items.map((item) => (
-                  <div key={item.id} className="relative group rounded-xl overflow-hidden border border-gray-100 bg-gray-50 aspect-square">
-                    {item.mediaType === "video" ? (
-                      <video src={item.mediaUrl} className="w-full h-full object-cover" muted />
-                    ) : (
-                      <img src={item.mediaUrl} alt="" className="w-full h-full object-cover" />
-                    )}
-                    <div className="absolute top-2 left-2 w-7 h-7 rounded-lg bg-black/50 flex items-center justify-center">
-                      {item.mediaType === "video" ? (
-                        <Video size={14} className="text-white" />
-                      ) : (
-                        <Image size={14} className="text-white" />
-                      )}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(item.id)}
-                      className="absolute top-2 right-2 w-7 h-7 rounded-lg bg-red-600/90 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                      aria-label="Remove"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                ))}
-              </div>
+          {pendingFiles.map((item) => (
+            <div key={item.id} className="relative group rounded-xl overflow-hidden border-2 border-dashed border-primary/40 bg-primary/5 aspect-square">
+              <img src={item.previewUrl} alt="" className="w-full h-full object-cover" />
+              <span className="absolute top-2 left-2 text-[10px] font-poppins font-bold text-white bg-amber-500 rounded px-1.5 py-0.5 shadow-sm">
+                Ready
+              </span>
+              <button
+                type="button"
+                onClick={() => removePending(item.id)}
+                className="absolute top-2 right-2 w-7 h-7 rounded-lg bg-red-600/90 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                aria-label="Remove"
+              >
+                <Trash2 size={14} />
+              </button>
             </div>
-          )}
+          ))}
         </div>
       )}
 
-      {hasSubmitted && (
-        <p className="font-nunito text-xs text-primary mt-4 bg-primary/5 rounded-lg px-3 py-2">
-          {items.length} file(s) submitted. Admin will verify hygiene and assign your score after review.
-        </p>
-      )}
+      <p className="font-nunito text-xs text-gray mt-3">
+        {totalCount}/5 photos selected. {totalCount < 2 ? "Minimum 2 photos required." : "Photos ready for Admin review."}
+      </p>
     </div>
   )
 }

@@ -5,6 +5,7 @@ import pool from "../config/db.js"
 import { authRequired, requireRole } from "../middleware/auth.js"
 import { requireApprovedKitchen } from "../middleware/kitchen.js"
 import { quotationUpload, getQuotationFileUrl, QUOTATION_UPLOADS_DIR } from "../middleware/upload.js"
+import { sendPushToUser } from "../utils/pushNotifications.js"
 const router = Router()
 const MIN_BULK_VALUE = 2000
 
@@ -39,7 +40,9 @@ function mapEnquiryRow(row) {
     kitchenName: row.kitchen_name || null,
     lastMessage: row.last_message || null,
     lastMessageSenderId: row.last_message_sender_id || null,
-    messageCount: row.message_count || 0
+    messageCount: row.message_count || 0,
+    customerUnreadCount: row.customer_unread_count || 0,
+    kitchenUnreadCount: row.kitchen_unread_count || 0,
   }
 }
 
@@ -74,10 +77,18 @@ router.post("/", authRequired, requireRole("customer"), async (req, res) => {
       return res.status(400).json({ message: "This kitchen is not accepting enquiries yet" })
     }
 
+    // Auto-close any previous active enquiries for this customer and kitchen so new enquiry starts with clean chat
+    await pool.query(
+      `UPDATE bulk_order_enquiries
+       SET status = 'cancelled'
+       WHERE customer_id = ? AND kitchen_id = ? AND status NOT IN ('completed', 'rejected', 'cancelled')`,
+      [req.user.id, kitchenId]
+    )
+
     const [result] = await pool.query(
-      `INSERT INTO bulk_order_enquiries (kitchen_id, customer_id, message, estimated_value, people_count)
-       VALUES (?, ?, ?, ?, ?)`,
-      [kitchenId, req.user.id, message, estimatedValue, peopleCount]
+      `INSERT INTO bulk_order_enquiries (kitchen_id, customer_id, message, estimated_value, people_count, kitchen_unread_count)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [kitchenId, req.user.id, message, estimatedValue, peopleCount, 1]
     )
 
     res.status(201).json({
@@ -126,7 +137,7 @@ router.get("/kitchen/:kitchenId", authRequired, requireRole("customer"), async (
       `SELECT e.*, k.name AS kitchen_name
        FROM bulk_order_enquiries e
        JOIN kitchens k ON k.id = e.kitchen_id
-       WHERE e.customer_id = ? AND e.kitchen_id = ?
+       WHERE e.customer_id = ? AND e.kitchen_id = ? AND e.status NOT IN ('completed', 'rejected', 'cancelled')
        ORDER BY e.created_at DESC
        LIMIT 1`,
       [req.user.id, kitchenId]
@@ -208,10 +219,35 @@ router.post(
                quotation_file = ?,
                quotation_amount = ?,
                quotation_notes = ?,
-               quoted_at = NOW()
+               quoted_at = NOW(),
+               customer_unread_count = customer_unread_count + 1,
+               kitchen_unread_count = 0
            WHERE id = ?`,
           [fileUrl, quotationAmount, quotationNotes, enquiryId]
         )
+
+        // Send Push Notification to customer
+        const [enqDetails] = await pool.query(
+          `SELECT e.customer_id, k.name as kitchen_name 
+           FROM bulk_order_enquiries e 
+           JOIN kitchens k ON e.kitchen_id = k.id 
+           WHERE e.id = ?`,
+          [enquiryId]
+        )
+        if (enqDetails.length > 0) {
+          sendPushToUser(
+            enqDetails[0].customer_id,
+            "Quotation Reply Received! 📜",
+            `${enqDetails[0].kitchen_name} has sent a quotation reply of ₹${quotationAmount} for your bulk enquiry!`,
+            {
+              type: "quotation_reply",
+              enquiryId: String(enquiryId),
+              kitchenId: String(rows[0].kitchen_id),
+              kitchenName: enqDetails[0].kitchen_name,
+              quotationAmount: String(quotationAmount),
+            }
+          ).catch((e) => console.error("Error sending quotation push:", e))
+        }
 
         res.json({
           message: "Quotation updated. The customer can view it in their enquiry chat.",
@@ -306,10 +342,34 @@ router.patch(
          SET status = 'quoted',
              quotation_amount = ?,
              quotation_notes = COALESCE(?, quotation_notes),
-             quoted_at = NOW()
+             quoted_at = NOW(),
+             kitchen_unread_count = 0
          WHERE id = ?`,
         [quotationAmount, quotationNotes, enquiryId]
       )
+
+      // Send Push Notification to customer
+      const [enqDetails] = await pool.query(
+        `SELECT e.customer_id, k.name as kitchen_name 
+         FROM bulk_order_enquiries e 
+         JOIN kitchens k ON e.kitchen_id = k.id 
+         WHERE e.id = ?`,
+        [enquiryId]
+      )
+      if (enqDetails.length > 0) {
+        sendPushToUser(
+          enqDetails[0].customer_id,
+          "Quotation Updated! 📜",
+          `${enqDetails[0].kitchen_name} has updated the quotation price to ₹${quotationAmount}!`,
+          {
+            type: "quotation_reply",
+            enquiryId: String(enquiryId),
+            kitchenId: String(rows[0].kitchen_id),
+            kitchenName: enqDetails[0].kitchen_name,
+            quotationAmount: String(quotationAmount),
+          }
+        ).catch((e) => console.error("Error sending quotation push:", e))
+      }
 
       res.json({ message: "Quotation price updated successfully." })
     } catch (error) {
@@ -425,13 +485,13 @@ router.post("/:id/pay", authRequired, requireRole("customer"), async (req, res) 
     try {
       await connection.beginTransaction()
 
-      // 4. Create the main order entry
+      // 4. Create the main order entry with 'confirmed' status
       const [orderResult] = await connection.query(
         `INSERT INTO orders (
           order_number, user_id, kitchen_id, status, payment_method,
           packing_type, delivery_method, item_total, packing_fee, delivery_fee,
           grand_total, delivery_address
-        ) VALUES (?, ?, ?, 'pending', 'online', 'standard', 'delivery', ?, 0.00, 0.00, ?, ?)`,
+        ) VALUES (?, ?, ?, 'confirmed', 'online', 'standard', 'delivery', ?, 0.00, 0.00, ?, ?)`,
         [
           orderNumber,
           req.user.id,
@@ -466,7 +526,7 @@ router.post("/:id/pay", authRequired, requireRole("customer"), async (req, res) 
       connection.release()
     }
 
-    res.json({ message: "Payment successful. Order placed." })
+    res.json({ message: "Payment successful. Order placed & confirmed!" })
   } catch (error) {
     console.error("Pay quotation error:", error)
     res.status(500).json({ message: "Failed to process payment" })
@@ -530,6 +590,13 @@ router.get("/:id/chat", authRequired, async (req, res) => {
       return res.status(403).json({ message: "Not authorized to access this chat" })
     }
 
+    // Reset unread count for the reading user
+    if (req.user.id === enq.customer_id) {
+      await pool.query("UPDATE bulk_order_enquiries SET customer_unread_count = 0 WHERE id = ?", [enquiryId])
+    } else if (req.user.id === enq.kitchen_user_id) {
+      await pool.query("UPDATE bulk_order_enquiries SET kitchen_unread_count = 0 WHERE id = ?", [enquiryId])
+    }
+
     const [messages] = await pool.query(
       `SELECT m.id, m.enquiry_id, m.sender_id, m.message, m.created_at, u.name AS sender_name, u.role AS sender_role
        FROM bulk_order_chat_messages m
@@ -581,6 +648,34 @@ router.post("/:id/chat", authRequired, async (req, res) => {
       "INSERT INTO bulk_order_chat_messages (enquiry_id, sender_id, message) VALUES (?, ?, ?)",
       [enquiryId, req.user.id, message]
     )
+
+    // Increment unread count for recipient & send push notification
+    if (req.user.id === enq.customer_id) {
+      await pool.query("UPDATE bulk_order_enquiries SET kitchen_unread_count = kitchen_unread_count + 1 WHERE id = ?", [enquiryId])
+    } else if (req.user.id === enq.kitchen_user_id) {
+      await pool.query("UPDATE bulk_order_enquiries SET customer_unread_count = customer_unread_count + 1 WHERE id = ?", [enquiryId])
+
+      // Trigger Push Notification to Customer
+      const [kInfo] = await pool.query(
+        "SELECT k.name, e.kitchen_id FROM bulk_order_enquiries e JOIN kitchens k ON k.id = e.kitchen_id WHERE e.id = ?",
+        [enquiryId]
+      )
+      const kitchenName = kInfo[0]?.name || "Kitchen"
+      const kitchenId = kInfo[0]?.kitchen_id
+
+      sendPushToUser(
+        enq.customer_id,
+        `New Message from ${kitchenName} 💬`,
+        message.length > 55 ? `${message.substring(0, 55)}...` : message,
+        {
+          type: "chat_message",
+          enquiryId: String(enquiryId),
+          kitchenId: String(kitchenId),
+          kitchenName: kitchenName,
+          message: message,
+        }
+      ).catch((e) => console.error("Error sending chat push to customer:", e))
+    }
 
     res.status(201).json({
       message: "Message sent",

@@ -9,6 +9,7 @@ export default function CustomerLayout() {
       <Stack.Screen name="orders/[id]" />
       <Stack.Screen name="rescue/[id]" />
       <Stack.Screen name="storyViewer" options={{ animation: "fade_from_bottom" }} />
+      <Stack.Screen name="user-account-deletion" />
     </Stack>
   )
 }

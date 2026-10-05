@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Linking, Image, Platform, ImageBackground } from "react-native"
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Linking, Image, Platform, ImageBackground, Modal } from "react-native"
 
 // Custom Alert wrapper to support React Native Web / Browser environment
 const Alert = {
@@ -22,7 +22,7 @@ const Alert = {
 };
 import { useLocalSearchParams, useRouter } from "expo-router"
 import { SafeAreaView } from "react-native-safe-area-context"
-import { ArrowLeft, CheckCircle2, ChefHat, Bike, Home, Phone, Truck, Check } from "lucide-react-native"
+import { ArrowLeft, CheckCircle2, ChefHat, Bike, Home, Phone, Truck, Check, AlertTriangle } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import Button from "../../../components/ui/Button"
 import { api } from "../../../lib/api"
@@ -102,51 +102,53 @@ export default function OrderTrackingScreen() {
 
     const interval = setInterval(() => {
       loadOrder(false)
-    }, 10000)
+    }, 3000)
 
     return () => clearInterval(interval)
   }, [order, loadOrder])
 
-  const handleCancelOrder = async () => {
-    const isOutForDelivery = order.status === "out_for_delivery"
-    const title = isOutForDelivery ? "Cancel Out-For-Delivery Order" : "Cancel Order"
-    const message = isOutForDelivery 
-      ? `This order is already out for delivery. To cancel, you must pay the delivery fee of ₹${order.deliveryFee || 30} online immediately. Do you want to pay and cancel?`
-      : "Are you sure you want to cancel this order?"
+  const [cancelModalOpen, setCancelModalOpen] = useState(false)
+  const [cancelSuccessMsg, setCancelSuccessMsg] = useState("")
 
-    Alert.alert(
-      title,
-      message,
-      [
-        { text: "No", style: "cancel" },
-        {
-          text: isOutForDelivery ? "Pay & Cancel" : "Yes, Cancel",
-          style: "destructive",
-          onPress: async () => {
-            setCancelling(true)
-            try {
-              const body = isOutForDelivery ? { payOnline: true } : {}
-              const data = await api(`/api/orders/${order.id}/cancel`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(body)
-              })
-              setOrder(data.order)
-              Alert.alert(
-                "Success", 
-                isOutForDelivery 
-                  ? "Cancellation fee paid successfully. Order cancelled." 
-                  : "Order cancelled successfully"
-              )
-            } catch (err) {
-              Alert.alert("Error", err.message || "Failed to cancel order")
-            } finally {
-              setCancelling(false)
-            }
-          }
+  const openCancelModal = () => {
+    setCancelSuccessMsg("")
+    setCancelModalOpen(true)
+  }
+
+  const confirmCancelOrder = async () => {
+    setCancelling(true)
+    try {
+      const data = await api(`/api/orders/${order.id}/cancel`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" }
+      })
+      setOrder(data.order)
+
+      const isOutForDelivery = order.status === "out_for_delivery"
+      const isOnline = ["online", "upi", "razorpay"].includes(order.paymentMethod)
+      const deliveryFee = Number(order.deliveryFee) > 0 ? Number(order.deliveryFee) : 30
+      const refundAmt = Math.max(0, Number(order.grandTotal) - deliveryFee)
+
+      let successMsg = ""
+      if (isOutForDelivery) {
+        if (isOnline) {
+          successMsg = `Your order has been cancelled. Note: ₹${deliveryFee} delivery charge is non-refundable for rider trip. The remaining ₹${refundAmt} will be refunded to your account within 24-48 hours.`
+        } else {
+          successMsg = `Your order has been cancelled. Advance ₹${deliveryFee} delivery charge is non-refundable for rider trip.`
         }
-      ]
-    )
+      } else if (isOnline) {
+        successMsg = `Your order has been cancelled. Your full payment of ₹${order.grandTotal} will be refunded to your account within 24-48 hours.`
+      } else {
+        successMsg = `Your order has been cancelled. Your ₹30 advance delivery charge will be refunded to your account within 24-48 hours.`
+      }
+
+      setCancelSuccessMsg(successMsg)
+    } catch (err) {
+      Alert.alert("Error", err.message || "Failed to cancel order")
+      setCancelModalOpen(false)
+    } finally {
+      setCancelling(false)
+    }
   }
 
   if (loading) {
@@ -198,48 +200,74 @@ export default function OrderTrackingScreen() {
       <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 60 }}>
         {order.status === "cancelled" && (
           <View style={{
-            backgroundColor: "#FEE2E2",
-            borderColor: "#FCA5A5",
-            borderWidth: 1,
+            backgroundColor: "#FEF2F2",
             borderRadius: 24,
             padding: 20,
+            borderWidth: 1,
+            borderColor: "#FECACA",
             alignItems: "center",
             marginBottom: 16
           }}>
-            <Text style={{ fontSize: 15, fontFamily: "Poppins", fontWeight: "bold", color: "#B91C1C" }}>Order Cancelled</Text>
-            <Text style={{ fontSize: 13, fontFamily: "Nunito", color: "#991B1B", marginTop: 4, textAlign: "center" }}>This order was cancelled.</Text>
+            <Text style={{ fontSize: 16, fontFamily: "Poppins", fontWeight: "bold", color: "#DC2626" }}>Order Cancelled</Text>
+            <Text style={{ fontSize: 12, fontFamily: "Nunito", color: "#991B1B", marginTop: 4, textAlign: "center" }}>This order was cancelled.</Text>
           </View>
         )}
 
-        {order.status !== "cancelled" && (
-          <>
-            {/* Estimated Arrival Banner */}
-            <View style={{
-          backgroundColor: "#FFFFFF",
-          borderRadius: 24,
-          padding: 20,
-          borderWidth: 1,
-          borderColor: "#F3F4F6",
-          alignItems: "center",
-          marginBottom: 16,
-          ...Platform.select({
-            default: {
-              shadowColor: "#000",
-              shadowOffset: { width: 0, height: 4 },
-              shadowOpacity: 0.02,
-              shadowRadius: 8,
-              elevation: 1,
-            }
-          })
-        }}>
-          <Text style={{ fontSize: 11, fontFamily: "Poppins", fontWeight: "900", color: "#9CA3AF", textTransform: "uppercase", letterSpacing: 0.5 }}>Estimated Arrival</Text>
-          <Text style={{ fontSize: 32, fontFamily: "Poppins", fontWeight: "extrabold", color: "#1F2937", marginTop: 4 }}>25-30 min</Text>
-          <View style={{ width: "100%", backgroundColor: "#E5E7EB", borderRadius: 10, height: 6, marginTop: 16, overflow: "hidden" }}>
-            <View
-              style={{ width: `${progress}%`, height: "100%", backgroundColor: "#0B6B3A", borderRadius: 10 }}
-            />
+        {(order.cancellationOtp || order.cancellation_otp) && order.status !== "cancelled" && (
+          <View style={{
+            backgroundColor: "#FEF2F2",
+            borderRadius: 24,
+            padding: 18,
+            borderWidth: 1.5,
+            borderColor: "#FCA5A5",
+            alignItems: "center",
+            marginBottom: 16
+          }}>
+            <Text style={{ fontSize: 13, fontFamily: "Poppins", fontWeight: "bold", color: "#B91C1C", textTransform: "uppercase", letterSpacing: 0.5 }}>
+              🔑 Doorstep Cancellation OTP
+            </Text>
+            <Text style={{ fontSize: 28, fontFamily: "Poppins", fontWeight: "800", color: "#DC2626", marginTop: 4, letterSpacing: 4 }}>
+              {order.cancellationOtp || order.cancellation_otp}
+            </Text>
+            <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#991B1B", marginTop: 6, textAlign: "center", lineHeight: 18 }}>
+              {["online", "upi", "razorpay"].includes(order.paymentMethod)
+                ? `Doorstep cancellation requested. Note: ₹30 delivery fee is non-refundable for rider trip, and ₹${Math.max(0, Number(order.grandTotal) - 30)} will be refunded to your account within 24-48 hours. Share this OTP with rider to confirm:`
+                : "Doorstep cancellation requested. Note: ₹30 advance delivery fee is non-refundable for rider trip. Share this OTP with rider to confirm:"}
+            </Text>
           </View>
-        </View>
+        )}
+
+        {/* Estimated Arrival Header Card */}
+        {order.status !== "cancelled" && (
+          <View style={{
+            backgroundColor: "#FFFFFF",
+            borderRadius: 24,
+            padding: 20,
+            borderWidth: 1,
+            borderColor: "#F3F4F6",
+            alignItems: "center",
+            marginBottom: 16,
+            ...Platform.select({
+              default: {
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.02,
+                shadowRadius: 8,
+                elevation: 1,
+              }
+            })
+          }}>
+            <Text style={{ fontSize: 11, fontFamily: "Poppins", fontWeight: "bold", color: "#9CA3AF", textTransform: "uppercase", letterSpacing: 1 }}>
+              {order.status === "delivered" ? "Order Delivered" : order.status === "out_for_delivery" ? "Out for Delivery" : "Estimated Arrival"}
+            </Text>
+            <Text style={{ fontSize: 28, fontFamily: "Poppins", fontWeight: "extrabold", color: "#1F2937", marginTop: 4 }}>
+              {order.status === "delivered" ? "Enjoy Your Meal! 🍕" : order.status === "out_for_delivery" ? "Rider On The Way! 🚲" : "25-30 min"}
+            </Text>
+            <View style={{ width: "100%", height: 6, backgroundColor: "#E5E7EB", borderRadius: 3, marginTop: 16, overflow: "hidden" }}>
+              <View style={{ width: `${progress}%`, height: "100%", backgroundColor: "#0B6B3A", borderRadius: 3 }} />
+            </View>
+          </View>
+        )}
 
         {/* Delivery OTP Card */}
         {order.deliveryOtp && order.status !== "delivered" && order.status !== "cancelled" && (
@@ -290,8 +318,6 @@ export default function OrderTrackingScreen() {
             {STEPS.map((step, i) => {
               const Icon = step.icon
               const { done, active } = stepState(order.status, step.id)
-              const isCompleted = done && !active
-              const isPending = !done && !active
 
               return (
                 <View key={step.id} style={{ flexDirection: "row", alignItems: "center", marginBottom: 12, position: "relative" }}>
@@ -303,7 +329,7 @@ export default function OrderTrackingScreen() {
                       top: 36,
                       bottom: -20,
                       width: 2,
-                      backgroundColor: isCompleted ? "#0B6B3A" : "#E5E7EB",
+                      backgroundColor: done ? "#0B6B3A" : "#E5E7EB",
                       zIndex: 0
                     }} />
                   )}
@@ -313,7 +339,7 @@ export default function OrderTrackingScreen() {
                     width: 36,
                     height: 36,
                     borderRadius: 12,
-                    backgroundColor: isCompleted ? "#0B6B3A" : active ? "#FFFFFF" : "#FAF6F0",
+                    backgroundColor: done ? "#0B6B3A" : "#FAF6F0",
                     borderWidth: active ? 2 : 0,
                     borderColor: "#0B6B3A",
                     alignItems: "center",
@@ -324,25 +350,29 @@ export default function OrderTrackingScreen() {
                       default: active ? {
                         shadowColor: "#0B6B3A",
                         shadowOffset: { width: 0, height: 2 },
-                        shadowOpacity: 0.1,
+                        shadowOpacity: 0.25,
                         shadowRadius: 4,
-                        elevation: 1
+                        elevation: 2
                       } : {}
                     })
                   }}>
-                    {isCompleted ? (
-                      <Check size={14} color="#FFFFFF" strokeWidth={3} />
+                    {done ? (
+                      active ? (
+                        <Icon size={16} color="#FFFFFF" strokeWidth={2.5} />
+                      ) : (
+                        <Check size={16} color="#FFFFFF" strokeWidth={3} />
+                      )
                     ) : (
-                      <Icon size={14} color={active ? "#0B6B3A" : "#8D7355"} />
+                      <Icon size={16} color="#8D7355" />
                     )}
                   </View>
 
                   {/* Step Card */}
                   <View style={{
                     flex: 1,
-                    backgroundColor: active ? "#EAF7EE" : isCompleted ? "#F0FDF4" : "#FAF6F0",
-                    borderWidth: 1,
-                    borderColor: active ? "#D6EAE7" : isCompleted ? "#DCFCE7" : "#EADEC9",
+                    backgroundColor: active ? "#EAF7EE" : done ? "#F0FDF4" : "#FAF6F0",
+                    borderWidth: active ? 2 : 1,
+                    borderColor: active ? "#0B6B3A" : done ? "#DCFCE7" : "#EADEC9",
                     borderRadius: 20,
                     padding: 12,
                     flexDirection: "row",
@@ -363,31 +393,26 @@ export default function OrderTrackingScreen() {
                         fontFamily: "Nunito",
                         color: active ? "#0B6B3A" : "#6B7280",
                         marginTop: 2
-                      }}>{step.desc}</Text>
-                      {active && (
-                        <View style={{ marginTop: 6, backgroundColor: "#0B6B3A", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, alignSelf: "flex-start" }}>
-                          <Text style={{ fontSize: 9, fontFamily: "Poppins", fontWeight: "bold", color: "#FFFFFF" }}>In Progress</Text>
-                        </View>
-                      )}
+                      }}>
+                        {step.desc}
+                      </Text>
                     </View>
-                    <View style={{
-                      width: 20,
-                      height: 20,
-                      borderRadius: 10,
-                      backgroundColor: isCompleted || active ? "#EADEC9" : "#E5E7EB",
-                      alignItems: "center",
-                      justifyContent: "center"
-                    }}>
-                      <Check size={10} color={isCompleted || active ? "#8D7355" : "#9CA3AF"} strokeWidth={3} />
-                    </View>
+
+                    {active ? (
+                      <View style={{ backgroundColor: "#0B6B3A", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 }}>
+                        <Text style={{ color: "#FFFFFF", fontSize: 10, fontFamily: "Poppins", fontWeight: "bold" }}>
+                          {step.id === "out_for_delivery" ? "ON THE WAY" : "IN PROGRESS"}
+                        </Text>
+                      </View>
+                    ) : done ? (
+                      <Check size={16} color="#0B6B3A" strokeWidth={2.5} />
+                    ) : null}
                   </View>
                 </View>
               )
             })}
           </View>
         </View>
-          </>
-        )}
         {/* Items List */}
         <View style={{
           backgroundColor: "#FFFFFF",
@@ -431,9 +456,23 @@ export default function OrderTrackingScreen() {
               </View>
             </ImageBackground>
           ))}
-          <View style={{ borderTopWidth: 1, borderTopColor: "#E5E7EB", marginTop: 8, paddingTop: 12, flexDirection: "row", justifyContent: "space-between" }}>
-            <Text style={{ fontSize: 16, fontFamily: "Poppins", fontWeight: "extrabold", color: "#1F2937" }}>Total</Text>
-            <Text style={{ fontSize: 16, fontFamily: "Poppins", fontWeight: "extrabold", color: "#1F2937" }}>₹{order.grandTotal}</Text>
+          <View style={{ borderTopWidth: 1, borderTopColor: "#E5E7EB", marginTop: 8, paddingTop: 12, gap: 6 }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+              <Text style={{ fontSize: 13, fontFamily: "Nunito", color: "#6B7280" }}>Item Total</Text>
+              <Text style={{ fontSize: 13, fontFamily: "Nunito", color: "#1F2937", fontWeight: "600" }}>₹{order.itemTotal}</Text>
+            </View>
+            <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+              <Text style={{ fontSize: 13, fontFamily: "Nunito", color: "#6B7280" }}>Taxes & GST</Text>
+              <Text style={{ fontSize: 13, fontFamily: "Nunito", color: "#1F2937", fontWeight: "600" }}>₹{order.gstAmount !== undefined && order.gstAmount !== null ? order.gstAmount : Number((order.itemTotal * 0.05).toFixed(2))}</Text>
+            </View>
+            <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+              <Text style={{ fontSize: 13, fontFamily: "Nunito", color: "#6B7280" }}>Delivery Fee</Text>
+              <Text style={{ fontSize: 13, fontFamily: "Nunito", color: "#1F2937", fontWeight: "600" }}>{order.deliveryFee === 0 ? "Free" : `₹${order.deliveryFee}`}</Text>
+            </View>
+            <View style={{ borderTopWidth: 1, borderTopColor: "#F3F4F6", paddingTop: 8, flexDirection: "row", justifyContent: "space-between" }}>
+              <Text style={{ fontSize: 16, fontFamily: "Poppins", fontWeight: "extrabold", color: "#1F2937" }}>Grand Total</Text>
+              <Text style={{ fontSize: 16, fontFamily: "Poppins", fontWeight: "extrabold", color: "#0B6B3A" }}>₹{order.grandTotal}</Text>
+            </View>
           </View>
         </View>
 
@@ -499,7 +538,7 @@ export default function OrderTrackingScreen() {
 
         {["pending", "confirmed", "preparing", "out_for_delivery"].includes(order.status) && (
           <TouchableOpacity
-            onPress={handleCancelOrder}
+            onPress={openCancelModal}
             disabled={cancelling}
             style={{
               width: "100%",
@@ -538,6 +577,86 @@ export default function OrderTrackingScreen() {
           <Text style={{ color: "#0B6B3A", fontFamily: "Poppins", fontWeight: "bold", fontSize: 15 }}>Back to Home</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Custom Refund & Cancellation Modal */}
+      <Modal visible={cancelModalOpen} transparent animationType="fade" onRequestClose={() => setCancelModalOpen(false)}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+          <View style={{ width: "100%", maxWidth: 360, backgroundColor: "#FFFFFF", borderRadius: 24, padding: 24, alignItems: "center" }}>
+            {cancelSuccessMsg ? (
+              <>
+                <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#DCFCE7", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                  <CheckCircle2 size={36} color="#16A34A" />
+                </View>
+                <Text style={{ fontSize: 18, fontFamily: "Poppins", fontWeight: "bold", color: "#1F2937", textAlign: "center" }}>
+                  Order Cancelled 🛑
+                </Text>
+                <Text style={{ fontSize: 13, fontFamily: "Nunito", color: "#4B5563", marginTop: 8, textAlign: "center", lineHeight: 20 }}>
+                  {cancelSuccessMsg}
+                </Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    setCancelModalOpen(false)
+                    setCancelSuccessMsg("")
+                  }}
+                  style={{ marginTop: 24, width: "100%", height: 48, borderRadius: 24, backgroundColor: "#0B6B3A", alignItems: "center", justifyContent: "center" }}
+                >
+                  <Text style={{ color: "#FFFFFF", fontFamily: "Poppins", fontWeight: "bold", fontSize: 15 }}>OK, Got It</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#FEE2E2", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                  <AlertTriangle size={32} color="#DC2626" />
+                </View>
+                <Text style={{ fontSize: 18, fontFamily: "Poppins", fontWeight: "bold", color: "#1F2937", textAlign: "center" }}>
+                  {order?.status === "out_for_delivery" ? "Cancel In-Transit Order?" : "Cancel Order?"}
+                </Text>
+                <Text style={{ fontSize: 13, fontFamily: "Nunito", color: "#4B5563", marginTop: 8, textAlign: "center", lineHeight: 20 }}>
+                  {(() => {
+                    const isOutForDelivery = order?.status === "out_for_delivery"
+                    const isOnline = ["online", "upi", "razorpay"].includes(order?.paymentMethod)
+                    const deliveryFee = Number(order?.deliveryFee) > 0 ? Number(order?.deliveryFee) : 30
+                    const refundAmt = Math.max(0, Number(order?.grandTotal || 0) - deliveryFee)
+
+                    if (isOutForDelivery) {
+                      if (isOnline) {
+                        return `Since the order is out for delivery, ₹${deliveryFee} delivery fee is non-refundable for rider trip. Your remaining ₹${refundAmt} will be refunded within 24-48 hours.`
+                      }
+                      return `Since the order is out for delivery, your advance ₹${deliveryFee} delivery fee is non-refundable to cover rider trip expenses.`
+                    }
+
+                    if (isOnline) {
+                      return `Are you sure you want to cancel? Your full payment of ₹${order?.grandTotal} will be refunded within 24-48 hours.`
+                    }
+
+                    return `Are you sure you want to cancel? Your ₹30 advance delivery charge will be refunded within 24-48 hours.`
+                  })()}
+                </Text>
+
+                <View style={{ width: "100%", marginTop: 24, gap: 10 }}>
+                  <TouchableOpacity
+                    onPress={confirmCancelOrder}
+                    disabled={cancelling}
+                    style={{ width: "100%", height: 48, borderRadius: 24, backgroundColor: "#DC2626", alignItems: "center", justifyContent: "center" }}
+                  >
+                    <Text style={{ color: "#FFFFFF", fontFamily: "Poppins", fontWeight: "bold", fontSize: 15 }}>
+                      {cancelling ? "Cancelling..." : "Yes, Cancel Order"}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={() => setCancelModalOpen(false)}
+                    disabled={cancelling}
+                    style={{ width: "100%", height: 48, borderRadius: 24, borderWidth: 1, borderColor: "#D1D5DB", alignItems: "center", justifyContent: "center", backgroundColor: "#F9FAFB" }}
+                  >
+                    <Text style={{ color: "#374151", fontFamily: "Poppins", fontWeight: "bold", fontSize: 15 }}>Keep Order</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   )
 }

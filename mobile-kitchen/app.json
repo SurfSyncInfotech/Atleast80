@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Atleast80 Kitchen",
+    "slug": "mobile-kitchen",
+    "version": "25.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/logo.png",
+    "scheme": "mobile-kitchen",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "icon": "./assets/images/logo.png"
+    },
+    "android": {
+      "package": "com.Atleast80_Seller.app",
+      "googleServicesFile": "./google-services.json",
+      "versionCode": 140
+    },
+    "web": {
+      "output": "single",
+      "favicon": "./assets/images/logo.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-video"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "e2d57a05-9150-4af0-8d93-16bea025376c"
+      }
+    },
+    "owner": "niteshprodeveloper"
+  }
+}

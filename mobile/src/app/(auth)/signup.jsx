@@ -1,11 +1,22 @@
-import { useState, useRef } from "react"
-import { View, Text, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, TextInput, ActivityIndicator } from "react-native"
+import { useState, useEffect, useRef } from "react"
+import { View, Text, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, TextInput, ActivityIndicator, Linking, Modal } from "react-native"
+import { SafeAreaView } from "react-native-safe-area-context"
 import { useRouter } from "expo-router"
-import { ArrowLeft, Mail, Lock, User, Phone, ArrowRight, Eye, EyeOff } from "lucide-react-native"
+import { ArrowLeft, Mail, Lock, User, Phone, ArrowRight, Eye, EyeOff, Check, FileText, ExternalLink, X } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import { useAuth } from "../../context/AuthContext"
-import { checkPhoneAvailability } from "../../lib/api"
+import { checkPhoneAvailability, getUserAgreement } from "../../lib/api"
+import { resolveMediaUrl } from "../../lib/media"
 import Svg, { Path } from "react-native-svg"
+
+let WebView = null
+if (Platform.OS !== "web") {
+  try {
+    WebView = require("react-native-webview").WebView
+  } catch (e) {
+    console.warn("react-native-webview not loaded", e)
+  }
+}
 
 function WheatBackground() {
   return (
@@ -188,6 +199,8 @@ function PremiumButton({ onPress, label, loading }) {
   )
 }
 
+import { CheckCircle } from "lucide-react-native"
+
 export default function SignupPage() {
   const router = useRouter()
   const { signupCustomer, verifySignupOtp, resendSignupOtp, loginCustomer } = useAuth()
@@ -198,6 +211,11 @@ export default function SignupPage() {
   const [phone, setPhone] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
+  const [agreedToTerms, setAgreedToTerms] = useState(false)
+  const [agreementRead, setAgreementRead] = useState(false)
+  const [userAgreement, setUserAgreement] = useState(null)
+  const [pdfModalVisible, setPdfModalVisible] = useState(false)
+  const [pdfViewerLoading, setPdfViewerLoading] = useState(true)
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
 
@@ -205,7 +223,34 @@ export default function SignupPage() {
   const [userId, setUserId] = useState(null)
   const [otp, setOtp] = useState(["", "", "", ""])
   const [phoneHint, setPhoneHint] = useState("")
+  const [resendTimer, setResendTimer] = useState(30)
+  const [resendMessage, setResendMessage] = useState("")
   const otpRefs = [useRef(null), useRef(null), useRef(null), useRef(null)]
+
+  useEffect(() => {
+    getUserAgreement()
+      .then((data) => {
+        if (data?.url) {
+          setUserAgreement({
+            ...data,
+            url: resolveMediaUrl(data.url)
+          })
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    let interval = null
+    if (step === "otp" && resendTimer > 0) {
+      interval = setInterval(() => {
+        setResendTimer((prev) => prev - 1)
+      }, 1000)
+    }
+    return () => {
+      if (interval) clearInterval(interval)
+    }
+  }, [step, resendTimer])
 
   const handleSubmit = async () => {
     if (!name || !email || !phone || !password) {
@@ -220,11 +265,19 @@ export default function SignupPage() {
       setError("Password must be at least 6 characters")
       return
     }
+    if (userAgreement?.url && !agreementRead) {
+      setError("Please tap and read the User Agreement PDF before signing up")
+      return
+    }
+    if (!agreedToTerms) {
+      setError("Please accept the User Agreement & Terms to proceed")
+      return
+    }
 
     setError("")
     setLoading(true)
     try {
-      await checkPhoneAvailability(phone, email)
+      await checkPhoneAvailability(phone, email, "customer")
       const res = await signupCustomer({
         name,
         email,
@@ -234,6 +287,7 @@ export default function SignupPage() {
       if (res.requiresOtp) {
         setUserId(res.userId)
         setPhoneHint(`******${phone.slice(-4)}`)
+        setResendTimer(30)
         setStep("otp")
       } else {
         // Fallback login directly
@@ -271,13 +325,21 @@ export default function SignupPage() {
   }
 
   const handleResendOtp = async () => {
+    if (resendTimer > 0) return
     setError("")
+    setResendMessage("")
+    setLoading(true)
     try {
       await resendSignupOtp(userId)
+      setResendMessage("New OTP sent successfully!")
+      setResendTimer(30)
       setOtp(["", "", "", ""])
       if (otpRefs[0]?.current) otpRefs[0].current.focus()
+      setTimeout(() => setResendMessage(""), 4000)
     } catch (err) {
       setError(err.message || "Failed to resend OTP")
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -421,6 +483,111 @@ export default function SignupPage() {
                   />
                 </View>
 
+                {/* User Agreement PDF Card (Compulsory) */}
+                {userAgreement?.url ? (
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      setPdfViewerLoading(true)
+                      setPdfModalVisible(true)
+                      setAgreementRead(true)
+                      setAgreedToTerms(true)
+                    }}
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 12,
+                      backgroundColor: agreementRead ? "#F0FBF4" : "#FFF8E7",
+                      borderRadius: 16,
+                      padding: 14,
+                      borderWidth: 1.5,
+                      borderColor: agreementRead ? "#0B6B3A" : "#F4C400",
+                      marginTop: 4,
+                    }}
+                  >
+                    <View style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: 18,
+                      backgroundColor: agreementRead ? "#EAF7EE" : "#FEF3C7",
+                      alignItems: "center",
+                      justifyContent: "center"
+                    }}>
+                      <FileText size={18} color={agreementRead ? "#0B6B3A" : "#B8900A"} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontFamily: "Poppins", fontWeight: "600", fontSize: 13, color: agreementRead ? "#0B6B3A" : "#92400E" }}>
+                        {agreementRead ? "Agreement Read ✓" : "Read User Agreement (Required)"}
+                      </Text>
+                      <Text style={{ fontFamily: "Nunito", fontSize: 11, color: "#7A7A7A", marginTop: 1 }}>
+                        Version {userAgreement.version} · Tap to view PDF in app
+                      </Text>
+                    </View>
+                    {!agreementRead ? (
+                      <ArrowRight size={16} color="#B8900A" />
+                    ) : (
+                      <Check size={18} color="#0B6B3A" strokeWidth={2.5} />
+                    )}
+                  </TouchableOpacity>
+                ) : null}
+
+                {/* User Agreement & Terms Checkbox */}
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    if (userAgreement?.url && !agreementRead) {
+                      setPdfViewerLoading(true)
+                      setPdfModalVisible(true)
+                      setAgreementRead(true)
+                      setAgreedToTerms(true)
+                    } else {
+                      setAgreedToTerms(!agreedToTerms)
+                    }
+                  }}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "flex-start",
+                    gap: 10,
+                    marginTop: 4,
+                  }}
+                >
+                  <View
+                    style={{
+                      width: 20,
+                      height: 20,
+                      borderRadius: 6,
+                      borderWidth: 1.5,
+                      borderColor: agreedToTerms ? "#0B6B3A" : "#D1D5DB",
+                      backgroundColor: agreedToTerms ? "#0B6B3A" : "#FFFFFF",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      marginTop: 2,
+                    }}
+                  >
+                    {agreedToTerms && <Check size={13} color="#FFFFFF" strokeWidth={3} />}
+                  </View>
+
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontFamily: "Nunito", fontSize: 12, color: "#4B5563", lineHeight: 18 }}>
+                      I agree to the{" "}
+                      <Text
+                        onPress={() => {
+                          if (userAgreement?.url) {
+                            setPdfViewerLoading(true)
+                            setPdfModalVisible(true)
+                            setAgreementRead(true)
+                            setAgreedToTerms(true)
+                          }
+                        }}
+                        style={{ color: "#0B6B3A", fontWeight: "bold", textDecorationLine: "underline" }}
+                      >
+                        User Agreement &amp; Terms
+                      </Text>
+                      .
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+
                 <View style={{ paddingTop: 16 }}>
                   <PremiumButton 
                     onPress={handleSubmit} 
@@ -430,7 +597,14 @@ export default function SignupPage() {
                 </View>
               </View>
             ) : (
-              <View style={{ gap: 20 }}>
+              <View style={{ gap: 16 }}>
+                {resendMessage ? (
+                  <View style={{ backgroundColor: "#EAF7EE", borderRadius: 16, borderHeight: 1, borderColor: "#D6EAE7", padding: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                    <CheckCircle size={16} color="#059669" />
+                    <Text style={{ color: "#0B6B3A", fontWeight: "bold", fontSize: 13 }}>{resendMessage}</Text>
+                  </View>
+                ) : null}
+
                 {/* 4 Digit OTP Inputs */}
                 <View style={{ flexDirection: "row", gap: 12, justifyContent: "center", paddingVertical: 8 }}>
                   {otp.map((digit, i) => (
@@ -446,38 +620,53 @@ export default function SignupPage() {
                         width: 56,
                         height: 56,
                         backgroundColor: "white",
-                        borderRadius: 12,
+                        borderRadius: 16,
                         borderWidth: 2,
-                        borderColor: "#E8E8E8",
+                        borderColor: digit ? "#0B6B3A" : "#E3DFD5",
                         textAlign: "center",
-                        fontSize: 24,
+                        fontSize: 22,
+                        fontFamily: "Poppins",
                         fontWeight: "bold",
-                        color: "#1F1F1F"
+                        color: "#1F1F1F",
                       }}
                     />
                   ))}
                 </View>
 
+                {error ? (
+                  <View className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 mt-2">
+                    <Text className="font-nunito text-xs text-red-700 text-center">{error}</Text>
+                  </View>
+                ) : null}
+
                 <View style={{ paddingTop: 16 }}>
                   <PremiumButton 
                     onPress={handleVerifyOtp} 
-                    label="Verify & sign in" 
+                    label="Verify &amp; Continue" 
                     loading={loading} 
                   />
                 </View>
 
-                <TouchableOpacity onPress={handleResendOtp} disabled={loading} style={{ alignSelf: "center", marginTop: 8 }}>
-                  <Text style={{ color: "#0B6B3A", fontWeight: "bold", fontSize: 14 }}>Resend OTP</Text>
+                <TouchableOpacity
+                  onPress={handleResendOtp}
+                  disabled={loading || resendTimer > 0}
+                  style={{ alignSelf: "center", marginTop: 8 }}
+                >
+                  <Text style={{ color: resendTimer > 0 ? "#9A9A9A" : "#0B6B3A", fontWeight: "bold", fontSize: 14 }}>
+                    {resendTimer > 0 ? `Resend OTP in ${resendTimer}s` : "Resend OTP"}
+                  </Text>
                 </TouchableOpacity>
               </View>
             )}
 
-            <View className="flex-row justify-center mt-6">
-              <Text className="font-nunito text-sm text-gray">Already have an account? </Text>
-              <TouchableOpacity onPress={() => router.push("/(auth)/login")}>
-                <Text className="text-primary font-bold text-sm">Sign in</Text>
-              </TouchableOpacity>
-            </View>
+            {step === "signup" ? (
+              <View className="flex-row justify-center mt-6">
+                <Text className="font-nunito text-sm text-gray">Already have an account? </Text>
+                <TouchableOpacity onPress={() => router.push("/(auth)/login")}>
+                  <Text className="text-primary font-bold text-sm">Sign in</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
 
             {/* Bottom Brand Slogan */}
             <Text style={{ color: "#8D7E50", fontSize: 9, fontFamily: "Poppins", fontWeight: "bold", letterSpacing: 2, textAlign: "center", marginTop: 40 }}>
@@ -486,6 +675,163 @@ export default function SignupPage() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+      {/* In-App User Agreement PDF Modal */}
+      <Modal
+        visible={pdfModalVisible}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setPdfModalVisible(false)}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: "#0B6B3A" }} edges={["top", "bottom"]}>
+          {/* Modal Header */}
+          <View style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            paddingHorizontal: 16,
+            paddingVertical: 14,
+            backgroundColor: "#0B6B3A"
+          }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
+              <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" }}>
+                <FileText size={20} color="#FFFFFF" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontFamily: "Poppins", fontWeight: "bold", fontSize: 15, color: "#FFFFFF" }} numberOfLines={1}>
+                  User Agreement &amp; Terms
+                </Text>
+                <Text style={{ fontFamily: "Nunito", fontSize: 11, color: "rgba(255,255,255,0.8)" }}>
+                  Version {userAgreement?.version || 1} · Official Terms
+                </Text>
+              </View>
+            </View>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              {userAgreement?.url ? (
+                <TouchableOpacity
+                  onPress={() => Linking.openURL(userAgreement.url)}
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 18,
+                    backgroundColor: "rgba(255,255,255,0.2)",
+                    alignItems: "center",
+                    justifyContent: "center"
+                  }}
+                  accessibilityLabel="Open PDF in new tab"
+                >
+                  <ExternalLink size={18} color="#FFFFFF" />
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity
+                onPress={() => setPdfModalVisible(false)}
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 18,
+                  backgroundColor: "rgba(255,255,255,0.2)",
+                  alignItems: "center",
+                  justifyContent: "center"
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <X size={20} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* PDF Viewer Body */}
+          <View style={{ flex: 1, backgroundColor: "#FFFFFF", position: "relative" }}>
+            {pdfViewerLoading && (
+              <View style={{
+                position: "absolute",
+                inset: 0,
+                backgroundColor: "#FFFFFF",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 10,
+                gap: 12
+              }}>
+                <ActivityIndicator size="large" color="#0B6B3A" />
+                <Text style={{ fontFamily: "Nunito", fontSize: 13, color: "#7A7A7A" }}>
+                  Loading User Agreement...
+                </Text>
+              </View>
+            )}
+
+            {Platform.OS === "web" ? (
+              <iframe
+                src={userAgreement?.url || ""}
+                style={{ width: "100%", height: "100%", minHeight: "100%", border: "none", display: "block", backgroundColor: "#FFFFFF" }}
+                onLoad={() => setPdfViewerLoading(false)}
+              />
+            ) : WebView ? (
+              <WebView
+                source={{
+                  uri: Platform.OS === "android" && userAgreement?.url && !userAgreement.url.includes("localhost") && !userAgreement.url.includes("127.0.0.1") && !userAgreement.url.includes("10.0.2.2")
+                    ? `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(userAgreement.url)}`
+                    : (userAgreement?.url || "")
+                }}
+                style={{ flex: 1, backgroundColor: "#FFFFFF" }}
+                onLoadEnd={() => setPdfViewerLoading(false)}
+                onError={() => setPdfViewerLoading(false)}
+                startInLoadingState={true}
+                scalesPageToFit={true}
+                javaScriptEnabled={true}
+                domStorageEnabled={true}
+              />
+            ) : (
+              <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
+                <FileText size={48} color="#0B6B3A" />
+                <Text style={{ fontFamily: "Poppins", fontWeight: "bold", fontSize: 16, color: "#1F1F1F", marginTop: 16, textAlign: "center" }}>
+                  User Agreement &amp; Terms
+                </Text>
+                <Text style={{ fontFamily: "Nunito", fontSize: 13, color: "#7A7A7A", textAlign: "center", marginTop: 8 }}>
+                  Document loaded and ready for review.
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* Modal Bottom Action Bar */}
+          <View style={{
+            paddingHorizontal: 16,
+            paddingVertical: 12,
+            backgroundColor: "#FFFFFF",
+            borderTopWidth: 1,
+            borderTopColor: "#E5E5E5",
+            flexDirection: "row",
+            gap: 12
+          }}>
+            <TouchableOpacity
+              onPress={() => {
+                setAgreementRead(true)
+                setAgreedToTerms(true)
+                setPdfModalVisible(false)
+              }}
+              style={{
+                flex: 1,
+                height: 48,
+                backgroundColor: "#0B6B3A",
+                borderRadius: 14,
+                alignItems: "center",
+                justifyContent: "center",
+                flexDirection: "row",
+                gap: 8,
+                shadowColor: "#0B6B3A",
+                shadowOffset: { width: 0, height: 3 },
+                shadowOpacity: 0.2,
+                shadowRadius: 5,
+                elevation: 3
+              }}
+            >
+              <Check size={18} color="#FFFFFF" strokeWidth={2.5} />
+              <Text style={{ color: "#FFFFFF", fontFamily: "Poppins", fontWeight: "bold", fontSize: 14 }}>
+                I Have Read & Accept Terms
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </Modal>
     </LinearGradient>
   )
 }

@@ -28,7 +28,7 @@ export default function RiderLoginPage() {
 
   useEffect(() => {
     if (user?.role === "rider") {
-      router.replace("/(rider)/dashboard")
+      router.replace("/(rider)/(tabs)/dashboard")
     }
   }, [user, router])
 
@@ -52,7 +52,7 @@ export default function RiderLoginPage() {
         setStep("otp")
         setOtp(["", "", "", ""])
       } else {
-        router.replace("/(rider)/dashboard")
+        router.replace("/(rider)/(tabs)/dashboard")
       }
     } catch (err) {
       setError(err.message || "Login failed")
@@ -71,7 +71,7 @@ export default function RiderLoginPage() {
     setLoading(true)
     try {
       await verifyRiderLoginOtp(identifier, password, otpValue)
-      router.replace("/(rider)/dashboard")
+      router.replace("/(rider)/(tabs)/dashboard")
     } catch (err) {
       setError(err.message || "Failed to verify OTP")
     } finally {

@@ -17,6 +17,7 @@ import {
   patchStoredAuth,
   clearStoredAuth,
   readStoredAuthSync,
+  subscribeAuthChange,
 } from "../lib/authStorage"
 
 // Configure foreground notifications handler
@@ -388,6 +389,15 @@ export function AuthProvider({ children }) {
       cancelled = true
     }
   }, [applySession])
+
+  useEffect(() => {
+    const unsubscribe = subscribeAuthChange((authData) => {
+      if (authData?.user) setUser(authData.user)
+      if (authData?.kitchen !== undefined) setKitchen(authData.kitchen)
+      if (authData?.rider !== undefined) setRider(authData.rider)
+    })
+    return () => unsubscribe()
+  }, [])
 
   return (
     <AuthContext.Provider

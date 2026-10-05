@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import { motion } from "framer-motion"
 import {
@@ -7,6 +8,7 @@ import {
 import Navbar from "../components/layout/Navbar"
 import Footer from "../components/layout/Footer"
 import Button from "../components/ui/Button"
+import { getPublicContactSettings } from "../lib/api"
 
 const fadeUp = {
   hidden: { opacity: 0, y: 28 },
@@ -48,6 +50,23 @@ const pillars = [
 
 export default function AboutPage() {
   const navigate = useNavigate()
+  const [contact, setContact] = useState({
+    supportPhone: "+91 40 3559 4439",
+    supportEmail: "contact@elifelo.com",
+  })
+
+  useEffect(() => {
+    getPublicContactSettings()
+      .then((data) => {
+        if (data?.supportPhone || data?.supportEmail) {
+          setContact({
+            supportPhone: data.supportPhone || "+91 40 3559 4439",
+            supportEmail: data.supportEmail || "contact@elifelo.com",
+          })
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   return (
     <>
@@ -256,15 +275,15 @@ export default function AboutPage() {
               </p>
               <div className="mt-8 space-y-4">
                 {[
-                  { icon: Mail, text: "contact@elifelo.com" },
-                  { icon: Phone, text: "+91 40 3559 4439" },
-                ].map(({ icon: Icon, text }) => (
-                  <div key={text} className="flex items-center gap-3 text-dark">
-                    <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                  { icon: Mail, text: contact.supportEmail, href: `mailto:${contact.supportEmail}` },
+                  { icon: Phone, text: contact.supportPhone, href: `tel:${contact.supportPhone.replace(/[^0-9+]/g, "")}` },
+                ].map(({ icon: Icon, text, href }) => (
+                  <a key={text} href={href} className="flex items-center gap-3 text-dark hover:text-primary transition-colors">
+                    <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
                       <Icon size={18} className="text-primary" />
                     </div>
-                    <span className="font-nunito text-sm md:text-base">{text}</span>
-                  </div>
+                    <span className="font-nunito text-sm md:text-base font-medium">{text}</span>
+                  </a>
                 ))}
               </div>
             </div>

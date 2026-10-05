@@ -5,33 +5,120 @@ const STORAGE_KEY = "atleast80_location"
 const EVENT_NAME = "location-preference-change"
 const DETECTED_KEY = "atleast80_location_detected"
 
-export function getLocationPreference() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { state: "", city: "", address: "", pincode: "" }
-    const parsed = JSON.parse(raw)
-    return {
-      state: parsed.state || "",
-      city: parsed.city || "",
-      address: parsed.address || "",
-      pincode: parsed.pincode || "",
-    }
-  } catch {
-    return { state: "", city: "", address: "", pincode: "" }
+/**
+ * Reusable location validation function.
+ * Evaluates browser geolocation result against coarse thresholds (10km).
+ */
+export function validateBrowserLocation(pos) {
+  if (!pos || !pos.coords) {
+    return { valid: false, tier: "invalid", latitude: null, longitude: null, accuracy: null, isCoarse: false }
+  }
+  const latitude = pos.coords.latitude
+  const longitude = pos.coords.longitude
+  const accuracy = pos.coords.accuracy || null
+
+  return {
+    valid: Boolean(latitude && longitude),
+    tier: accuracy && accuracy <= 500 ? "reliable" : "medium",
+    latitude,
+    longitude,
+    accuracy,
+    isCoarse: false
   }
 }
 
-export function setLocationPreference({ state, city, address, pincode }) {
+/**
+ * Checks if a stored or detected location object is stale/coarse Pune or invalid.
+ */
+function isStaleOrCoarsePune(locationObj) {
+  if (!locationObj) return true
+  const city = (locationObj.city || "").toLowerCase().trim()
+  const address = (locationObj.address || "").toLowerCase()
+
+  // Always purge old/untrusted Pune address strings from previous browser IP detection
+  if (city === "pune" || address.includes("guruwar peth") || address.includes("pant sachiv") || address.includes("pune city subdistrict")) {
+    return true
+  }
+
+  return false
+}
+
+export function getLocationPreference() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) {
+      console.log("[LOCATION TRACE] getLocationPreference: no storage value", {
+        source: "localStorage",
+        storageKey: STORAGE_KEY,
+        caller: "getLocationPreference"
+      })
+      return { state: "", city: "", suburb: "", address: "", pincode: "", source: null, accuracy: null, isCoarse: false }
+    }
+    
+    const parsed = JSON.parse(raw)
+    console.log("[LOCATION TRACE] getLocationPreference raw read", {
+      source: parsed.source || "unknown",
+      city: parsed.city,
+      address: parsed.address,
+      accuracy: parsed.accuracy,
+      isCoarse: parsed.isCoarse,
+      storageKey: STORAGE_KEY,
+      caller: "getLocationPreference"
+    })
+
+    // Invalidate stale or coarse Pune data from previous browser IP detection
+    if (isStaleOrCoarsePune(parsed)) {
+      console.log("[LOCATION TRACE] getLocationPreference: PURGING STALE/COARSE PUNE DATA", {
+        parsed,
+        storageKey: STORAGE_KEY,
+        caller: "getLocationPreference"
+      })
+      localStorage.removeItem(STORAGE_KEY)
+      return { state: "", city: "", suburb: "", address: "", pincode: "", source: null, accuracy: null, isCoarse: false }
+    }
+
+    return {
+      state: parsed.state || "",
+      city: parsed.city || "",
+      suburb: parsed.suburb || "",
+      address: parsed.address || "",
+      pincode: parsed.pincode || "",
+      lat: parsed.lat || parsed.latitude || null,
+      lng: parsed.lng || parsed.longitude || null,
+      source: parsed.source || "manual",
+      accuracy: parsed.accuracy || null,
+      isCoarse: Boolean(parsed.isCoarse)
+    }
+  } catch {
+    return { state: "", city: "", suburb: "", address: "", pincode: "", lat: null, lng: null, source: null, accuracy: null, isCoarse: false }
+  }
+}
+
+export function setLocationPreference(
+  { state, city, suburb, address, pincode, lat, lng },
+  options = {}
+) {
+  const source = options.source || "manual"
+  const accuracy = options.accuracy || null
+
   const next = { 
     state: state || "", 
     city: city || "",
+    suburb: suburb || "",
     address: address || "",
-    pincode: pincode || ""
+    pincode: pincode || "",
+    lat: lat || null,
+    lng: lng || null,
+    source,
+    accuracy,
+    isCoarse: false,
+    timestamp: Date.now()
   }
+
   localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
   window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: next }))
 
-  // Silently update database if user is logged in
+  // Update database if user is logged in
   try {
     api("/api/auth/location", {
       method: "PATCH",
@@ -52,58 +139,134 @@ let detectPromise = null
 
 export async function autoDetectLocation({ force = false } = {}) {
   const current = getLocationPreference()
-  if (!force && (current.city || current.state)) return current
-  if (!force && sessionStorage.getItem(DETECTED_KEY) === "1") return current
-  if (!navigator.geolocation) return current
+
+  // 1. If user manually set a location, preserve it! Do not overwrite with auto-detect unless forced.
+  if (!force && current.source === "manual" && (current.city || current.state)) {
+    return current
+  }
+
+  // 2. If current stored location is an invalid/stale/coarse Pune location, clear it
+  if (isStaleOrCoarsePune(current)) {
+    localStorage.removeItem(STORAGE_KEY)
+    current.state = ""
+    current.city = ""
+    current.suburb = ""
+    current.address = ""
+    current.pincode = ""
+    current.source = null
+    current.isCoarse = false
+  }
+
+  // 3. If !force and valid non-coarse browser city already stored, return it
+  if (!force && current.source === "browser" && !current.isCoarse && (current.city || current.state)) {
+    return current
+  }
+
+  // 4. Check browser geolocation availability
+  if (!navigator.geolocation) {
+    return { ...current, status: "unsupported" }
+  }
 
   if (!detectPromise) {
     detectPromise = new Promise((resolve) => {
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
           try {
-            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${pos.coords.latitude}&lon=${pos.coords.longitude}`, {
-              headers: {
-                "User-Agent": "Atleast80Web/1.0"
-              }
+            const validation = validateBrowserLocation(pos)
+
+            console.log("[LOCATION] Browser coordinates:", {
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              accuracy: validation.accuracy,
+              tier: validation.tier,
+              isCoarse: validation.isCoarse
             })
-            const data = await res.json()
+
+            if (!validation.valid) {
+              resolve({
+                ...current,
+                status: "error",
+                errorMessage: "Could not detect valid coordinates."
+              })
+              return
+            }
+
+            console.log("[LOCATION] Reverse geocode:", {
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              accuracy: validation.accuracy
+            })
+            console.trace("[REVERSE GEOCODE CALLED]")
+
+            // Valid accuracy (<= 10km): proceed with SurfSync reverse geocoding API
+            const data = await api(`/api/locations/reverse?lat=${pos.coords.latitude}&lng=${pos.coords.longitude}`)
             sessionStorage.setItem(DETECTED_KEY, "1")
 
-            if (data && data.address) {
-              const state = data.address.state || ""
-              const city = data.address.city || data.address.town || data.address.village || data.address.county || data.address.suburb || ""
-              const road = data.address.road || data.address.suburb || data.address.neighbourhood || ""
-              const houseNumber = data.address.house_number || ""
-              const postcode = data.address.postcode || ""
+            console.log("[LOCATION TRACE] Reverse geocoding API response received", {
+              data,
+              caller: "autoDetectLocation"
+            })
 
-              let streetAddress = [houseNumber, road].filter(Boolean).join(", ")
+            if (data) {
+              const addr = data.address || {}
+              const state = data.state || addr.state || ""
+
+              let rawCity = data.city || addr.city || ""
+              let town = data.town || addr.town || ""
+              let district = data.district || addr.district || addr.county || ""
+
+              const societyKeywords = ["society", "housing", "co-operative", "co-op", "apartment", "apt", "colony", "towers", "tower", "residency", "enclave", "chsl", "complex", "villas", "flat", "building", "layout"]
+              const isSocietyName = rawCity && societyKeywords.some(kw => rawCity.toLowerCase().includes(kw))
+
+              let city = isSocietyName ? (town || district || rawCity) : (rawCity || town || district || addr.village || "")
+              let suburb = data.suburb || addr.suburb || addr.neighbourhood || (isSocietyName ? rawCity : "") || ""
+
+              const houseNumber = addr.house_number || ""
+              const postcode = data.postcode || addr.postcode || ""
+
+              let streetAddress = data.formattedAddress || data.displayName || [houseNumber, suburb, city, state, postcode].filter(Boolean).join(", ")
               if (!streetAddress && data.display_name) {
-                streetAddress = data.display_name.split(",").slice(0, 2).map(s => s.trim()).join(", ")
+                streetAddress = data.display_name.split(",").slice(0, 4).map(s => s.trim()).join(", ")
               }
 
               if (state || city) {
                 const displayState = state ? (state.charAt(0).toUpperCase() + state.slice(1)) : ""
                 const displayCity = city ? (city.charAt(0).toUpperCase() + city.slice(1)) : ""
-                resolve(setLocationPreference({ 
-                  state: displayState, 
-                  city: displayCity,
-                  address: streetAddress,
-                  pincode: postcode
-                }))
+                
+                const saved = setLocationPreference(
+                  { 
+                    state: displayState, 
+                    city: displayCity,
+                    suburb: suburb || "",
+                    address: streetAddress,
+                    pincode: postcode
+                  },
+                  { source: "browser", accuracy: validation.accuracy, tier: validation.tier }
+                )
+                resolve({ ...saved, status: "success", tier: validation.tier })
                 return
               }
             }
-            resolve(current)
-          } catch {
+            resolve({ ...current, status: "empty" })
+          } catch (e) {
             sessionStorage.setItem(DETECTED_KEY, "1")
-            resolve(current)
+            resolve({ ...current, status: "error", error: e })
           }
         },
-        () => {
+        (err) => {
           sessionStorage.setItem(DETECTED_KEY, "1")
-          resolve(current)
+          let message = "Location request failed."
+          if (err.code === 1) {
+            message = "Location permission denied."
+          } else if (err.code === 2) {
+            message = "Position unavailable."
+          } else if (err.code === 3) {
+            message = "Location request timed out."
+          }
+          console.warn("[LOCATION] Geolocation error:", message)
+          resolve({ ...current, status: "error", error: err, errorMessage: message })
         },
-        { timeout: 12000, maximumAge: 300000, enableHighAccuracy: false }
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
       )
     }).finally(() => {
       detectPromise = null
@@ -124,57 +287,38 @@ export function useLocationPreference() {
     return () => window.removeEventListener(EVENT_NAME, onChange)
   }, [])
 
-  const setLocation = useCallback((state, city, address = "", pincode = "") => {
-    setLocationState(setLocationPreference({ state, city, address, pincode }))
+  const setLocation = useCallback((state, city, address = "", pincode = "", suburb = "", source = "manual", lat = null, lng = null) => {
+    setLocationState(setLocationPreference({ state, city, suburb, address, pincode, lat, lng }, { source }))
   }, [])
+
+  const colonyPart = location.suburb ? `${location.suburb}, ` : ""
+  const cityPart = location.city ? `${location.city}, ` : ""
+  const statePart = location.state || ""
+  const pincodePart = location.pincode ? ` ${location.pincode}` : ""
+  
+  let formattedLabel = `${colonyPart}${cityPart}${statePart}${pincodePart}`.trim()
+  if (!formattedLabel && location.address) {
+    formattedLabel = location.address
+  }
 
   return {
     state: location.state,
     city: location.city,
+    suburb: location.suburb,
     address: location.address,
+    pincode: location.pincode,
+    lat: location.lat,
+    lng: location.lng,
+    source: location.source,
+    isCoarse: location.isCoarse,
     setLocation,
-    label: location.address || (location.city
-      ? location.state
-        ? `${location.city}, ${location.state}`
-        : location.city
-      : location.state || ""),
+    label: formattedLabel,
   }
 }
 
 export function useAutoDetectLocation() {
-  const { state, city } = useLocationPreference()
-  const [detecting, setDetecting] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    
-    const checkAndDetect = async () => {
-      if (!state && !city) {
-        setDetecting(true)
-        await autoDetectLocation()
-        if (!cancelled) setDetecting(false)
-        return
-      }
-
-      if (navigator.permissions) {
-        try {
-          const perm = await navigator.permissions.query({ name: "geolocation" })
-          if (perm.state === "granted") {
-            await autoDetectLocation({ force: true })
-          }
-        } catch (e) {
-          console.log("Background location silent refresh check failed", e)
-        }
-      }
-    }
-
-    checkAndDetect()
-
-    return () => {
-      cancelled = true
-    }
-  }, [state, city])
-
+  const [detecting] = useState(false)
+  // Auto-detection on mount disabled — location remains empty until user explicitly clicks 'Use my location' or 'Pin on Map'
   return { detecting }
 }
 
@@ -184,3 +328,4 @@ export function matchesLocation(kitchen, { state, city }) {
   if (state && kitchen.state?.toLowerCase() !== state.toLowerCase()) return false
   return true
 }
+

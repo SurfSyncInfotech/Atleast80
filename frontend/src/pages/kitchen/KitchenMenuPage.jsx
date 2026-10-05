@@ -2,42 +2,34 @@ import { useEffect, useState, useRef, useMemo } from "react"
 import { useNavigate, useLocation } from "react-router-dom"
 
 import {
-
   Plus, UtensilsCrossed, Lock, Leaf, IndianRupee,
-
-  Upload, X, Video, Play, Tag,
-
+  Upload, X, Video, Play, Tag, Check, ShoppingBag,
 } from "lucide-react"
 
 import KitchenLayout from "../../components/layout/KitchenLayout"
 import KitchenMenuTable from "../../components/kitchen/KitchenMenuTable"
+import FestivalSpecialsSection from "../../components/kitchen/FestivalSpecialsSection"
 import Button from "../../components/ui/Button"
 import TablePagination from "../../components/ui/TablePagination"
-
 import { useAuth } from "../../context/AuthContext"
-
 import { api, uploadMenuFiles } from "../../lib/api"
-
 import { resolveMediaUrl, resolveMenuItemMedia } from "../../lib/media"
-
 import { paginateSlice } from "../../lib/pagination"
-
 import { cn } from "../../lib/utils"
-
-
+import { PRESET_GROCERY_ITEMS, SUGGESTED_FOOD_ITEMS } from "../../data/groceryPresetGallery"
+import { GROCERY_MASTER_CATALOG, GROCERY_LANGUAGES } from "../../data/groceryMasterCatalog"
 
 const emptyForm = {
-
   name: "",
-
+  localName: "",
   description: "",
-
   price: "",
-
   category: "food",
-
   itemType: "veg",
-
+  packagingType: "packaged",
+  unitValue: "1",
+  unit: "kg",
+  gstRate: 5,
 }
 
 
@@ -59,21 +51,16 @@ export default function KitchenMenuPage() {
   const [loading, setLoading] = useState(true)
 
   const [showForm, setShowForm] = useState(false)
-
   const [form, setForm] = useState(emptyForm)
-
+  const [selectedGroceryLang, setSelectedGroceryLang] = useState("en")
+  const [selectedGroceryId, setSelectedGroceryId] = useState("")
+  const [isCustomGrocery, setIsCustomGrocery] = useState(false)
   const [existingImages, setExistingImages] = useState([])
-
   const [existingVideos, setExistingVideos] = useState([])
-
   const [pendingImages, setPendingImages] = useState([])
-
   const [pendingVideos, setPendingVideos] = useState([])
-
   const [editingId, setEditingId] = useState(null)
-
   const [saving, setSaving] = useState(false)
-
   const [error, setError] = useState("")
 
 
@@ -130,12 +117,26 @@ export default function KitchenMenuPage() {
 
 
   useEffect(() => {
+    if (!isApproved) {
+      setLoading(false)
+      return
+    }
 
-    if (isApproved) loadMenu()
+    loadMenu()
+    const interval = setInterval(() => {
+      if (!showForm && !editingId) {
+        api("/api/menu/me", {}, "kitchen")
+          .then((data) => {
+            if (data?.items) {
+              setItems(data.items.map(resolveMenuItemMedia))
+            }
+          })
+          .catch(() => {})
+      }
+    }, 3000)
 
-    else setLoading(false)
-
-  }, [isApproved, kitchen?.status])
+    return () => clearInterval(interval)
+  }, [isApproved, kitchen?.status, showForm, editingId])
 
   useEffect(() => {
     const editItemId = location.state?.editItemId
@@ -185,49 +186,74 @@ export default function KitchenMenuPage() {
 
 
   const openAdd = () => {
-
     pendingImages.forEach((p) => URL.revokeObjectURL(p.preview))
-
     pendingVideos.forEach((p) => URL.revokeObjectURL(p.preview))
-
     setForm(emptyForm)
-
+    setSelectedGroceryLang("en")
+    setSelectedGroceryId("")
+    setIsCustomGrocery(false)
     setExistingImages([])
-
     setExistingVideos([])
-
     setPendingImages([])
-
     setPendingVideos([])
-
     setEditingId(null)
-
     setShowForm(true)
-
     setError("")
-
   }
 
-
-
-
-
-
-
   const openEdit = (item) => {
+    const isGrocery = item.category === "grocery"
+    let matchedCatalogId = ""
+    let isCustom = false
+    let extractedUnitValue = item.unit_value || item.unitValue || "1"
+    let extractedUnit = item.unit || "kg"
+    let cleanName = item.name || ""
+
+    if (isGrocery) {
+      const unitMatch = cleanName.match(/\(([^\)]+)\)$/)
+      if (unitMatch) {
+        const parts = unitMatch[1].trim().split(/\s+/)
+        if (parts.length >= 2) {
+          extractedUnitValue = parts[0]
+          extractedUnit = parts[1].toLowerCase()
+        }
+        cleanName = cleanName.replace(/\s*\([^\)]+\)$/, "").trim()
+      }
+
+      const match = GROCERY_MASTER_CATALOG.find((g) => {
+        return Object.values(g.names).some((name) => {
+          const c1 = cleanName.toLowerCase()
+          const c2 = (name || "").toLowerCase()
+          return c1 === c2 || c1.includes(c2) || c2.includes(c1)
+        })
+      })
+      if (match) {
+        matchedCatalogId = match.id
+        isCustom = false
+      } else {
+        matchedCatalogId = "custom"
+        isCustom = true
+      }
+    }
+
+    setSelectedGroceryLang("en")
+    setSelectedGroceryId(matchedCatalogId)
+    setIsCustomGrocery(isCustom)
+
+    const defaultGst = isGrocery ? 5 : 5
+    const itemGst = item.gst_rate !== undefined && item.gst_rate !== null ? Number(item.gst_rate) : (item.gstRate !== undefined && item.gstRate !== null ? Number(item.gstRate) : defaultGst)
 
     setForm({
-
-      name: item.name,
-
+      name: cleanName,
+      localName: item.local_name || item.localName || "",
       description: item.description || "",
-
       price: String(item.price),
-
       category: item.category,
-
-      itemType: item.item_type,
-
+      itemType: item.item_type || "veg",
+      packagingType: item.packaging_type || item.packagingType || "packaged",
+      unitValue: String(extractedUnitValue),
+      unit: extractedUnit,
+      gstRate: itemGst,
     })
 
     setExistingImages(
@@ -235,17 +261,11 @@ export default function KitchenMenuPage() {
     )
 
     setExistingVideos((item.videos || []).map(resolveMediaUrl).filter(Boolean))
-
     setPendingImages([])
-
     setPendingVideos([])
-
     setEditingId(item.id)
-
     setShowForm(true)
-
     setError("")
-
   }
 
 
@@ -383,21 +403,23 @@ export default function KitchenMenuPage() {
 
 
       const images = [...existingImages, ...uploadedImages]
-
       const videos = [...existingVideos, ...uploadedVideos]
 
-
+      let finalName = form.name.trim()
+      if (form.category === "grocery" && form.unitValue && form.unit) {
+        finalName = `${finalName} (${form.unitValue} ${form.unit})`
+      }
+      const calculatedGstRate = form.category === "grocery"
+        ? (Number(form.gstRate) ?? 5)
+        : 5
 
       const payload = {
-
         ...form,
-
+        gstRate: calculatedGstRate,
+        name: finalName,
         images,
-
         videos,
-
         image: images[0] || null,
-
       }
 
 
@@ -562,8 +584,8 @@ export default function KitchenMenuPage() {
 
 
   return (
-
     <KitchenLayout>
+      <FestivalSpecialsSection kitchen={kitchen} onUpdated={refreshKitchen} />
 
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
 
@@ -761,130 +783,346 @@ export default function KitchenMenuPage() {
 
             <form onSubmit={handleSave} className="p-6 space-y-4">
 
-              <Field label="Item Name" required>
-
-                <input
-
+              <Field label="Category" required>
+                <select
                   className={inputClass}
-
-                  value={form.name}
-
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-
-                  placeholder="e.g. Dal Makhani Thali"
-
-                  required
-
-                />
-
+                  value={form.category}
+                  onChange={(e) => {
+                    const nextCat = e.target.value
+                    if (nextCat === "grocery") {
+                      setSelectedGroceryId("")
+                      setIsCustomGrocery(false)
+                      setForm({ ...form, category: nextCat, name: "", localName: "", gstRate: 5 })
+                    } else {
+                      setForm({ ...form, category: nextCat, gstRate: 5 })
+                    }
+                  }}
+                >
+                  <option value="food">Food</option>
+                  <option value="grocery">Grocery / Ration</option>
+                </select>
               </Field>
 
-              <Field label="Description">
-
-                <textarea
-
-                  className={`${inputClass} min-h-[80px] resize-none`}
-
-                  value={form.description}
-
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-
-                  placeholder="Short description for customers"
-
-                />
-
-              </Field>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-
-                <Field label="Price (₹)" required>
-
-                  <div className="relative">
-
-                    <IndianRupee size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray" />
-
-                    <input
-
-                      type="number"
-
-                      min="1"
-
-                      className={`${inputClass} pl-8`}
-
-                      value={form.price}
-
-                      onChange={(e) => setForm({ ...form, price: e.target.value })}
-
-                      placeholder="149"
-
-                      required
-
-                    />
-
+              {/* Grocery Category: Multi-Language & Item Dropdown */}
+              {form.category === "grocery" ? (
+                <>
+                  {/* Step 1: Language Selector */}
+                  <div className="bg-emerald-50/60 p-3 rounded-xl border border-emerald-200/80">
+                    <label className="text-xs font-poppins font-bold text-emerald-950 mb-1.5 flex items-center justify-between">
+                      <span>🌐 Select Item Language</span>
+                      <span className="text-[10px] font-nunito text-emerald-700 font-normal">Choose language to browse catalog</span>
+                    </label>
+                    <select
+                      className={inputClass}
+                      value={selectedGroceryLang}
+                      onChange={(e) => {
+                        const newLang = e.target.value
+                        setSelectedGroceryLang(newLang)
+                        if (selectedGroceryId && selectedGroceryId !== "custom") {
+                          const item = GROCERY_MASTER_CATALOG.find((g) => g.id === selectedGroceryId)
+                          if (item) {
+                            const chosenName = item.names[newLang] || item.names.en
+                            setForm((prev) => ({
+                              ...prev,
+                              name: chosenName,
+                              localName: newLang !== "en" ? item.names.en : (item.names.hi || ""),
+                              gstRate: item.gstRate,
+                            }))
+                          }
+                        }
+                      }}
+                    >
+                      {GROCERY_LANGUAGES.map((lang) => (
+                        <option key={lang.id} value={lang.id}>
+                          {lang.label}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
-                </Field>
+                  {/* Step 2: Grocery Master Item Dropdown */}
+                  <div>
+                    <label className="block font-poppins text-xs font-bold text-dark mb-1.5">
+                      Select Grocery Item *
+                    </label>
+                    <select
+                      className={inputClass}
+                      value={selectedGroceryId}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        setSelectedGroceryId(val)
+                        if (val === "custom") {
+                          setIsCustomGrocery(true)
+                          setForm((prev) => ({ ...prev, name: "", localName: "", gstRate: 5 }))
+                        } else if (val) {
+                          setIsCustomGrocery(false)
+                          const item = GROCERY_MASTER_CATALOG.find((g) => g.id === val)
+                          if (item) {
+                            const chosenName = item.names[selectedGroceryLang] || item.names.en
+                            setForm((prev) => ({
+                              ...prev,
+                              name: chosenName,
+                              localName: selectedGroceryLang !== "en" ? item.names.en : (item.names.hi || ""),
+                              gstRate: item.gstRate,
+                            }))
+                          }
+                        } else {
+                          setIsCustomGrocery(false)
+                          setForm((prev) => ({ ...prev, name: "", gstRate: 5 }))
+                        }
+                      }}
+                      required={!isCustomGrocery}
+                    >
+                      <option value="">-- Choose from {GROCERY_MASTER_CATALOG.length} Standard Grocery Items --</option>
+                      {GROCERY_MASTER_CATALOG.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.names[selectedGroceryLang] || item.names.en} (GST: {item.gstRate}%)
+                        </option>
+                      ))}
+                      <option value="custom">➕ Other / Custom Item (यदि सूची में नहीं है)</option>
+                    </select>
+                  </div>
 
-                <Field label="Category" required>
+                  {/* Step 3: Custom Item Input if 'Other / Custom' chosen */}
+                  {isCustomGrocery ? (
+                    <div className="bg-amber-50/70 p-3.5 rounded-xl border border-amber-200 space-y-3 animate-in fade-in">
+                      <div>
+                        <label className="block font-poppins text-xs font-bold text-dark mb-1">
+                          Custom Grocery Item Name *
+                        </label>
+                        <input
+                          className={inputClass}
+                          value={form.name}
+                          onChange={(e) => setForm({ ...form, name: e.target.value })}
+                          placeholder="e.g. Special Homemade Spices / Raw Honey"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-poppins text-xs font-bold text-dark mb-1">
+                          GST Rate (%) *
+                        </label>
+                        <select
+                          className={inputClass}
+                          value={form.gstRate}
+                          onChange={(e) => setForm({ ...form, gstRate: Number(e.target.value) })}
+                        >
+                          <option value={0}>0% (Exempted / Zero GST)</option>
+                          <option value={5}>5% (Standard Grocery GST)</option>
+                          <option value={12}>12% (Pickles / Processed)</option>
+                          <option value={18}>18% (Standard 18%)</option>
+                        </select>
+                      </div>
+                      <p className="text-[11px] font-nunito text-amber-800 font-semibold">
+                        ℹ️ Custom items will be submitted for Admin approval before going live.
+                      </p>
+                    </div>
+                  ) : selectedGroceryId ? (
+                    /* Auto-filled GST Display Badge */
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between shadow-xs">
+                      <div>
+                        <p className="font-poppins text-xs font-bold text-emerald-950">GST Rate (Auto-filled)</p>
+                        <p className="font-nunito text-[11px] text-emerald-800">
+                          {form.gstRate === 0
+                            ? "Zero GST / Tax Exempted item"
+                            : `${form.gstRate}% standard GST automatically applied`}
+                        </p>
+                      </div>
+                      <span className="bg-emerald-600 text-white font-poppins text-xs font-bold px-3 py-1 rounded-full shadow-xs">
+                        {form.gstRate}% GST
+                      </span>
+                    </div>
+                  ) : null}
 
-                  <select
+                  {/* Quantity & Unit Row */}
+                  <div className="bg-emerald-50/50 p-3 rounded-xl border border-emerald-200/70">
+                    <label className="block text-xs font-poppins font-bold text-emerald-950 mb-2">
+                      Quantity / Weight & Unit *
+                    </label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-nunito text-emerald-800 font-semibold mb-1">
+                          Amount / Quantity
+                        </label>
+                        <input
+                          type="number"
+                          step="any"
+                          min="0.1"
+                          className={inputClass}
+                          value={form.unitValue}
+                          onChange={(e) => setForm({ ...form, unitValue: e.target.value })}
+                          placeholder="e.g. 1 or 500"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-nunito text-emerald-800 font-semibold mb-1">
+                          Unit
+                        </label>
+                        <select
+                          className={inputClass}
+                          value={form.unit}
+                          onChange={(e) => setForm({ ...form, unit: e.target.value })}
+                        >
+                          <option value="kg">kg (Kilogram)</option>
+                          <option value="gm">gm (Gram)</option>
+                          <option value="litre">litre (L)</option>
+                          <option value="ml">ml (Millilitre)</option>
+                          <option value="pack">pack (Packet)</option>
+                          <option value="piece">piece (Pcs)</option>
+                          <option value="dozen">dozen</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
 
-                    className={inputClass}
+                  {/* Preset Grocery Photo Gallery */}
+                  <div className="bg-emerald-50/60 p-3 rounded-xl border border-emerald-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-poppins font-bold text-emerald-950 flex items-center gap-1.5">
+                        <ShoppingBag size={14} className="text-emerald-700" />
+                        Grocery Photo Gallery ({PRESET_GROCERY_ITEMS.length})
+                      </span>
+                      <span className="text-[10px] font-nunito text-emerald-700 font-semibold">
+                        Click photo to attach
+                      </span>
+                    </div>
+                    <div className="flex gap-2 overflow-x-auto pb-1.5 pt-0.5">
+                      {PRESET_GROCERY_ITEMS.map((preset) => {
+                        const isAdded = existingImages.includes(preset.image)
+                        return (
+                          <div
+                            key={preset.id}
+                            onClick={() => {
+                              if (isAdded) {
+                                setExistingImages((prev) => prev.filter((img) => img !== preset.image))
+                              } else {
+                                if (existingImages.length + pendingImages.length < MAX_IMAGES) {
+                                  setExistingImages((prev) => [...prev, preset.image])
+                                }
+                              }
+                            }}
+                            className={cn(
+                              "flex-shrink-0 w-20 p-1.5 rounded-lg border bg-white cursor-pointer transition-all hover:shadow-xs relative text-center",
+                              isAdded ? "border-emerald-600 bg-emerald-50 ring-2 ring-emerald-500/20" : "border-gray-200 hover:border-emerald-300"
+                            )}
+                          >
+                            <div className="w-full aspect-square rounded-md overflow-hidden bg-gray-100 mb-1 relative">
+                              <img src={preset.image} alt={preset.name} className="w-full h-full object-cover" />
+                              {isAdded && (
+                                <div className="absolute top-1 right-1 bg-emerald-600 text-white rounded-full p-0.5 shadow-sm">
+                                  <Check size={10} strokeWidth={3} />
+                                </div>
+                              )}
+                            </div>
+                            <p className="text-[10px] font-nunito font-semibold text-dark truncate leading-tight">
+                              {preset.name.split("/")[0]}
+                            </p>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                /* Food Category: Item Name with Suggestions */
+                <>
+                  <Field label="Item Name" required>
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <input
+                          className={inputClass}
+                          value={form.name}
+                          onChange={(e) => setForm({ ...form, name: e.target.value })}
+                          placeholder="e.g. Special Dal Makhani Thali"
+                          list="suggested-food-names"
+                          required
+                        />
+                        <datalist id="suggested-food-names">
+                          {SUGGESTED_FOOD_ITEMS.map((item, idx) => (
+                            <option key={idx} value={item} />
+                          ))}
+                        </datalist>
+                      </div>
 
-                    value={form.category}
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-poppins font-medium text-gray-500">
+                          Or pick from list:
+                        </span>
+                        <select
+                          className="text-xs bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 font-nunito text-dark cursor-pointer flex-1"
+                          value=""
+                          onChange={(e) => {
+                            if (e.target.value) {
+                              setForm((prev) => ({ ...prev, name: e.target.value }))
+                            }
+                          }}
+                        >
+                          <option value="">-- Choose suggested food item --</option>
+                          {SUGGESTED_FOOD_ITEMS.map((name, idx) => (
+                            <option key={idx} value={name}>
+                              {name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </Field>
 
-                    onChange={(e) => setForm({ ...form, category: e.target.value })}
+                  <Field label="Local / Regional Name (Optional)">
+                    <input
+                      className={inputClass}
+                      value={form.localName}
+                      onChange={(e) => setForm({ ...form, localName: e.target.value })}
+                      placeholder="e.g. दाल मखनी थाली"
+                    />
+                  </Field>
+                </>
+              )}
 
-                  >
+              <Field label="Description">
+                <textarea
+                  className={`${inputClass} min-h-[70px] resize-none`}
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                  placeholder="Short description for customers"
+                />
+              </Field>
 
-                    <option value="food">Food</option>
-
-                    <option value="grocery">Grocery</option>
-
-                  </select>
-
-                </Field>
-
-              </div>
+              <Field label="Price (₹)" required>
+                <div className="relative">
+                  <IndianRupee size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray" />
+                  <input
+                    type="number"
+                    min="1"
+                    className={`${inputClass} pl-8`}
+                    value={form.price}
+                    onChange={(e) => setForm({ ...form, price: e.target.value })}
+                    placeholder="149"
+                    required
+                  />
+                </div>
+              </Field>
 
               <Field label="Type">
-
                 <div className="flex gap-3">
-
                   {["veg", "non_veg"].map((t) => (
-
                     <button
-
                       key={t}
-
                       type="button"
-
                       onClick={() => setForm({ ...form, itemType: t })}
-
                       className={cn(
-
                         "flex-1 py-2.5 rounded-lg border text-xs font-poppins font-medium cursor-pointer transition-colors",
-
                         form.itemType === t
-
                           ? t === "veg" ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-red-500 bg-red-50 text-red-700"
-
                           : "border-gray-200 text-gray"
-
                       )}
-
                     >
-
                       <Leaf size={13} className="inline mr-1" />
-
                       {t === "veg" ? "Veg" : "Non-Veg"}
-
                     </button>
-
                   ))}
-
                 </div>
-
               </Field>
 
 

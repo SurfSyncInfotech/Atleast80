@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { ArrowRight, ArrowLeft, Mail, Lock, User, Phone, CheckCircle, RotateCw } from "lucide-react"
+import { ArrowRight, ArrowLeft, Mail, Lock, User, Phone, CheckCircle, RotateCw, FileText } from "lucide-react"
 import Button from "../components/ui/Button"
 import PasswordInput from "../components/ui/PasswordInput"
 import { useAuth } from "../context/AuthContext"
+import { getUserAgreement } from "../lib/api"
 
 const INDIAN_MOBILE = /^[6-9]\d{9}$/
 
@@ -13,6 +14,8 @@ export default function SignupPage() {
   const { signupCustomer, verifySignupOtp, resendSignupOtp, loginCustomer } = useAuth()
   const [step, setStep] = useState("signup") // "signup" or "otp"
   const [form, setForm] = useState({ name: "", email: "", phone: "", password: "" })
+  const [agreedToTerms, setAgreedToTerms] = useState(false)
+  const [userAgreement, setUserAgreement] = useState(null)
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
 
@@ -30,6 +33,14 @@ export default function SignupPage() {
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }))
 
   useEffect(() => {
+    getUserAgreement()
+      .then((data) => {
+        if (data?.url) setUserAgreement(data)
+      })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
     let timer = null
     if (step === "otp" && resendTimer > 0) {
       timer = setInterval(() => {
@@ -44,6 +55,10 @@ export default function SignupPage() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError("")
+    if (!agreedToTerms) {
+      setError("Please read and accept the User Agreement & Terms to proceed.")
+      return
+    }
     setLoading(true)
     try {
       const phone = form.phone.replace(/\D/g, "").slice(0, 10)
@@ -224,7 +239,44 @@ export default function SignupPage() {
                   </div>
                 </div>
 
-                <Button type="submit" size="lg" className="w-full" disabled={loading || !INDIAN_MOBILE.test(form.phone)}>
+                {/* User Agreement & Terms Acceptance */}
+                <div className="pt-1">
+                  <label className="flex items-start gap-3 cursor-pointer select-none group">
+                    <input
+                      type="checkbox"
+                      checked={agreedToTerms}
+                      onChange={(e) => setAgreedToTerms(e.target.checked)}
+                      className="mt-1 w-4 h-4 text-primary rounded border-gray-300 focus:ring-primary focus:ring-offset-0 cursor-pointer accent-primary"
+                    />
+                    <span className="font-nunito text-xs text-dark/80 leading-relaxed">
+                      I have read and agree to the{" "}
+                      {userAgreement?.url ? (
+                        <a
+                          href={userAgreement.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-semibold text-primary underline hover:text-primary-dark inline-flex items-center gap-0.5"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          User Agreement &amp; Terms
+                          <FileText size={12} className="inline ml-0.5" />
+                        </a>
+                      ) : (
+                        <Link
+                          to="/terms"
+                          target="_blank"
+                          className="font-semibold text-primary underline hover:text-primary-dark"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          Terms of Service &amp; Privacy Policy
+                        </Link>
+                      )}
+                      .
+                    </span>
+                  </label>
+                </div>
+
+                <Button type="submit" size="lg" className="w-full" disabled={loading || !INDIAN_MOBILE.test(form.phone) || !agreedToTerms}>
                   {loading ? "Creating account..." : "Sign up"}
                   <ArrowRight size={18} />
                 </Button>

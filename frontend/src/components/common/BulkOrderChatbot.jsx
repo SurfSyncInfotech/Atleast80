@@ -73,6 +73,33 @@ export default function BulkOrderChatbot({ kitchenId, kitchenName, cartVisible =
     }
   }
 
+  useEffect(() => {
+    if (!open || !customerUser?.id || !kitchenId || !enquiry?.id || enquiry.status === "completed") return
+
+    let cancelled = false
+
+    const pollEnquiry = async () => {
+      try {
+        const data = await api(`/api/bulk-enquiries/kitchen/${kitchenId}`, {}, "customer")
+        if (!cancelled) {
+          setEnquiry(data.enquiry)
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.log("Failed to poll enquiry:", err)
+        }
+      }
+    }
+
+    pollEnquiry()
+    const interval = setInterval(pollEnquiry, 5000)
+
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [open, customerUser?.id, kitchenId, enquiry?.id, enquiry?.status])
+
   // In-app chat polling
   useEffect(() => {
     if (!showChat || !enquiry?.id) return

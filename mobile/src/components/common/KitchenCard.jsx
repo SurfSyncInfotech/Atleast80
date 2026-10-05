@@ -33,6 +33,7 @@ export default function KitchenCard({ kitchen, className, onPress, variant = "li
   }
 
   const isVerified = kitchen.verified || kitchen.hygieneVerified
+  const festOffer = kitchen.festivalOffer?.active ? kitchen.festivalOffer : null
 
   if (variant === "grid") {
     return (
@@ -78,6 +79,46 @@ export default function KitchenCard({ kitchen, className, onPress, variant = "li
                 colors={["transparent", "rgba(0,0,0,0.3)"]}
                 className="absolute inset-x-0 bottom-0 h-10"
               />
+
+              {/* Floating Festival Offer Badge */}
+              {festOffer && (
+                <View style={{
+                  position: "absolute",
+                  top: 8,
+                  left: 8,
+                  backgroundColor: "#FF6B00",
+                  paddingHorizontal: 7,
+                  paddingVertical: 3,
+                  borderRadius: 8,
+                  shadowColor: "#000",
+                  shadowOffset: { width: 0, height: 1 },
+                  shadowOpacity: 0.15,
+                  shadowRadius: 3,
+                  elevation: 2,
+                }}>
+                  <Text style={{ color: "#FFFFFF", fontSize: 8, fontFamily: "Poppins", fontWeight: "bold" }}>
+                    🎉 {festOffer.discountPercent}% OFF
+                  </Text>
+                </View>
+              )}
+
+              {festOffer && (
+                <View style={{
+                  position: "absolute",
+                  bottom: 5,
+                  right: 8,
+                  backgroundColor: "rgba(0,0,0,0.7)",
+                  paddingHorizontal: 6,
+                  paddingVertical: 2,
+                  borderRadius: 6,
+                  borderWidth: 0.5,
+                  borderColor: "rgba(255,255,255,0.3)"
+                }}>
+                  <Text style={{ color: "#FFE082", fontSize: 8, fontFamily: "Poppins", fontWeight: "bold" }}>
+                    ✨ Special Deals Inside →
+                  </Text>
+                </View>
+              )}
 
               {/* Floating Verified Badge */}
               {isVerified && (
@@ -257,10 +298,34 @@ export default function KitchenCard({ kitchen, className, onPress, variant = "li
               </Text>
             </View>
           )}
-          {kitchen.offer && (
+          {festOffer ? (
+            <View className="absolute top-3 left-3 bg-[#FF6B00] px-2.5 py-1 rounded-lg shadow-sm">
+              <Text className="text-white text-[9px] font-poppins font-bold uppercase tracking-wider">
+                🎉 {festOffer.discountPercent}% OFF · {festOffer.title || "Festival Special"}
+              </Text>
+            </View>
+          ) : kitchen.offer ? (
             <View className="absolute top-3 left-3 bg-accent px-2.5 py-1 rounded-lg shadow-sm">
               <Text className="text-white text-[9px] font-poppins font-bold uppercase tracking-wider">
                 {kitchen.offer}
+              </Text>
+            </View>
+          ) : null}
+
+          {festOffer && (
+            <View style={{
+              position: "absolute",
+              bottom: 8,
+              right: 12,
+              backgroundColor: "rgba(0,0,0,0.65)",
+              paddingHorizontal: 8,
+              paddingVertical: 3,
+              borderRadius: 8,
+              borderWidth: 0.5,
+              borderColor: "rgba(255,255,255,0.3)"
+            }}>
+              <Text style={{ color: "#FFE082", fontSize: 9, fontFamily: "Poppins", fontWeight: "bold" }}>
+                ✨ Tap to Explore Special Deals →
               </Text>
             </View>
           )}

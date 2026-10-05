@@ -56,7 +56,14 @@ export default function ForgotPasswordPage() {
   const [resendLoading, setResendLoading] = useState(false)
 
   const otpRefs = [useRef(null), useRef(null), useRef(null), useRef(null)]
+  const scrollViewRef = useRef(null)
   const otpValue = otp.join("")
+
+  const handlePasswordFocus = () => {
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true })
+    }, 150)
+  }
 
   useEffect(() => {
     let timer = null
@@ -150,10 +157,16 @@ export default function ForgotPasswordPage() {
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      behavior={Platform.OS === "ios" ? "padding" : "padding"}
+      style={{ flex: 1 }}
       className="flex-1 bg-cream relative"
     >
-      <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: "center", paddingVertical: 40 }} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        ref={scrollViewRef}
+        contentContainerStyle={{ flexGrow: 1, justifyContent: "center", paddingTop: 40, paddingBottom: 160 }}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         {/* Top Left Back Circle Button */}
         <TouchableOpacity
           onPress={() => (step === "otp" ? setStep("phone") : router.replace("/(auth)/login"))}
@@ -265,6 +278,7 @@ export default function ForgotPasswordPage() {
                     onChangeText={setPassword}
                     placeholder="At least 6 characters"
                     icon={Lock}
+                    onFocus={handlePasswordFocus}
                   />
                 </View>
 

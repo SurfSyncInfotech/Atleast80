@@ -66,7 +66,15 @@ export async function sendPushToToken(token, title, body, data = {}) {
       },
       data: {
         ...data,
-        click_action: "FLUTTER_NOTIFICATION_CLICK", // for expo / react native compatibility
+        click_action: "FLUTTER_NOTIFICATION_CLICK",
+      },
+      android: {
+        priority: "high",
+        notification: {
+          sound: "default",
+          channelId: "default",
+          priority: "high",
+        },
       },
       token,
     }
@@ -100,6 +108,16 @@ export async function broadcastRescueNotification(kitchenId, orderNumber, grandT
       return
     }
 
+    const alertTitle = "🍕 Food Rescue Alert! (FREE Delivery)"
+    const alertBody = `Fresh food available from ${kitchenName} in ${city} with FREE Delivery! Claim now and save on delivery charges.`
+    
+    // Always insert system alert entry into database for Notification Bell 🔔
+    await pool.query(
+      `INSERT INTO alerts (target_role, title, body, is_system, created_at)
+       VALUES ('customer', ?, ?, 1, NOW())`,
+      [alertTitle, alertBody]
+    ).catch((err) => console.error("Error inserting rescue alert:", err.message))
+
     // 2. Fetch all customers in that city with active FCM tokens, excluding the user who cancelled
     let query = "SELECT id, fcm_token FROM users WHERE role = 'customer' AND TRIM(LOWER(city)) = TRIM(LOWER(?)) AND fcm_token IS NOT NULL"
     const params = [city]
@@ -111,7 +129,7 @@ export async function broadcastRescueNotification(kitchenId, orderNumber, grandT
     const [customers] = await pool.query(query, params)
 
     if (customers.length === 0) {
-      console.log(`[Push Broadcast] No other customers found in city "${city}" with FCM tokens.`)
+      console.log(`[Push Broadcast] No other customers found in city "${city}" with FCM tokens. In-app notification saved.`)
       return
     }
 
@@ -119,19 +137,29 @@ export async function broadcastRescueNotification(kitchenId, orderNumber, grandT
     console.log(`[Push Broadcast] Found ${tokens.length} users in ${city} for food rescue broadcast.`)
 
     if (!isFirebaseInitialized) {
-      console.log(`[Push Broadcast (Simulated)] City: ${city} | Title: "🍕 Food Rescue Alert!" | Body: "Rescue food available from ${kitchenName} with FREE Delivery!"`)
+      console.log(`[Push Broadcast (Simulated)] City: ${city} | Title: "${alertTitle}" | Body: "${alertBody}"`)
       return
     }
 
     const message = {
       notification: {
-        title: "🍕 Food Rescue Alert!",
-        body: `Fresh food available from ${kitchenName} near you with FREE Delivery! Claim now.`,
+        title: alertTitle,
+        body: alertBody,
       },
       data: {
         type: "rescue",
+        action: "rescue",
         orderNumber: String(orderNumber),
         orderId: String(orderId),
+        order_id: String(orderId),
+      },
+      android: {
+        priority: "high",
+        notification: {
+          sound: "default",
+          channelId: "default",
+          priority: "high",
+        },
       },
       tokens: tokens,
     }
@@ -185,6 +213,14 @@ export async function broadcastNewOrderToRiders(kitchenCity, orderNumber, orderI
         type: "new_delivery",
         orderId: String(orderId),
       },
+      android: {
+        priority: "high",
+        notification: {
+          sound: "default",
+          channelId: "default",
+          priority: "high",
+        },
+      },
       tokens: tokens,
     }
 
@@ -192,5 +228,32 @@ export async function broadcastNewOrderToRiders(kitchenCity, orderNumber, orderI
     console.log(`✉️ Multicast rider push sent. Success: ${response.successCount}, Fail: ${response.failureCount}`)
   } catch (error) {
     console.error("❌ Error broadcasting new order alert to riders:", error.message)
+  }
+}
+
+/**
+ * Sends a push notification to a specific rider by rider ID or rider user ID.
+ */
+export async function sendPushToRider(riderIdOrUserId, title, body, data = {}) {
+  try {
+    const [rows] = await pool.query(
+      `SELECT u.fcm_token 
+       FROM users u
+       LEFT JOIN riders r ON r.user_id = u.id
+       WHERE u.id = ? OR r.id = ?
+       LIMIT 1`,
+      [riderIdOrUserId, riderIdOrUserId]
+    )
+
+    if (rows.length === 0 || !rows[0].fcm_token) {
+      console.log(`[Rider Push (Skipped)] Rider/User #${riderIdOrUserId} has no active FCM token.`)
+      return false
+    }
+
+    const token = rows[0].fcm_token
+    return await sendPushToToken(token, title, body, data)
+  } catch (error) {
+    console.error(`❌ Error sending push to rider #${riderIdOrUserId}:`, error.message)
+    return false
   }
 }

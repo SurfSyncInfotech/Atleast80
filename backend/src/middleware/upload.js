@@ -90,6 +90,21 @@ export const kitchenCoverUpload = multer({
   fileFilter: imageOnlyFilter,
 })
 
+const kitchenImagesStorage = multer.diskStorage({
+  destination(_req, _file, cb) {
+    cb(null, KITCHEN_UPLOADS_DIR)
+  },
+  filename(_req, file, cb) {
+    const ext = path.extname(file.originalname).toLowerCase() || ".jpg"
+    cb(null, `kitchen-image-${Date.now()}-${Math.random().toString(36).slice(2, 9)}${ext}`)
+  },
+})
+
+export const kitchenImagesUpload = multer({
+  storage: kitchenImagesStorage,
+  fileFilter: imageOnlyFilter,
+})
+
 const fssaiLicenseStorage = multer.diskStorage({
   destination(_req, _file, cb) {
     cb(null, KITCHEN_UPLOADS_DIR)
@@ -119,12 +134,12 @@ const onboardingDocumentsStorage = multer.diskStorage({
     const prefix = file.fieldname === "aadhaarCard"
       ? "aadhaar_front"
       : file.fieldname === "aadhaarCardBack"
-      ? "aadhaar_back"
-      : file.fieldname === "panCard"
-      ? "pan"
-      : file.fieldname === "drivingLicense"
-      ? "license"
-      : "fssai"
+        ? "aadhaar_back"
+        : file.fieldname === "panCard"
+          ? "pan"
+          : file.fieldname === "drivingLicense"
+            ? "license"
+            : "fssai"
     cb(null, `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}${ext}`)
   },
 })

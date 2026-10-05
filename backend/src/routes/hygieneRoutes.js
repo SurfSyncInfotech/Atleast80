@@ -114,8 +114,10 @@ router.get("/kitchen/:kitchenId", async (req, res) => {
       return res.status(404).json({ message: "Kitchen not found" })
     }
 
+    const status = await getHygieneCompliance(pool, kitchenId)
+
     const [rows] = await pool.query(
-      `SELECT id, area, media_url AS mediaUrl, recorded_at AS recordedAt
+      `SELECT id, area, media_url AS mediaUrl, recorded_at AS recordedAt, status, rejection_reason AS rejectionReason
        FROM hygiene_checks
        WHERE kitchen_id = ? AND area = ?
        ORDER BY recorded_at DESC
@@ -123,14 +125,29 @@ router.get("/kitchen/:kitchenId", async (req, res) => {
       [kitchenId, HYGIENE_AREA]
     )
 
-    const status = await getHygieneCompliance(pool, kitchenId)
+    const latestRow = rows[0] || null
+
+    const formattedVideos = rows.map((r) => ({
+      ...r,
+      mediaUrl: normalizePublicUrl(r.mediaUrl),
+      label: HYGIENE_AREA_LABEL,
+    }))
+
+    const approvedVideo = (latestRow && latestRow.status === "approved" && status.compliant)
+      ? {
+          id: latestRow.id,
+          area: latestRow.area,
+          mediaUrl: normalizePublicUrl(latestRow.mediaUrl),
+          recordedAt: latestRow.recordedAt,
+          status: latestRow.status,
+          label: HYGIENE_AREA_LABEL,
+        }
+      : null
 
     res.json({
-      videos: rows.map((r) => ({
-        ...r,
-        mediaUrl: normalizePublicUrl(r.mediaUrl),
-        label: HYGIENE_AREA_LABEL,
-      })),
+      approvedVideo,
+      video: approvedVideo,
+      videos: formattedVideos,
       compliant: status.compliant,
       areas: status.areas,
       latest: status.latest,

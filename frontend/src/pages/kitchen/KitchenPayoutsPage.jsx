@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { IndianRupee, RefreshCw, CheckCircle2, Building2, Calendar, FileText, ArrowDownLeft, ShieldCheck } from "lucide-react"
+import { IndianRupee, RefreshCw, CheckCircle2, Building2, Calendar, FileText, ArrowDownLeft, ShieldCheck, Truck } from "lucide-react"
 import KitchenLayout from "../../components/layout/KitchenLayout"
 import { useAuth } from "../../context/AuthContext"
 import { api } from "../../lib/api"
@@ -32,6 +32,7 @@ export default function KitchenPayoutsPage() {
 
   const totalNetPaid = payouts.reduce((acc, p) => acc + (p.netPayout || 0), 0)
   const totalCommission = payouts.reduce((acc, p) => acc + (p.commissionDeduction || 0), 0)
+  const totalRiderFees = payouts.reduce((acc, p) => acc + (p.riderFeeDeduction || 0), 0)
   const totalGross = payouts.reduce((acc, p) => acc + (p.grossAmount || 0), 0)
 
   return (
@@ -45,7 +46,7 @@ export default function KitchenPayoutsPage() {
               Payouts & Settlement History
             </h1>
             <p className="font-nunito text-gray text-sm mt-0.5">
-              View all bank transfers, gross order sales, commission breakdowns, and UTR reference numbers credited by Admin.
+              View all bank transfers, gross order sales, commission breakdowns, delivery fee deductions, and UTR reference numbers credited by Admin.
             </p>
           </div>
           <button
@@ -59,7 +60,7 @@ export default function KitchenPayoutsPage() {
         </div>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
             <div className="flex items-center justify-between mb-3">
               <span className="font-nunito text-xs font-semibold text-gray uppercase tracking-wider">Total Net Received</span>
@@ -88,7 +89,7 @@ export default function KitchenPayoutsPage() {
 
           <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
             <div className="flex items-center justify-between mb-3">
-              <span className="font-nunito text-xs font-semibold text-gray uppercase tracking-wider">Platform Commission (10%)</span>
+              <span className="font-nunito text-xs font-semibold text-gray uppercase tracking-wider">Platform Commission</span>
               <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600">
                 <ShieldCheck size={20} />
               </div>
@@ -96,7 +97,20 @@ export default function KitchenPayoutsPage() {
             <p className="font-poppins font-bold text-2xl text-red-600">
               -₹{totalCommission.toLocaleString("en-IN")}
             </p>
-            <p className="font-nunito text-xs text-gray mt-2">Atleast80 platform service fee</p>
+            <p className="font-nunito text-xs text-gray mt-2">Atleast80 platform service fee (0% for promo)</p>
+          </div>
+
+          <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
+            <div className="flex items-center justify-between mb-3">
+              <span className="font-nunito text-xs font-semibold text-gray uppercase tracking-wider">Rider Delivery Fee</span>
+              <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center text-purple-600">
+                <Truck size={20} />
+              </div>
+            </div>
+            <p className="font-poppins font-bold text-2xl text-purple-700">
+              -₹{totalRiderFees.toLocaleString("en-IN")}
+            </p>
+            <p className="font-nunito text-xs text-gray mt-2">Delivery charge paid to delivery riders</p>
           </div>
         </div>
 
@@ -124,7 +138,8 @@ export default function KitchenPayoutsPage() {
                   <tr className="border-b border-gray-100 bg-gray-50/70 text-[11px] font-poppins font-bold text-gray uppercase tracking-wider">
                     <th className="py-3 px-4">Paid Date</th>
                     <th className="py-3 px-4">Gross Sales</th>
-                    <th className="py-3 px-4">Comm. (10%)</th>
+                    <th className="py-3 px-4">Platform Fee</th>
+                    <th className="py-3 px-4">Rider Fee</th>
                     <th className="py-3 px-4">Net Amount Received</th>
                     <th className="py-3 px-4">UTR Reference</th>
                     <th className="py-3 px-4">Status</th>
@@ -138,6 +153,7 @@ export default function KitchenPayoutsPage() {
                       </td>
                       <td className="py-3.5 px-4 font-semibold text-dark">₹{p.grossAmount}</td>
                       <td className="py-3.5 px-4 font-semibold text-red-600">-₹{p.commissionDeduction}</td>
+                      <td className="py-3.5 px-4 font-semibold text-purple-700">-₹{p.riderFeeDeduction}</td>
                       <td className="py-3.5 px-4 font-poppins font-bold text-emerald-700 text-base">
                         ₹{p.netPayout}
                       </td>

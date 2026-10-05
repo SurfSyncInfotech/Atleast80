@@ -1,10 +1,48 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   Video, Circle, Square, CheckCircle, AlertTriangle, SwitchCamera, Trash2,
 } from "lucide-react"
 import Button from "../ui/Button"
 import { api, uploadHygieneVideo, deleteHygieneVideo } from "../../lib/api"
 import { resolveMediaUrl } from "../../lib/media"
+
+const HYGIENE_WINDOW_MS = 24 * 60 * 60 * 1000
+const HYGIENE_EXPIRED_PROMPT =
+  "Your daily hygiene video has completed 24 hours. Record and upload today's daily hygiene video to stay visible to customers."
+
+function isFreshHygieneVideo(video, now = Date.now()) {
+  if (!video?.mediaUrl || !video?.recordedAt) return false
+  const recordedAt = new Date(video.recordedAt).getTime()
+  if (Number.isNaN(recordedAt)) return false
+  return now - recordedAt < HYGIENE_WINDOW_MS
+}
+
+function getVisibleStatus(status, now = Date.now()) {
+  if (!status) return null
+  const videoStatus = status.video?.status || status.status
+
+  if (videoStatus === "rejected") {
+    return {
+      ...status,
+      compliant: false,
+      uploaded: false,
+      requiresUpload: true,
+      uploadMessage: status.uploadMessage || "Daily video rejected by Admin. Please re-upload a clear video.",
+      video: null,
+    }
+  }
+
+  if (isFreshHygieneVideo(status.video, now)) return status
+
+  return {
+    ...status,
+    compliant: false,
+    uploaded: false,
+    requiresUpload: true,
+    uploadMessage: status.uploadMessage || HYGIENE_EXPIRED_PROMPT,
+    video: null,
+  }
+}
 
 export default function HygieneRecordSection({ onUpdated }) {
   const videoRef = useRef(null)
@@ -21,27 +59,44 @@ export default function HygieneRecordSection({ onUpdated }) {
   const [error, setError] = useState("")
   const [cameraReady, setCameraReady] = useState(false)
   const [facingMode, setFacingMode] = useState("environment")
+  const [statusClock, setStatusClock] = useState(0)
 
-  const loadStatus = async () => {
+  const stopCamera = useCallback(() => {
+    streamRef.current?.getTracks().forEach((t) => t.stop())
+    streamRef.current = null
+    setCameraReady(false)
+  }, [])
+
+  const loadStatus = useCallback(async () => {
     try {
       const data = await api("/api/hygiene/me/status", {}, "kitchen")
+      setStatusClock(Date.now())
       setStatus(data)
       onUpdated?.(data)
     } catch {
       setStatus(null)
     }
-  }
+  }, [onUpdated])
 
   useEffect(() => {
-    loadStatus()
-    return () => stopCamera()
-  }, [])
+    const timer = setTimeout(() => {
+      loadStatus()
+    }, 0)
 
-  const stopCamera = () => {
-    streamRef.current?.getTracks().forEach((t) => t.stop())
-    streamRef.current = null
-    setCameraReady(false)
-  }
+    return () => {
+      clearTimeout(timer)
+      stopCamera()
+    }
+  }, [loadStatus, stopCamera])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setStatusClock(Date.now())
+      loadStatus()
+    }, 60000)
+
+    return () => clearInterval(interval)
+  }, [loadStatus])
 
   const startCamera = async (mode) => {
     setError("")
@@ -138,8 +193,9 @@ export default function HygieneRecordSection({ onUpdated }) {
     }
   }
 
-  const uploaded = status?.uploaded
-  const savedVideoUrl = status?.video?.mediaUrl ? resolveMediaUrl(status.video.mediaUrl) : null
+  const visibleStatus = getVisibleStatus(status, statusClock)
+  const uploaded = visibleStatus?.uploaded
+  const savedVideoUrl = visibleStatus?.video?.mediaUrl ? resolveMediaUrl(visibleStatus.video.mediaUrl) : null
 
   return (
     <div className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/5 via-white to-secondary/10 p-6 mb-6 shadow-sm">
@@ -155,11 +211,10 @@ export default function HygieneRecordSection({ onUpdated }) {
         </div>
       </div>
 
-      {status && status.requiresUpload && (
+      {visibleStatus && visibleStatus.requiresUpload && (
         <div className="mb-4 flex items-start gap-2 rounded-xl bg-amber-50 border border-amber-100 px-3 py-2 text-sm text-amber-800 font-nunito">
           <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" />
-          {status.uploadMessage ||
-            "Your daily hygiene video is missing or older than 24 hours. Record and upload a new video to stay visible to customers."}
+          {visibleStatus.uploadMessage || HYGIENE_EXPIRED_PROMPT}
         </div>
       )}
 
@@ -185,9 +240,9 @@ export default function HygieneRecordSection({ onUpdated }) {
             controls
             playsInline
           />
-          {status?.video?.recordedAt && (
+          {visibleStatus?.video?.recordedAt && (
             <p className="font-nunito text-xs text-gray mb-3">
-              Uploaded {new Date(status.video.recordedAt).toLocaleString("en-IN")}
+              Uploaded {new Date(visibleStatus.video.recordedAt).toLocaleString("en-IN")}
             </p>
           )}
           <div className="flex flex-wrap gap-3">

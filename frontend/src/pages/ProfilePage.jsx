@@ -8,6 +8,7 @@ import {
 import Button from "../components/ui/Button"
 import { useAuth } from "../context/AuthContext"
 import { api } from "../lib/api"
+import { validateBrowserLocation, getLocationPreference } from "../lib/locationPreference"
 import { cn } from "../lib/utils"
 
 const STATUS_LABELS = {
@@ -141,22 +142,29 @@ export default function ProfilePage() {
     setDetectingLocation(true)
     navigator.geolocation.getCurrentPosition(
       async (position) => {
-        const { latitude, longitude } = position.coords
-        try {
-          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`, {
-            headers: {
-              "User-Agent": "Atleast80Web/1.0"
-            }
-          })
-          const data = await res.json()
-          if (data && data.address) {
-            const addr = data.address
-            const road = addr.road || addr.suburb || addr.neighbourhood || ""
-            const houseNumber = addr.house_number || ""
-            const city = addr.city || addr.town || addr.village || addr.county || ""
-            const postcode = addr.postcode || ""
+        const validation = validateBrowserLocation(position)
+        if (!validation.valid) {
+          alert(`Browser location is too coarse (~${Math.round((validation.accuracy || 0)/1000)} km). Please pick location on map or enter manually.`)
+          setDetectingLocation(false)
+          return
+        }
 
-            let streetAddress = [houseNumber, road].filter(Boolean).join(", ")
+        const { latitude, longitude } = position.coords
+        console.trace("[REVERSE GEOCODE CALLED]", {
+          latitude,
+          longitude,
+          caller: "ProfilePage.handleAutoDetectLocation"
+        })
+        try {
+          const data = await api(`/api/locations/reverse?lat=${latitude}&lng=${longitude}`)
+          if (data) {
+            const addr = data.address || {}
+            const road = data.suburb || addr.road || addr.suburb || addr.neighbourhood || ""
+            const houseNumber = addr.house_number || ""
+            const city = data.city || data.suburb || data.district || addr.city || addr.town || addr.village || addr.county || ""
+            const postcode = data.postcode || addr.postcode || ""
+
+            let streetAddress = data.formattedAddress || data.displayName || [houseNumber, road].filter(Boolean).join(", ")
             if (!streetAddress && data.display_name) {
               streetAddress = data.display_name.split(",").slice(0, 2).map(s => s.trim()).join(", ")
             }
@@ -177,25 +185,66 @@ export default function ProfilePage() {
         }
       },
       (err) => {
-        alert("Failed to get location: " + err.message)
+        if (err.code === 1) {
+          alert("Location permission denied. Please allow access or fill manually.")
+        } else if (err.code === 2) {
+          alert("Position unavailable. Please pick location on map or enter manually.")
+        } else if (err.code === 3) {
+          alert("Location detection timed out. Please try again or enter manually.")
+        } else {
+          alert("Failed to get location: " + (err.message || "Unknown error"))
+        }
         setDetectingLocation(false)
       },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     )
   }
 
-  const hasAddress = Boolean(user?.address || user?.city || user?.pincode)
+  const [locationPref, setLocationPref] = useState(getLocationPreference)
+
+  useEffect(() => {
+    const syncLocation = () => {
+      const pref = getLocationPreference()
+      setLocationPref(pref)
+      if (pref.address || pref.city) {
+        setForm((prev) => ({
+          ...prev,
+          address: pref.address || prev.address,
+          city: pref.city || prev.city,
+          pincode: pref.pincode || prev.pincode,
+        }))
+      }
+    }
+    window.addEventListener("location-preference-change", syncLocation)
+    return () => window.removeEventListener("location-preference-change", syncLocation)
+  }, [])
+
+  const isStalePune = (str) =>
+    str && (str.toLowerCase().includes("guruwar peth") || str.toLowerCase().includes("pant sachiv"))
+
+  const prefAddressStr = [locationPref?.address || locationPref?.suburb, locationPref?.city, locationPref?.pincode].filter(Boolean).join(", ")
+  const userAddressStr = [user?.address, user?.city, user?.pincode].filter(Boolean).join(", ")
+
+  const activeDisplayAddress = (!isStalePune(prefAddressStr) && prefAddressStr)
+    || (!isStalePune(userAddressStr) && userAddressStr)
+    || ""
+
+  const hasAddress = Boolean(activeDisplayAddress)
   const pastOrders = orders.filter((o) => !currentOrder || o.id !== currentOrder.id)
 
   useEffect(() => {
     if (!user) return
+    const pref = getLocationPreference()
+    const cleanUserAddr = isStalePune(user.address) ? "" : (user.address || "")
+    const cleanUserCity = isStalePune(user.address) ? "" : (user.city || "")
+
     setForm({
       name: user.name || "",
       email: user.email || "",
       phone: user.phone || "",
-      address: user.address || "",
-      city: user.city || "",
-      pincode: user.pincode || "",
+      address: pref.address || cleanUserAddr,
+      city: pref.city || cleanUserCity,
+      pincode: pref.pincode || user.pincode || "",
     })
   }, [user])
 
@@ -330,7 +379,7 @@ export default function ProfilePage() {
                   label="Delivery address"
                   value={
                     hasAddress
-                      ? [user.address, user.city, user.pincode].filter(Boolean).join(", ")
+                      ? activeDisplayAddress
                       : "No address saved yet"
                   }
                   muted={!hasAddress}

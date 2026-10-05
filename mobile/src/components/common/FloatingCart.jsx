@@ -1,14 +1,12 @@
 import React from "react"
 import { View, Text, TouchableOpacity, Platform } from "react-native"
-import { useRouter } from "expo-router"
 import { ShoppingCart, ChevronRight } from "lucide-react-native"
 import { useCart } from "../../context/CartContext"
 import { useAuth } from "../../context/AuthContext"
 
-export default function FloatingCart() {
+export default function FloatingCart({ onNavigateToCart }) {
   const { itemCount, total } = useCart()
   const { isCustomer } = useAuth()
-  const router = useRouter()
 
   if (itemCount <= 0) return null
 
@@ -25,7 +23,7 @@ export default function FloatingCart() {
       }}
     >
       <TouchableOpacity
-        onPress={() => isCustomer && router.push("/(customer)/cart")}
+        onPress={() => onNavigateToCart?.()}
         activeOpacity={0.9}
         className="w-full bg-primary py-3.5 px-5 rounded-2xl flex-row items-center justify-between border border-white/20"
       >

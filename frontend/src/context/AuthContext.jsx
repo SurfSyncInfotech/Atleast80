@@ -277,6 +277,16 @@ export function AuthProvider({ children }) {
     }
   }, [currentRole, applyRoleSession, reloadSessions])
 
+  useEffect(() => {
+    if (activeSession?.token) {
+      import("../lib/firebase")
+        .then(({ requestWebNotificationPermission }) => {
+          requestWebNotificationPermission(activeSession.token)
+        })
+        .catch((err) => console.warn("Web notification init error:", err))
+    }
+  }, [activeSession?.token])
+
   const value = useMemo(
     () => ({
       user,

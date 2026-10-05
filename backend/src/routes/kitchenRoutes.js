@@ -4,6 +4,7 @@ import { authRequired, requireRole } from "../middleware/auth.js"
 import {
   kitchenLogoUpload,
   kitchenCoverUpload,
+  kitchenImagesUpload,
   fssaiLicenseUpload,
   getKitchenLogoUrl,
   getKitchenFileUrl,
@@ -93,6 +94,144 @@ router.post("/me/cover", authRequired, requireRole("kitchen"), (req, res) => {
   })
 })
 
+router.post("/me/images", authRequired, requireRole("kitchen"), (req, res) => {
+  kitchenImagesUpload.array("images", 5)(req, res, async (err) => {
+    if (err) {
+      return res.status(400).json({ message: err.message || "Upload failed" })
+    }
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ message: "Kitchen images are required" })
+    }
+
+    try {
+      const [rows] = await pool.query(
+        "SELECT kitchen_images FROM kitchens WHERE user_id = ?",
+        [req.user.id]
+      )
+      const existing = []
+      if (rows[0]?.kitchen_images) {
+        try {
+          const parsed = typeof rows[0].kitchen_images === "string" ? JSON.parse(rows[0].kitchen_images) : rows[0].kitchen_images
+          if (Array.isArray(parsed)) existing.push(...parsed)
+        } catch {
+          // ignore invalid JSON
+        }
+      }
+
+      const totalCount = existing.length + req.files.length
+      if (totalCount > 5) {
+        return res.status(400).json({ message: "You can upload at most 5 kitchen images" })
+      }
+
+      const imageUrls = req.files.map((file) => getKitchenFileUrl(req, file.filename))
+      const nextImages = [...existing, ...imageUrls]
+
+      await pool.query(
+        "UPDATE kitchens SET kitchen_images = ? WHERE user_id = ?",
+        [JSON.stringify(nextImages), req.user.id]
+      )
+
+      const [updatedRows] = await pool.query(
+        `SELECT k.*, u.name AS user_name, u.email AS user_email
+         FROM kitchens k JOIN users u ON u.id = k.user_id WHERE k.user_id = ?`,
+        [req.user.id]
+      )
+
+      res.json({ message: "Kitchen images uploaded", kitchen: formatKitchen(updatedRows[0]) })
+    } catch (error) {
+      console.error("Kitchen images upload error:", error)
+      res.status(500).json({ message: "Failed to upload kitchen images" })
+    }
+  })
+})
+
+router.delete("/me/images", authRequired, requireRole("kitchen"), async (req, res) => {
+  const { imageUrl } = req.body
+  if (!imageUrl) {
+    return res.status(400).json({ message: "imageUrl is required" })
+  }
+
+  try {
+    const [rows] = await pool.query(
+      "SELECT kitchen_images FROM kitchens WHERE user_id = ?",
+      [req.user.id]
+    )
+
+    let existing = []
+    if (rows[0]?.kitchen_images) {
+      try {
+        const parsed = typeof rows[0].kitchen_images === "string" ? JSON.parse(rows[0].kitchen_images) : rows[0].kitchen_images
+        if (Array.isArray(parsed)) existing = parsed
+      } catch {
+        existing = []
+      }
+    }
+
+    const targetUrl = imageUrl.trim()
+    const nextImages = existing.filter((url) => {
+      return url !== targetUrl && !targetUrl.endsWith(url) && !url.endsWith(targetUrl)
+    })
+
+    await pool.query(
+      "UPDATE kitchens SET kitchen_images = ? WHERE user_id = ?",
+      [JSON.stringify(nextImages), req.user.id]
+    )
+
+    const [updatedRows] = await pool.query(
+      `SELECT k.*, u.name AS user_name, u.email AS user_email
+       FROM kitchens k JOIN users u ON u.id = k.user_id WHERE k.user_id = ?`,
+      [req.user.id]
+    )
+
+    res.json({ message: "Kitchen image deleted", kitchen: formatKitchen(updatedRows[0]) })
+  } catch (error) {
+    console.error("Delete kitchen image error:", error)
+    res.status(500).json({ message: "Failed to delete kitchen image" })
+  }
+})
+
+router.post("/me/resubmit", authRequired, requireRole("kitchen"), async (req, res) => {
+  try {
+    const [kitchenRows] = await pool.query(
+      "SELECT id, name, cover_image, status FROM kitchens WHERE user_id = ?",
+      [req.user.id]
+    )
+    if (kitchenRows.length === 0) {
+      return res.status(404).json({ message: "Kitchen not found" })
+    }
+
+    const kitchen = kitchenRows[0]
+
+    await pool.query(
+      `UPDATE kitchens 
+       SET status = 'pending', rejection_reason = NULL, submitted_at = NOW() 
+       WHERE id = ?`,
+      [kitchen.id]
+    )
+
+    // Notify Admin
+    await pool.query(
+      `INSERT INTO alerts (target_role, kitchen_id, title, body, is_system, created_by) 
+       VALUES ('admin', ?, 'Kitchen Re-Submitted Application', ?, 1, ?)`,
+      [kitchen.id, `Kitchen "${kitchen.name}" has re-submitted their application with updated details/photos for review.`, req.user.id]
+    )
+
+    const [updated] = await pool.query(
+      `SELECT k.*, u.name AS user_name, u.email AS user_email
+       FROM kitchens k JOIN users u ON u.id = k.user_id WHERE k.id = ?`,
+      [kitchen.id]
+    )
+
+    res.json({
+      message: "Application re-submitted successfully for Admin review",
+      kitchen: formatKitchen(updated[0]),
+    })
+  } catch (error) {
+    console.error("Resubmit application error:", error)
+    res.status(500).json({ message: "Failed to re-submit application" })
+  }
+})
+
 router.get("/me", authRequired, requireRole("kitchen"), async (req, res) => {
   try {
     const [rows] = await pool.query(
@@ -123,6 +262,85 @@ router.get("/me", authRequired, requireRole("kitchen"), async (req, res) => {
   }
 })
 
+// Get Kitchen Payout Settings
+router.get("/me/payout-settings", authRequired, requireRole("kitchen"), async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT payout_mode, bank_account_name, bank_name, bank_account_number, bank_ifsc, upi_id
+       FROM kitchens WHERE user_id = ?`,
+      [req.user.id]
+    )
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "Kitchen not found" })
+    }
+    const r = rows[0]
+    res.json({
+      payoutMode: r.payout_mode || "upi",
+      bankAccountName: r.bank_account_name || "",
+      bankName: r.bank_name || "",
+      bankAccountNumber: r.bank_account_number || "",
+      bankIfsc: r.bank_ifsc || "",
+      upiId: r.upi_id || "",
+    })
+  } catch (error) {
+    console.error("Fetch kitchen payout settings error:", error)
+    res.status(500).json({ message: "Failed to fetch payout settings" })
+  }
+})
+
+// Update Kitchen Payout Settings
+router.put("/me/payout-settings", authRequired, requireRole("kitchen"), async (req, res) => {
+  try {
+    const { payoutMode, bankAccountName, bankName, bankAccountNumber, bankIfsc, upiId } = req.body
+
+    const mode = payoutMode === "bank" ? "bank" : "upi"
+
+    if (mode === "bank") {
+      if (!bankAccountName || !bankAccountName.trim()) {
+        return res.status(400).json({ message: "Account Holder Name is required for Bank Payout" })
+      }
+      if (!bankName || !bankName.trim()) {
+        return res.status(400).json({ message: "Bank Name is required for Bank Payout" })
+      }
+      if (!bankAccountNumber || !bankAccountNumber.trim()) {
+        return res.status(400).json({ message: "Account Number is required for Bank Payout" })
+      }
+      if (!bankIfsc || !bankIfsc.trim() || bankIfsc.trim().length !== 11) {
+        return res.status(400).json({ message: "Valid 11-character IFSC Code is required" })
+      }
+    } else {
+      if (!upiId || !upiId.trim() || !upiId.includes("@")) {
+        return res.status(400).json({ message: "Valid UPI ID / VPA is required (e.g. name@upi)" })
+      }
+    }
+
+    await pool.query(
+      `UPDATE kitchens SET 
+        payout_mode = ?,
+        bank_account_name = ?,
+        bank_name = ?,
+        bank_account_number = ?,
+        bank_ifsc = ?,
+        upi_id = ?
+       WHERE user_id = ?`,
+      [
+        mode,
+        bankAccountName ? bankAccountName.trim() : null,
+        bankName ? bankName.trim() : null,
+        bankAccountNumber ? bankAccountNumber.trim() : null,
+        bankIfsc ? bankIfsc.trim().toUpperCase() : null,
+        upiId ? upiId.trim().toLowerCase() : null,
+        req.user.id,
+      ]
+    )
+
+    res.json({ message: "Payout settings saved successfully" })
+  } catch (error) {
+    console.error("Update kitchen payout settings error:", error)
+    res.status(500).json({ message: "Failed to update payout settings" })
+  }
+})
+
 // Kitchen Payout Settlement History
 router.get("/me/payouts", authRequired, requireRole("kitchen"), async (req, res) => {
   try {
@@ -136,7 +354,7 @@ router.get("/me/payouts", authRequired, requireRole("kitchen"), async (req, res)
     const kitchenId = kitchenRows[0].id
 
     const [rows] = await pool.query(
-      `SELECT id, period_type, period_start, period_end, gross_amount, deductions_commissions, net_payout, status, utr_number, notes, paid_at, created_at
+      `SELECT id, period_type, period_start, period_end, gross_amount, deductions_commissions, deductions_rider_fees, deductions_gst, net_payout, status, utr_number, notes, paid_at, created_at
        FROM settlements
        WHERE entity_type = 'kitchen' AND (entity_id = ? OR entity_id = ?)
        ORDER BY paid_at DESC, created_at DESC`,
@@ -144,20 +362,31 @@ router.get("/me/payouts", authRequired, requireRole("kitchen"), async (req, res)
     )
 
     res.json({
-      payouts: rows.map((r) => ({
-        id: r.id,
-        periodType: r.period_type,
-        periodStart: r.period_start,
-        periodEnd: r.period_end,
-        grossAmount: Number(r.gross_amount),
-        commissionDeduction: Number(r.deductions_commissions),
-        netPayout: Number(r.net_payout),
-        status: r.status,
-        utrNumber: r.utr_number,
-        notes: r.notes,
-        paidAt: r.paid_at,
-        createdAt: r.created_at,
-      }))
+      payouts: rows.map((r) => {
+        const gross = Number(Number(r.gross_amount).toFixed(2))
+        const comm = Number(Number(r.deductions_commissions).toFixed(2))
+        const gst = Number(Number(r.deductions_gst || 0).toFixed(2))
+        const net = Number(Number(r.net_payout).toFixed(2))
+        const storedRiderFee = Number(Number(r.deductions_rider_fees || 0).toFixed(2))
+        const riderFee = storedRiderFee > 0 ? storedRiderFee : Number(Math.max(0, gross - comm - gst - net).toFixed(2))
+
+        return {
+          id: r.id,
+          periodType: r.period_type,
+          periodStart: r.period_start,
+          periodEnd: r.period_end,
+          grossAmount: gross,
+          commissionDeduction: comm,
+          gstDeduction: gst,
+          riderFeeDeduction: riderFee,
+          netPayout: net,
+          status: r.status,
+          utrNumber: r.utr_number,
+          notes: r.notes,
+          paidAt: r.paid_at,
+          createdAt: r.created_at,
+        }
+      })
     })
   } catch (error) {
     console.error("Fetch kitchen payouts error:", error)
@@ -222,6 +451,125 @@ router.patch("/me/offer", authRequired, requireRole("kitchen"), async (req, res)
     console.error("Kitchen offer update error:", error)
     res.status(500).json({ message: "Failed to update offer" })
   }
+})
+
+router.put("/me/festival-offer", authRequired, requireRole("kitchen"), async (req, res) => {
+  try {
+    const {
+      enabled,
+      title,
+      category,
+      discountPercent,
+      startDate,
+      endDate,
+      description,
+      image,
+      image2,
+      festival_offer_image,
+      festival_offer_image_2,
+    } = req.body
+
+    const isEnabled = enabled !== undefined ? (enabled ? 1 : 0) : 0
+    const validCategory = ["food", "grocery", "both"].includes(category) ? category : "both"
+    const parsedPercent = discountPercent !== undefined ? Math.max(0, Math.min(100, Number(discountPercent) || 0)) : 0
+    const offerImg1 = image !== undefined ? image : (festival_offer_image !== undefined ? festival_offer_image : null)
+    const offerImg2 = image2 !== undefined ? image2 : (festival_offer_image_2 !== undefined ? festival_offer_image_2 : null)
+
+    let parsedStart = null
+    let parsedEnd = null
+    if (startDate) {
+      const s = new Date(startDate)
+      if (!isNaN(s.getTime())) {
+        parsedStart = s.toISOString().slice(0, 19).replace("T", " ")
+      }
+    }
+    if (endDate) {
+      const e = new Date(endDate)
+      if (!isNaN(e.getTime())) {
+        parsedEnd = e.toISOString().slice(0, 19).replace("T", " ")
+      }
+    }
+
+    const [result] = await pool.query(
+      `UPDATE kitchens SET
+        festival_offer_enabled = ?,
+        festival_offer_title = ?,
+        festival_offer_category = ?,
+        festival_offer_discount_percent = ?,
+        festival_offer_start_date = ?,
+        festival_offer_end_date = ?,
+        festival_offer_description = ?,
+        festival_offer_image = ?,
+        festival_offer_image_2 = ?
+       WHERE user_id = ?`,
+      [
+        isEnabled,
+        title ? String(title).trim() : null,
+        validCategory,
+        parsedPercent,
+        parsedStart,
+        parsedEnd,
+        description ? String(description).trim() : null,
+        offerImg1,
+        offerImg2,
+        req.user.id,
+      ]
+    )
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "Kitchen not found" })
+    }
+
+    const [rows] = await pool.query(
+      `SELECT k.*, u.name AS user_name, u.email AS user_email
+       FROM kitchens k JOIN users u ON u.id = k.user_id WHERE k.user_id = ?`,
+      [req.user.id]
+    )
+
+    res.json({ message: "Festival offer updated successfully", kitchen: formatKitchen(rows[0]) })
+  } catch (error) {
+    console.error("Festival offer update error:", error)
+    res.status(500).json({ message: "Failed to update festival offer" })
+  }
+})
+
+router.post("/me/festival-offer/image", authRequired, requireRole("kitchen"), (req, res) => {
+  kitchenCoverUpload.single("image")(req, res, async (err) => {
+    if (err) {
+      return res.status(400).json({ message: err.message || "Upload failed" })
+    }
+    if (!req.file) {
+      return res.status(400).json({ message: "No image provided" })
+    }
+
+    try {
+      const imageUrl = getKitchenFileUrl(req, req.file.filename)
+      const slot = String(req.query.slot || req.body.slot || "1")
+
+      if (slot === "2") {
+        await pool.query(
+          "UPDATE kitchens SET festival_offer_image_2 = ? WHERE user_id = ?",
+          [imageUrl, req.user.id]
+        )
+      } else {
+        await pool.query(
+          "UPDATE kitchens SET festival_offer_image = ? WHERE user_id = ?",
+          [imageUrl, req.user.id]
+        )
+      }
+
+      const [rows] = await pool.query(
+        `SELECT k.*, u.name AS user_name, u.email AS user_email
+         FROM kitchens k JOIN users u ON u.id = k.user_id WHERE k.user_id = ?`,
+        [req.user.id]
+      )
+
+      res.json({ message: `Festival offer image ${slot} uploaded`, imageUrl, slot, kitchen: formatKitchen(rows[0]) })
+    } catch (error) {
+      console.error("Festival offer image upload error:", error)
+      res.status(500).json({ message: "Failed to save festival offer image" })
+    }
+  })
 })
 
 router.patch("/me", authRequired, requireRole("kitchen"), async (req, res) => {
@@ -291,12 +639,12 @@ router.patch("/me", authRequired, requireRole("kitchen"), async (req, res) => {
     }
 
     const [phoneConflict] = await connection.query(
-      "SELECT id FROM users WHERE phone = ? AND id != ?",
+      "SELECT id FROM users WHERE phone = ? AND role = 'kitchen' AND id != ?",
       [phone.trim(), req.user.id]
     )
     if (phoneConflict.length > 0) {
       await connection.rollback()
-      return res.status(409).json({ message: "Phone number already registered" })
+      return res.status(409).json({ message: "Phone number already registered for another kitchen" })
     }
 
     await connection.query(
@@ -392,17 +740,23 @@ router.patch("/me/status", authRequired, requireRole("kitchen"), async (req, res
   }
 })
 
-
-router.get("/featured", async (_req, res) => {
+router.get("/featured", async (req, res) => {
   try {
-    const [rows] = await pool.query(
-      `SELECT k.id, k.name, k.owner_name, k.speciality, k.image, k.cover_image, k.rating, k.delivery_time,
+    const city = req.query.city?.toString().trim() || null
+    let query = `SELECT k.id, k.name, k.owner_name, k.speciality, k.image, k.cover_image, k.rating, k.delivery_time,
               k.hygiene_score, k.offer, k.best_item, k.city, k.state, k.kitchen_type, k.status, k.is_featured, k.featured_order, k.reviewed_at, k.visibility_status, k.is_active,
+              k.festival_offer_enabled, k.festival_offer_title, k.festival_offer_category, k.festival_offer_discount_percent, k.festival_offer_start_date, k.festival_offer_end_date, k.festival_offer_description, k.festival_offer_image, k.festival_offer_image_2,
               ${SQL_RATING_COUNT}
        FROM kitchens k
-       WHERE k.status = 'approved' AND k.is_active = 1 AND k.is_featured = 1
-       ORDER BY k.featured_order ASC, k.submitted_at DESC`
-    )
+       WHERE k.status = 'approved' AND k.is_active = 1 AND k.is_featured = 1`
+    const params = []
+    if (city) {
+      query += ` AND LOWER(TRIM(k.city)) = LOWER(TRIM(?))`
+      params.push(city)
+    }
+    query += ` ORDER BY k.featured_order ASC, k.submitted_at DESC`
+
+    const [rows] = await pool.query(query, params)
     const visible = []
     for (const row of rows) {
       if (await isKitchenPubliclyVisible(pool, row)) visible.push(row)
@@ -414,16 +768,23 @@ router.get("/featured", async (_req, res) => {
   }
 })
 
-router.get("/", async (_req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const [rows] = await pool.query(
-      `SELECT k.id, k.name, k.owner_name, k.speciality, k.image, k.cover_image, k.rating, k.delivery_time,
+    const city = req.query.city?.toString().trim() || null
+    let query = `SELECT k.id, k.name, k.owner_name, k.speciality, k.image, k.cover_image, k.rating, k.delivery_time,
               k.hygiene_score, k.offer, k.best_item, k.city, k.state, k.kitchen_type, k.status, k.reviewed_at, k.visibility_status, k.is_active,
+              k.festival_offer_enabled, k.festival_offer_title, k.festival_offer_category, k.festival_offer_discount_percent, k.festival_offer_start_date, k.festival_offer_end_date, k.festival_offer_description, k.festival_offer_image, k.festival_offer_image_2,
               ${SQL_RATING_COUNT}
        FROM kitchens k
-       WHERE k.status = 'approved' AND k.is_active = 1
-       ORDER BY k.submitted_at DESC`
-    )
+       WHERE k.status = 'approved' AND k.is_active = 1`
+    const params = []
+    if (city) {
+      query += ` AND LOWER(TRIM(k.city)) = LOWER(TRIM(?))`
+      params.push(city)
+    }
+    query += ` ORDER BY k.submitted_at DESC`
+
+    const [rows] = await pool.query(query, params)
     const visible = []
     for (const row of rows) {
       if (await isKitchenPubliclyVisible(pool, row)) visible.push(row)
@@ -438,8 +799,10 @@ router.get("/", async (_req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT k.id, k.name, k.owner_name, k.phone, k.speciality, k.description, k.image, k.rating,
-              k.delivery_time, k.hygiene_score, k.offer, k.best_item, k.city, k.status, k.reviewed_at, k.visibility_status, k.is_active,
+      `SELECT k.id, k.name, k.owner_name, k.phone, k.speciality, k.description, k.image, k.cover_image, k.rating,
+              k.delivery_time, k.hygiene_score, k.offer, k.best_item, k.city, k.state, k.address, k.pincode, k.status, k.reviewed_at, k.visibility_status, k.is_active,
+              k.is_fresh_food_active, k.is_grocery_active,
+              k.festival_offer_enabled, k.festival_offer_title, k.festival_offer_category, k.festival_offer_discount_percent, k.festival_offer_start_date, k.festival_offer_end_date, k.festival_offer_description, k.festival_offer_image, k.festival_offer_image_2,
               ${SQL_RATING_COUNT}
        FROM kitchens k
        WHERE k.id = ? AND k.status = 'approved' AND k.is_active = 1`,

@@ -20,10 +20,28 @@ export default function LoginPage() {
   const [demoOtp, setDemoOtp] = useState(null)
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
+  const [resendLoading, setResendLoading] = useState(false)
+  const [resendCount, setResendCount] = useState(0)
+  const [resendTimer, setResendTimer] = useState(0)
+  const [toastMessage, setToastMessage] = useState("")
 
   const from = location.state?.from || "/home"
   const successMessage = location.state?.message
   const otpValue = otp.join("")
+
+  useEffect(() => {
+    if (successMessage) {
+      setToastMessage(successMessage)
+      const t = setTimeout(() => setToastMessage(""), 4000)
+      return () => clearTimeout(t)
+    }
+  }, [successMessage])
+
+  useEffect(() => {
+    if (resendTimer <= 0) return
+    const timer = setInterval(() => setResendTimer((prev) => prev - 1), 1000)
+    return () => clearInterval(timer)
+  }, [resendTimer])
 
   useEffect(() => {
     const prefill = location.state?.phone || location.state?.email || location.state?.identifier

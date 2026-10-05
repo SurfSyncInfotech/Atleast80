@@ -1,7 +1,7 @@
 import { Router } from "express"
 import bcrypt from "bcryptjs"
 import pool from "../config/db.js"
-import { signToken, authRequired, requireRole } from "../middleware/auth.js"
+import { signToken, authRequired, optionalAuth, requireRole } from "../middleware/auth.js"
 import { fssaiLicenseUpload, onboardingDocumentsUpload, getKitchenFileUrl } from "../middleware/upload.js"
 import {
   createAndSendOtp,
@@ -27,7 +27,54 @@ function customerUser(row) {
   }
 }
 
-router.get("/me", authRequired, async (req, res) => {
+// Public endpoint to get contact / support info
+router.get("/contact", async (_req, res) => {
+  try {
+    const [rows] = await pool.query(
+      "SELECT support_phone, support_email, support_address FROM site_settings WHERE id = 1"
+    )
+    if (rows.length === 0) {
+      return res.json({
+        supportPhone: "+91 40 3559 4439",
+        supportEmail: "contact@elifelo.com",
+        supportAddress: "Maharashtra, India",
+      })
+    }
+    const row = rows[0]
+    res.json({
+      supportPhone: row.support_phone || "+91 40 3559 4439",
+      supportEmail: row.support_email || "contact@elifelo.com",
+      supportAddress: row.support_address || "Maharashtra, India",
+    })
+  } catch (error) {
+    console.error("Fetch contact info error:", error)
+    res.status(500).json({ message: "Failed to fetch contact info" })
+  }
+})
+
+// Public endpoint to get current User Agreement PDF
+router.get("/user-agreement", async (_req, res) => {
+  try {
+    const [rows] = await pool.query(
+      "SELECT user_agreement_url, user_agreement_version, user_agreement_updated_at FROM site_settings WHERE id = 1"
+    )
+    const row = rows[0] || {}
+    res.json({
+      url: row.user_agreement_url || null,
+      version: row.user_agreement_version || 0,
+      updatedAt: row.user_agreement_updated_at || null,
+    })
+  } catch (error) {
+    console.error("Fetch user agreement error:", error)
+    res.status(500).json({ message: "Failed to fetch user agreement" })
+  }
+})
+
+router.get("/me", optionalAuth, async (req, res) => {
+  if (!req.user || !req.user.id) {
+    return res.json({ user: null, authenticated: false })
+  }
+
   try {
     const [users] = await pool.query(
       "SELECT id, name, email, phone, role, address, city, pincode FROM users WHERE id = ?",
@@ -35,10 +82,19 @@ router.get("/me", authRequired, async (req, res) => {
     )
 
     if (users.length === 0) {
-      return res.status(401).json({ message: "Session expired" })
+      return res.json({ user: null, authenticated: false })
     }
 
     const user = users[0]
+
+    // Purge legacy Pune IP address if present in DB
+    if (user.address && (user.address.toLowerCase().includes("guruwar peth") || user.address.toLowerCase().includes("pant sachiv"))) {
+      user.address = null
+      user.city = null
+      user.pincode = null
+      pool.query("UPDATE users SET address = NULL, city = NULL, pincode = NULL WHERE id = ?", [user.id]).catch(() => {})
+    }
+
     let kitchen = null
 
     if (user.role === "kitchen") {
@@ -65,33 +121,58 @@ router.get("/me", authRequired, async (req, res) => {
   }
 })
 
+router.patch("/location", authRequired, async (req, res) => {
+  try {
+    const { city, state, suburb, address, pincode } = req.body
+    if (address && (address.toLowerCase().includes("guruwar peth") || address.toLowerCase().includes("pant sachiv"))) {
+      return res.json({ success: true, message: "Ignored legacy address" })
+    }
+    const cleanAddress = address || [suburb, city, state].filter(Boolean).join(", ")
+    await pool.query(
+      "UPDATE users SET city = ?, address = ?, pincode = ? WHERE id = ?",
+      [city || null, cleanAddress || null, pincode || null, req.user.id]
+    )
+    const [updatedUsers] = await pool.query(
+      "SELECT id, name, email, phone, role, city, address, pincode FROM users WHERE id = ?",
+      [req.user.id]
+    )
+    res.json({ success: true, message: "Location updated successfully", user: updatedUsers[0] })
+  } catch (error) {
+    console.error("Update location error:", error)
+    res.status(500).json({ message: "Failed to update location" })
+  }
+})
+
 router.post("/check-phone", async (req, res) => {
   const phone = req.body.phone?.toString().trim() || null
   const email = req.body.email?.toString().trim().toLowerCase() || null
+  const role = req.body.role?.toString().trim() || null
 
   if (!phone && !email) {
     return res.status(400).json({ message: "Phone number or email is required" })
   }
 
   try {
-    if (phone) {
-      const cleanPhone = phone.length === 10 ? phone : phone.slice(-10)
-      const [existingPhone] = await pool.query(
-        "SELECT id FROM users WHERE phone = ? OR phone = ?",
-        [phone, cleanPhone]
-      )
-      if (existingPhone.length > 0) {
-        return res.status(409).json({ message: "This phone number is already registered. Please log in instead." })
+    if (role) {
+      if (phone) {
+        const cleanPhone = phone.length === 10 ? phone : phone.slice(-10)
+        const [existingPhone] = await pool.query(
+          "SELECT id FROM users WHERE (phone = ? OR phone = ?) AND (phone_verified = 1 OR account_verified = 1) AND role = ?",
+          [phone, cleanPhone, role]
+        )
+        if (existingPhone.length > 0) {
+          return res.status(409).json({ message: `This phone number is already registered as a ${role}. Please log in instead.` })
+        }
       }
-    }
 
-    if (email) {
-      const [existingEmail] = await pool.query(
-        "SELECT id FROM users WHERE email = ?",
-        [email]
-      )
-      if (existingEmail.length > 0) {
-        return res.status(409).json({ message: "This email address is already registered. Please log in instead." })
+      if (email) {
+        const [existingEmail] = await pool.query(
+          "SELECT id FROM users WHERE email = ? AND (phone_verified = 1 OR account_verified = 1) AND role = ?",
+          [email, role]
+        )
+        if (existingEmail.length > 0) {
+          return res.status(409).json({ message: `This email address is already registered as a ${role}. Please log in instead.` })
+        }
       }
     }
 
@@ -123,19 +204,29 @@ router.post("/customer/register", async (req, res) => {
   }
 
   try {
-    const [existingEmail] = await pool.query("SELECT id FROM users WHERE email = ?", [email])
+    const [existingEmail] = await pool.query("SELECT id, phone_verified, account_verified FROM users WHERE email = ? AND role = 'customer'", [email])
     if (existingEmail.length > 0) {
-      return res.status(409).json({ message: "Email already registered" })
+      const existing = existingEmail[0]
+      if (existing.phone_verified || existing.account_verified) {
+        return res.status(409).json({ message: "Email already registered as customer" })
+      } else {
+        await pool.query("DELETE FROM users WHERE id = ?", [existing.id])
+      }
     }
 
-    const [existingPhone] = await pool.query("SELECT id FROM users WHERE phone = ?", [phone])
+    const [existingPhone] = await pool.query("SELECT id, phone_verified, account_verified FROM users WHERE phone = ? AND role = 'customer'", [phone])
     if (existingPhone.length > 0) {
-      return res.status(409).json({ message: "Phone number already registered" })
+      const existing = existingPhone[0]
+      if (existing.phone_verified || existing.account_verified) {
+        return res.status(409).json({ message: "Phone number already registered as customer" })
+      } else {
+        await pool.query("DELETE FROM users WHERE id = ?", [existing.id])
+      }
     }
 
     const hash = await bcrypt.hash(password, 10)
     const [result] = await pool.query(
-      "INSERT INTO users (role, name, email, phone, password_hash, phone_verified) VALUES ('customer', ?, ?, ?, ?, 0)",
+      "INSERT INTO users (role, name, email, phone, password_hash, phone_verified, account_verified) VALUES ('customer', ?, ?, ?, ?, 0, 0)",
       [name, email, phone, hash]
     )
 
@@ -382,7 +473,7 @@ router.post("/customer/forgot-password/send-otp", async (req, res) => {
       phoneHint: `******${userPhone.slice(-4)}`,
       phoneOrEmail: phone || email,
     }
-    const demoOtp = getDemoOtp()
+    const demoOtp = getDemoOtp(`reset:${userPhone}`)
     if (demoOtp) payload.demoOtp = demoOtp
 
     res.json(payload)
@@ -458,20 +549,27 @@ router.patch("/customer/profile", authRequired, requireRole("customer"), async (
   }
 
   try {
-    const [existingEmail] = await pool.query(
-      "SELECT id FROM users WHERE email = ? AND id != ?",
-      [email, req.user.id]
-    )
-    if (existingEmail.length > 0) {
-      return res.status(409).json({ message: "Email already in use" })
+    const normUserPhone = normalizeIndianPhone(req.user.phone)
+    const normUserEmail = (req.user.email || "").trim().toLowerCase()
+
+    if (email && email !== normUserEmail) {
+      const [existingEmail] = await pool.query(
+        "SELECT id FROM users WHERE email = ? AND role = 'customer' AND id != ?",
+        [email, req.user.id]
+      )
+      if (existingEmail.length > 0) {
+        return res.status(409).json({ message: "Email already in use" })
+      }
     }
 
-    const [existingPhone] = await pool.query(
-      "SELECT id FROM users WHERE phone = ? AND id != ?",
-      [phone, req.user.id]
-    )
-    if (existingPhone.length > 0) {
-      return res.status(409).json({ message: "Phone number already in use" })
+    if (phone && phone !== normUserPhone) {
+      const [existingPhone] = await pool.query(
+        "SELECT id FROM users WHERE (phone = ? OR RIGHT(phone, 10) = ?) AND role = 'customer' AND id != ?",
+        [phone, phone, req.user.id]
+      )
+      if (existingPhone.length > 0) {
+        return res.status(409).json({ message: "Phone number already in use" })
+      }
     }
 
     await pool.query(
@@ -613,18 +711,30 @@ router.post("/kitchen/register", (req, res) => {
       await connection.beginTransaction()
 
       if (email) {
-        const [existingEmail] = await connection.query("SELECT id FROM users WHERE email = ?", [email])
+        const [existingEmail] = await connection.query("SELECT id, account_verified FROM users WHERE email = ? AND role = 'kitchen'", [email])
         if (existingEmail.length > 0) {
-          await connection.rollback()
-          return res.status(409).json({ message: "Email already registered" })
+          const existing = existingEmail[0]
+          if (!existing.account_verified) {
+            await connection.query("DELETE FROM kitchens WHERE user_id = ?", [existing.id])
+            await connection.query("DELETE FROM users WHERE id = ?", [existing.id])
+          } else {
+            await connection.rollback()
+            return res.status(409).json({ message: "Email address is already registered with a kitchen" })
+          }
         }
       }
 
       if (phone) {
-        const [existingPhone] = await connection.query("SELECT id FROM users WHERE phone = ?", [phone])
+        const [existingPhone] = await connection.query("SELECT id, account_verified FROM users WHERE phone = ? AND role = 'kitchen'", [phone])
         if (existingPhone.length > 0) {
-          await connection.rollback()
-          return res.status(409).json({ message: "Phone number already registered" })
+          const existing = existingPhone[0]
+          if (!existing.account_verified) {
+            await connection.query("DELETE FROM kitchens WHERE user_id = ?", [existing.id])
+            await connection.query("DELETE FROM users WHERE id = ?", [existing.id])
+          } else {
+            await connection.rollback()
+            return res.status(409).json({ message: "Phone number is already registered with a kitchen" })
+          }
         }
       }
 
@@ -893,11 +1003,19 @@ router.post("/rider/register", (req, res) => {
       name, password,
       vehicleType, vehicleNumber, drivingLicenseNumber,
       aadhaarNumber, panNumber,
+      payoutMode, bankAccountName, bankName, bankAccountNumber, bankIfsc, upiId
     } = req.body
 
     const email = req.body.email?.toString().trim().toLowerCase() || null
     const phone = req.body.phone?.toString().trim() || null
     const appVersion = req.body.appVersion?.toString().trim() || "1.0.0"
+
+    const mode = payoutMode === "bank" ? "bank" : "upi"
+    const finalBankAccountName = mode === "bank" && bankAccountName ? bankAccountName.trim() : null
+    const finalBankName = mode === "bank" && bankName ? bankName.trim() : null
+    const finalBankAccountNumber = mode === "bank" && bankAccountNumber ? bankAccountNumber.trim() : null
+    const finalBankIfsc = mode === "bank" && bankIfsc ? bankIfsc.trim().toUpperCase() : null
+    const finalUpiId = mode === "upi" && upiId ? upiId.trim().toLowerCase() : null
 
     if (!name || !password || !vehicleType || !aadhaarNumber || !panNumber) {
       return res.status(400).json({ message: "Name, password, vehicle type, Aadhaar number, and PAN number are required" })
@@ -957,34 +1075,34 @@ router.post("/rider/register", (req, res) => {
 
       if (email) {
         const [existingEmail] = await connection.query(
-          "SELECT id, role, account_verified FROM users WHERE email = ?", [email]
+          "SELECT id, role, account_verified FROM users WHERE email = ? AND role = 'rider'", [email]
         )
         if (existingEmail.length > 0) {
           const existing = existingEmail[0]
-          if (existing.role === "rider" && !existing.account_verified) {
+          if (!existing.account_verified) {
             // Stale unverified signup — clean it up and allow re-registration
             await connection.query("DELETE FROM riders WHERE user_id = ?", [existing.id])
             await connection.query("DELETE FROM users WHERE id = ?", [existing.id])
           } else {
             await connection.rollback()
-            return res.status(409).json({ message: "This email address is already registered. Please log in instead." })
+            return res.status(409).json({ message: "This email address is already registered as a rider. Please log in instead." })
           }
         }
       }
 
       if (phone) {
         const [existingPhone] = await connection.query(
-          "SELECT id, role, account_verified FROM users WHERE phone = ?", [phone]
+          "SELECT id, role, account_verified FROM users WHERE phone = ? AND role = 'rider'", [phone]
         )
         if (existingPhone.length > 0) {
           const existing = existingPhone[0]
-          if (existing.role === "rider" && !existing.account_verified) {
+          if (!existing.account_verified) {
             // Stale unverified signup — clean it up and allow re-registration
             await connection.query("DELETE FROM riders WHERE user_id = ?", [existing.id])
             await connection.query("DELETE FROM users WHERE id = ?", [existing.id])
           } else {
             await connection.rollback()
-            return res.status(409).json({ message: "This phone number is already registered. Please log in instead." })
+            return res.status(409).json({ message: "This phone number is already registered as a rider. Please log in instead." })
           }
         }
       }
@@ -1000,11 +1118,13 @@ router.post("/rider/register", (req, res) => {
       const [riderResult] = await connection.query(
         `INSERT INTO riders (
           user_id, vehicle_type, vehicle_number, driving_license_number,
-          aadhaar_number, aadhaar_card, aadhaar_card_back, pan_number, pan_card, driving_license, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+          aadhaar_number, aadhaar_card, aadhaar_card_back, pan_number, pan_card, driving_license,
+          payout_mode, bank_account_name, bank_name, bank_account_number, bank_ifsc, upi_id, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
         [
           userId, vehicleType, vehicleNumber || null, drivingLicenseNumber || null,
-          aadhaarNumber, aadhaarCardUrl, aadhaarCardBackUrl, panNumber.toUpperCase(), panCardUrl, dlUrl
+          aadhaarNumber, aadhaarCardUrl, aadhaarCardBackUrl, panNumber.toUpperCase(), panCardUrl, dlUrl,
+          mode, finalBankAccountName, finalBankName, finalBankAccountNumber, finalBankIfsc, finalUpiId
         ]
       )
 
@@ -1033,7 +1153,11 @@ router.post("/rider/register", (req, res) => {
     } catch (error) {
       await connection.rollback()
       console.error("Rider registration transaction error:", error)
-      res.status(500).json({ message: "Registration failed. Database error." })
+      if (error.code === 'ER_DUP_ENTRY') {
+        const field = error.sqlMessage?.includes('email') ? 'email address' : 'phone number'
+        return res.status(409).json({ message: `This ${field} is already registered. Please log in or use a different one.` })
+      }
+      res.status(500).json({ message: error.message || "Registration failed. Database error." })
     } finally {
       connection.release()
     }
@@ -1186,60 +1310,74 @@ router.post("/rider/login/verify-otp", async (req, res) => {
 })
 
 // Update user's current delivery location in the database
-router.patch("/location", authRequired, async (req, res) => {
+router.patch("/location", optionalAuth, async (req, res) => {
   const { city, address, pincode } = req.body
   try {
-    const updates = []
-    const params = []
+    if (req.user && req.user.id) {
+      const updates = []
+      const params = []
 
-    if (city !== undefined) {
-      updates.push("city = ?")
-      params.push(city ? city.toString().trim() : null)
-    }
-    if (address !== undefined) {
-      updates.push("address = ?")
-      params.push(address ? address.toString().trim() : null)
-    }
-    if (pincode !== undefined) {
-      updates.push("pincode = ?")
-      params.push(pincode ? pincode.toString().replace(/\D/g, "") : null)
+      if (city !== undefined) {
+        updates.push("city = ?")
+        params.push(city ? city.toString().trim() : null)
+      }
+      if (address !== undefined) {
+        updates.push("address = ?")
+        params.push(address ? address.toString().trim() : null)
+      }
+      if (pincode !== undefined) {
+        updates.push("pincode = ?")
+        params.push(pincode ? pincode.toString().replace(/\D/g, "") : null)
+      }
+
+      if (updates.length > 0) {
+        params.push(req.user.id)
+        await pool.query(
+          `UPDATE users SET ${updates.join(", ")} WHERE id = ?`,
+          params
+        )
+      }
     }
 
-    if (updates.length === 0) {
-      return res.status(400).json({ message: "No location fields provided" })
-    }
-
-    params.push(req.user.id)
-    await pool.query(
-      `UPDATE users SET ${updates.join(", ")} WHERE id = ?`,
-      params
-    )
-
-    res.json({ message: "Delivery location updated successfully" })
+    res.json({
+      message: "Delivery location set successfully",
+      city: city || null,
+      address: address || null,
+      pincode: pincode || null
+    })
   } catch (error) {
     console.error("Update user location error:", error)
-    res.status(500).json({ message: "Failed to update delivery location" })
+    res.json({
+      message: "Delivery location set for session",
+      city: city || null,
+      address: address || null,
+      pincode: pincode || null
+    })
   }
 })
 
 // Update FCM push token
-router.post("/push-token", authRequired, async (req, res) => {
-  const { token } = req.body
-  if (!token) {
+const updatePushTokenHandler = async (req, res) => {
+  const tokenVal = req.body.token || req.body.fcmToken || req.body.pushToken
+  if (!tokenVal) {
     return res.status(400).json({ message: "Push token is required" })
   }
 
   try {
     await pool.query(
       "UPDATE users SET fcm_token = ? WHERE id = ?",
-      [token, req.user.id]
+      [tokenVal, req.user.id]
     )
+    console.log(`✅ Updated FCM push token for User #${req.user.id}`)
     res.json({ message: "Push token updated successfully" })
   } catch (error) {
     console.error("Update push token error:", error)
     res.status(500).json({ message: "Failed to update push token" })
   }
-})
+}
+
+router.post("/push-token", authRequired, updatePushTokenHandler)
+router.post("/fcm-token", authRequired, updatePushTokenHandler)
 
 // Rider Forgot Password - Send OTP
 router.post("/rider/forgot-password/send-otp", async (req, res) => {

@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react"
-import { Mail, Phone, MapPin, Pencil, X } from "lucide-react"
+import { Mail, Phone, MapPin, Pencil, X, Trash2, ChevronRight } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import Button from "../../components/ui/Button"
 import { useAuth } from "../../context/AuthContext"
+import { getPublicContactSettings } from "../../lib/api"
+import { gmailDeletionUrl } from "../../lib/deletionMail"
 import { cn } from "../../lib/utils"
 
 function InfoTile({ icon: Icon, label, value, muted }) {
@@ -29,8 +31,17 @@ export default function ProfileAccountPage() {
   })
   const [saveError, setSaveError] = useState("")
   const [saving, setSaving] = useState(false)
+  const [deletionEmail, setDeletionEmail] = useState("liveatleast80@gmail.com")
 
   const hasAddress = Boolean(user?.address || user?.city || user?.pincode)
+
+  useEffect(() => {
+    getPublicContactSettings()
+      .then((data) => {
+        if (data?.accountDeletionEmail) setDeletionEmail(data.accountDeletionEmail)
+      })
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (!user) return
@@ -97,6 +108,28 @@ export default function ProfileAccountPage() {
           Add delivery address for checkout →
         </button>
       )}
+
+      <a
+        href={gmailDeletionUrl(deletionEmail, {
+          name: user?.name || "",
+          phone: user?.phone || "",
+          registeredEmail: user?.email || "",
+        })}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mt-6 flex items-center justify-between gap-3 p-4 rounded-2xl border border-red-100 bg-red-50/70 hover:bg-red-50 transition-colors"
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center flex-shrink-0">
+            <Trash2 size={16} className="text-red-600" />
+          </div>
+          <div className="min-w-0">
+            <p className="font-poppins font-semibold text-sm text-dark">Delete your Atleast80 account</p>
+            <p className="font-nunito text-xs text-gray mt-0.5">Request deletion at {deletionEmail}</p>
+          </div>
+        </div>
+        <ChevronRight size={16} className="text-gray flex-shrink-0" />
+      </a>
 
       <AnimatePresence>
         {editing && (

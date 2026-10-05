@@ -1,17 +1,22 @@
 import { useState } from "react"
 import { View, Text, Modal, Image, TouchableOpacity, ScrollView, Platform } from "react-native"
-import { X, ChevronLeft, ChevronRight, Plus, Minus, Play } from "lucide-react-native"
-import { router } from "expo-router"
-import { useCart } from "../../context/CartContext"
+import { X, ChevronLeft, ChevronRight, Plus, Minus, Play, ShoppingBag } from "lucide-react-native"
 import { resolveMediaUrl } from "../../lib/media"
 import { useVideoPlayer, VideoView } from "expo-video"
 import { LinearGradient } from "expo-linear-gradient"
+
+import { useSafeAreaInsets } from "react-native-safe-area-context"
 
 const PLACEHOLDER = "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=800&h=600&fit=crop"
 
 function MenuItemVideoPlayer({ src }) {
   const player = useVideoPlayer(src, (playerInstance) => {
-    playerInstance.loop = false
+    if (playerInstance) {
+      playerInstance.showNowPlayingNotification = false
+      playerInstance.staysActiveInBackground = false
+      playerInstance.audioMixingMode = "mixWithOthers"
+      playerInstance.loop = false
+    }
   })
 
   return (
@@ -26,8 +31,14 @@ function MenuItemVideoPlayer({ src }) {
   )
 }
 
-export default function MenuItemDetailModal({ item, onClose }) {
-  const { addItem, removeItem, getItemQty } = useCart()
+export default function MenuItemDetailModal({ item, onClose, onNavigateToCart, onAddToCart, onRemoveFromCart, getItemQty }) {
+  const insets = useSafeAreaInsets()
+  const isAvailable = item?.isAvailable !== undefined ? Boolean(item?.isAvailable) : (item?.is_available !== undefined ? Boolean(item?.is_available) : true)
+  const addItem = (i) => {
+    if (!isAvailable) return false
+    return onAddToCart?.(i)
+  }
+  const removeItem = (id) => onRemoveFromCart?.(id)
   const [activeImage, setActiveImage] = useState(0)
   const [prevItemId, setPrevItemId] = useState(null)
 
@@ -48,8 +59,9 @@ export default function MenuItemDetailModal({ item, onClose }) {
     .map(resolveMediaUrl)
     .filter(Boolean)
 
-  const qty = getItemQty(item.id)
+  const qty = getItemQty ? getItemQty(item.id) : 0
   const isVeg = item.itemType === "veg" || item.item_type === "veg"
+  const hasOffer = Boolean(item.offerPrice !== undefined && item.offerPrice !== null && Number(item.offerPrice) < Number(item.price))
 
   const prevImage = () => setActiveImage((i) => (i === 0 ? displayImages.length - 1 : i - 1))
   const nextImage = () => setActiveImage((i) => (i === displayImages.length - 1 ? 0 : i + 1))
@@ -157,6 +169,22 @@ export default function MenuItemDetailModal({ item, onClose }) {
                   {item.category === "grocery" ? "Ration" : "Homemade Food"}
                 </Text>
               </View>
+
+              {hasOffer && (
+                <View className="bg-amber-100 px-2 py-0.5 rounded-md border border-amber-200">
+                  <Text className="text-[10px] font-poppins font-bold uppercase tracking-wider text-amber-800">
+                    🎉 {item.discountPercent}% OFF
+                  </Text>
+                </View>
+              )}
+
+              {!isAvailable && (
+                <View className="bg-red-50 px-2.5 py-0.5 rounded-md border border-red-200">
+                  <Text className="text-[10px] font-poppins font-bold uppercase tracking-wider text-red-700">
+                    Currently Unavailable
+                  </Text>
+                </View>
+              )}
             </View>
 
             <Text className="font-poppins font-bold text-dark text-xl leading-tight">
@@ -169,19 +197,7 @@ export default function MenuItemDetailModal({ item, onClose }) {
               </Text>
             ) : null}
 
-            {Boolean(item.isCombo || item.is_combo) && item.comboItems && item.comboItems.length > 0 ? (
-              <View className="mt-4 bg-cream/35 border border-primary/10 rounded-xl p-4">
-                <Text className="font-poppins font-bold text-dark text-sm mb-2.5">Combo Includes:</Text>
-                <View className="gap-2">
-                  {item.comboItems.map((ci, idx) => (
-                    <View key={`combo-item-${idx}`} className="flex-row justify-between items-center bg-white px-3 py-2 rounded-lg border border-gray-100">
-                      <Text className="font-nunito text-xs text-dark font-semibold">{ci.name}</Text>
-                      <Text className="font-poppins font-bold text-xs text-primary bg-primary/10 px-2 py-0.5 rounded">Qty: {ci.quantity}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            ) : null}
+
 
             {item.kitchen ? (
               <View className="mt-4 bg-gray-50 rounded-xl p-3 border border-gray-100 flex-row items-center justify-between">
@@ -206,19 +222,52 @@ export default function MenuItemDetailModal({ item, onClose }) {
             ) : null}
           </ScrollView>
 
+          {/* Active Cart Banner inside Modal */}
+          {qty > 0 ? (
+            <TouchableOpacity
+              onPress={() => {
+                onClose()
+                onNavigateToCart?.()
+              }}
+              activeOpacity={0.9}
+              className="bg-[#0B6B3A] mx-6 mb-2 px-4 py-2.5 rounded-2xl flex-row items-center justify-between shadow-md"
+            >
+              <View className="flex-row items-center gap-2 flex-1 mr-2">
+                <ShoppingBag size={16} color="#FFFFFF" />
+                <Text className="text-white font-poppins font-semibold text-xs flex-1" numberOfLines={1}>
+                  Item added to cart ({qty} in cart)
+                </Text>
+              </View>
+              <View className="bg-white/25 px-2.5 py-1 rounded-lg shrink-0">
+                <Text className="text-white font-poppins font-bold text-[10px]">VIEW CART</Text>
+              </View>
+            </TouchableOpacity>
+          ) : null}
+
           {/* Footer containing price and Cart buttons */}
           <View 
             className="flex-row items-center justify-between p-5 px-6 border-t border-gray-100 bg-white"
             style={{
-              paddingBottom: 24,
+              paddingBottom: Math.max(20, insets.bottom + 8),
             }}
           >
             <View>
               <Text className="text-[10px] text-gray font-nunito">Price</Text>
-              <Text className="font-poppins font-bold text-dark text-2xl mt-0.5">₹{Number(item.price)}</Text>
+              {hasOffer ? (
+                <View className="flex-row items-baseline gap-2 mt-0.5">
+                  <Text className="font-poppins font-bold text-[#0B6B3A] text-2xl">₹{Number(item.offerPrice)}</Text>
+                  <Text className="font-poppins text-gray-400 text-sm line-through">₹{Number(item.price)}</Text>
+                </View>
+              ) : (
+                <Text className="font-poppins font-bold text-dark text-2xl mt-0.5">₹{Number(item.price)}</Text>
+              )}
             </View>
 
-            {qty > 0 ? (
+            {!isAvailable ? (
+              <View className="bg-slate-100 px-6 py-3.5 rounded-2xl border border-slate-200 items-center justify-center">
+                <Text className="text-slate-400 font-poppins font-bold text-xs tracking-wide">CURRENTLY UNAVAILABLE</Text>
+              </View>
+            ) : qty > 0 ? (
               <View className="flex-row items-center gap-4 bg-primary/10 border border-primary/20 rounded-2xl px-4 py-2.5">
                 <TouchableOpacity onPress={() => removeItem(item.id)} className="p-1">
                   <Minus size={18} color="#0B6B3A" strokeWidth={2.5} />
@@ -256,8 +305,8 @@ export default function MenuItemDetailModal({ item, onClose }) {
                   onPress={() => {
                     const added = addItem(item)
                     if (added) {
-                      onClose() // Close details modal
-                      router.push("/(customer)/cart")
+                      onClose?.()
+                      onNavigateToCart?.()
                     }
                   }}
                   activeOpacity={0.9}

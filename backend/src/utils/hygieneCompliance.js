@@ -41,7 +41,7 @@ export async function getHygieneCompliance(pool, kitchenId) {
   await purgeExpiredHygieneVideos(pool, kitchenId)
 
   const [videoRows] = await pool.query(
-    `SELECT id, media_url AS mediaUrl, recorded_at AS recordedAt
+    `SELECT id, media_url AS mediaUrl, recorded_at AS recordedAt, status, rejection_reason AS rejectionReason
      FROM hygiene_checks
      WHERE kitchen_id = ? AND area = ?
      ORDER BY recorded_at DESC
@@ -53,26 +53,48 @@ export async function getHygieneCompliance(pool, kitchenId) {
   const latest = latestRow?.recordedAt || null
   const cutoff = new Date(Date.now() - HYGIENE_WINDOW_MS)
   const uploaded = Boolean(latest && new Date(latest) > cutoff)
+  const status = latestRow?.status || "missing"
+
+  const isApproved = Boolean(uploaded && status === "approved")
+  const isPending = Boolean(uploaded && status === "pending")
+  const isRejected = Boolean(uploaded && status === "rejected")
 
   const area = {
     area: HYGIENE_AREA,
     label: HYGIENE_AREA_LABEL,
     latest,
     uploaded,
+    status,
+  }
+
+  let uploadMessage = null
+  if (!uploaded) {
+    uploadMessage = HYGIENE_EXPIRED_MESSAGE
+  } else if (isPending) {
+    uploadMessage = "Daily hygiene video uploaded! Waiting for Admin verification and approval."
+  } else if (isRejected) {
+    uploadMessage = `Daily video rejected by Admin (${latestRow?.rejectionReason || "Video does not match kitchen setup"}). Please re-upload a clear video.`
   }
 
   return {
-    compliant: uploaded,
+    compliant: isApproved,
+    isApproved,
+    isPending,
+    isRejected,
+    status,
+    rejectionReason: latestRow?.rejectionReason || null,
     latest,
     uploaded,
-    requiresUpload: !uploaded,
-    uploadMessage: uploaded ? null : HYGIENE_EXPIRED_MESSAGE,
+    requiresUpload: !uploaded || isRejected,
+    uploadMessage,
     areas: [area],
     video: latestRow
       ? {
           id: latestRow.id,
           mediaUrl: latestRow.mediaUrl,
           recordedAt: latestRow.recordedAt,
+          status: latestRow.status,
+          rejectionReason: latestRow.rejectionReason,
         }
       : null,
   }
@@ -89,11 +111,6 @@ export async function isKitchenPubliclyVisible(pool, kitchen) {
   const { compliant } = await getHygieneCompliance(pool, kitchen.id)
   if (compliant) return true
 
-  if (kitchen.reviewed_at) {
-    const reviewedAt = new Date(kitchen.reviewed_at)
-    if (Date.now() - reviewedAt.getTime() < HYGIENE_WINDOW_MS) return true
-  }
-
   return false
 }
 
@@ -102,6 +119,11 @@ export async function getKitchenVisibilityInfo(pool, kitchen) {
   const publiclyVisible = await isKitchenPubliclyVisible(pool, kitchen)
   return {
     hygieneCompliant: compliance.compliant,
+    dailyVideoStatus: compliance.status,
+    isPendingHygiene: compliance.isPending,
+    isRejectedHygiene: compliance.isRejected,
+    rejectionReason: compliance.rejectionReason,
+    dailyVideoUrl: compliance.video?.mediaUrl || null,
     hygieneLatest: compliance.latest,
     requiresUpload: compliance.requiresUpload,
     publiclyVisible,

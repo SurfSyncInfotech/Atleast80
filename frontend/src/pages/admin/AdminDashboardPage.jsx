@@ -63,7 +63,7 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     const interval = setInterval(() => {
       loadData(false)
-    }, 5000)
+    }, 3000)
     return () => clearInterval(interval)
   }, [loadData])
 
@@ -533,6 +533,22 @@ function KitchenDrawer({ kitchen: k, onClose, onApprove, onReject, onDelete, act
   const [storiesLoading, setStoriesLoading] = useState(true)
   const coverUrl = resolveMediaUrl(k.cover_image)
   const hasCover = Boolean(coverUrl)
+
+  let setupPhotos = []
+  try {
+    if (Array.isArray(k.kitchen_images)) {
+      setupPhotos = k.kitchen_images
+    } else if (typeof k.kitchen_images === "string" && k.kitchen_images.trim()) {
+      setupPhotos = JSON.parse(k.kitchen_images)
+    } else if (Array.isArray(k.kitchenImages)) {
+      setupPhotos = k.kitchenImages
+    }
+  } catch {
+    setupPhotos = []
+  }
+  setupPhotos = (Array.isArray(setupPhotos) ? setupPhotos : []).filter(Boolean)
+
+  const hasSetupPhotos = setupPhotos.length >= 2
   const canApprove = hasCover
 
   useEffect(() => {
@@ -604,12 +620,47 @@ function KitchenDrawer({ kitchen: k, onClose, onApprove, onReject, onDelete, act
             <DrawerField label="Pincode" value={k.pincode} />
           </DrawerSection>
 
-          <DrawerSection title="Hygiene verification media" icon={ShieldCheck}>
+          <DrawerSection title={`Cooking Area Setup Photos (${setupPhotos.length})`} icon={ShieldCheck}>
+            {setupPhotos.length === 0 ? (
+              <p className="font-nunito text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
+                No cooking area setup photos uploaded yet. (Min 2 required for approval)
+              </p>
+            ) : (
+              <div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {setupPhotos.map((url, idx) => {
+                    const mediaUrl = resolveMediaUrl(url)
+                    return (
+                      <a
+                        key={url + idx}
+                        href={mediaUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block rounded-lg overflow-hidden border border-[#e8e8e8] aspect-square bg-[#f0f0f0] relative group hover:opacity-90 transition-opacity"
+                      >
+                        <img src={mediaUrl} alt={`Setup ${idx + 1}`} className="w-full h-full object-cover" />
+                        <span className="absolute bottom-1.5 left-1.5 text-[10px] font-poppins font-bold text-white bg-emerald-700 rounded px-1.5 py-0.5 shadow-sm">
+                          Setup {idx + 1}
+                        </span>
+                      </a>
+                    )
+                  })}
+                </div>
+                {setupPhotos.length >= 2 && (
+                  <p className="font-nunito text-xs text-emerald-700 bg-emerald-50 rounded-md px-2 py-1 mt-2 font-medium">
+                    ✅ {setupPhotos.length} setup photos verified & ready for review.
+                  </p>
+                )}
+              </div>
+            )}
+          </DrawerSection>
+
+          <DrawerSection title="Daily Hygiene Stories / Videos (24h)" icon={ShieldCheck}>
             {storiesLoading ? (
               <p className="font-nunito text-sm text-[#999]">Loading media...</p>
             ) : stories.length === 0 ? (
-              <p className="font-nunito text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
-                No photos or videos uploaded yet. Kitchen must upload hygiene proof before approval.
+              <p className="font-nunito text-xs text-[#888] bg-[#f9f9f9] rounded-lg px-3 py-2">
+                No active 24h daily story uploaded today.
               </p>
             ) : (
               <div className="grid grid-cols-2 gap-2">
@@ -630,7 +681,6 @@ function KitchenDrawer({ kitchen: k, onClose, onApprove, onReject, onDelete, act
                 ))}
               </div>
             )}
-
           </DrawerSection>
 
           <DrawerSection title="Compliance & KYC" icon={FileText}>
@@ -727,18 +777,20 @@ function KitchenDrawer({ kitchen: k, onClose, onApprove, onReject, onDelete, act
           )}
         </div>
 
-        {k.status === "pending" && (
+        {(k.status === "pending" || k.status === "rejected") && (
           <div className="p-4 border-t border-[#e8e8e8] flex gap-3">
             <button
               onClick={onApprove}
               disabled={actionLoading || !canApprove}
               className="flex-1 py-3 rounded-lg bg-primary text-white font-poppins font-semibold text-sm hover:bg-primary-dark cursor-pointer disabled:opacity-50"
             >
-              {actionLoading ? "Approving..." : "Approve Kitchen"}
+              {actionLoading ? "Approving..." : k.status === "rejected" ? "Re-Approve Kitchen" : "Approve Kitchen"}
             </button>
-            <button onClick={onReject} className="flex-1 py-3 rounded-lg border border-red-300 text-red-600 font-poppins font-semibold text-sm hover:bg-red-50 cursor-pointer">
-              Reject
-            </button>
+            {k.status === "pending" && (
+              <button onClick={onReject} className="flex-1 py-3 rounded-lg border border-red-300 text-red-600 font-poppins font-semibold text-sm hover:bg-red-50 cursor-pointer">
+                Reject
+              </button>
+            )}
           </div>
         )}
 

@@ -94,21 +94,55 @@ export default function KitchenBulkEnquiriesPage() {
     }
   }
 
+  const playEnquiryChime = () => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)()
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = "sine"
+      osc.frequency.setValueAtTime(440, ctx.currentTime)
+      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.2)
+      gain.gain.setValueAtTime(0.25, ctx.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start()
+      osc.stop(ctx.currentTime + 0.3)
+    } catch {
+      // AudioContext blocked until user interaction
+    }
+  }
+
   const load = () => {
     setLoading(true)
     return api("/api/bulk-enquiries/partner", {}, "kitchen")
-      .then((data) => setEnquiries(data.enquiries || []))
+      .then((data) => {
+        const list = data.enquiries || []
+        setEnquiries(list)
+      })
       .catch((err) => setError(err.message || "Failed to load enquiries"))
       .finally(() => setLoading(false))
   }
 
   useEffect(() => {
     load()
-    const interval = setInterval(() => {
-      api("/api/bulk-enquiries/partner", {}, "kitchen")
-        .then((data) => setEnquiries(data.enquiries || []))
-        .catch(() => {})
-    }, 5000)
+    let prevCount = -1
+
+    const pollEnquiries = async () => {
+      try {
+        const data = await api("/api/bulk-enquiries/partner", {}, "kitchen")
+        const list = data.enquiries || []
+        if (prevCount >= 0 && list.length > prevCount) {
+          playEnquiryChime()
+        }
+        prevCount = list.length
+        setEnquiries(list)
+      } catch {
+        // silent
+      }
+    }
+
+    const interval = setInterval(pollEnquiries, 3000)
     return () => clearInterval(interval)
   }, [])
 
@@ -121,17 +155,15 @@ export default function KitchenBulkEnquiriesPage() {
 
   const handleUpload = async (enquiryId) => {
     const form = forms[enquiryId] || {}
-    if (!form.file) {
-      alert("Select a quotation file (PDF or image)")
-      return
-    }
     if (!form.amount || Number(form.amount) <= 0) {
       alert("Enter quotation amount")
       return
     }
 
     const body = new FormData()
-    body.append("quotation", form.file)
+    if (form.file) {
+      body.append("quotation", form.file)
+    }
     body.append("quotationAmount", form.amount)
     if (form.notes?.trim()) body.append("quotationNotes", form.notes.trim())
 
@@ -598,7 +630,7 @@ function EnquiryCard({
             </div>
           </div>
           <div>
-            <label className="font-nunito text-xs text-gray block mb-1">Quotation file (PDF or image)</label>
+            <label className="font-nunito text-xs text-gray block mb-1">Quotation file (PDF or image) (optional)</label>
             <input
               type="file"
               accept="image/*,.pdf"

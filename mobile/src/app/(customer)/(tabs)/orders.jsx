@@ -66,7 +66,7 @@ export default function OrdersScreen() {
 
     const interval = setInterval(() => {
       loadOrders(false)
-    }, 15000)
+    }, 5000)
 
     return () => {
       isActive = false

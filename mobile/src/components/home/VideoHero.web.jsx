@@ -5,9 +5,11 @@ export default function VideoHero() {
   const videoSource = require("../../../assets/images/atleast80.mp4")
   const player = useVideoPlayer(videoSource, (playerInstance) => {
     if (playerInstance) {
+      playerInstance.showNowPlayingNotification = false
+      playerInstance.staysActiveInBackground = false
+      playerInstance.audioMixingMode = "mixWithOthers"
       playerInstance.loop = true
       playerInstance.muted = true
-      playerInstance.showNowPlayingNotification = false
       playerInstance.play()
     }
   })

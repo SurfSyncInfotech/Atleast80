@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { motion } from "framer-motion"
-import { Package, ShoppingBag, Clock, ChevronRight, Star, MapPin } from "lucide-react"
+import { Package, ShoppingBag, Clock, ChevronRight, Star, MapPin, ChefHat } from "lucide-react"
 import Button from "../../components/ui/Button"
 import { api } from "../../lib/api"
 import { resolveMediaUrl } from "../../lib/media"
@@ -113,37 +113,103 @@ export default function ProfileOrdersPage() {
   const navigate = useNavigate()
   const [orders, setOrders] = useState([])
   const [currentOrder, setCurrentOrder] = useState(null)
+  const [bulkEnquiries, setBulkEnquiries] = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let cancelled = false
     async function load() {
       try {
-        const [ordersRes, currentRes] = await Promise.all([
+        const [ordersRes, currentRes, enquiriesRes] = await Promise.all([
           api("/api/orders"),
           api("/api/orders/current"),
+          api("/api/bulk-enquiries/mine").catch(() => ({ enquiries: [] })),
         ])
         if (!cancelled) {
           setOrders(ordersRes.orders || [])
           setCurrentOrder(currentRes.order || null)
+          setBulkEnquiries(enquiriesRes.enquiries || [])
         }
       } catch {
         if (!cancelled) {
           setOrders([])
           setCurrentOrder(null)
+          setBulkEnquiries([])
         }
       } finally {
         if (!cancelled) setLoading(false)
       }
     }
+
     load()
-    return () => { cancelled = true }
+    const interval = setInterval(load, 3000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
   }, [])
 
   const pastOrders = orders.filter((o) => !currentOrder || o.id !== currentOrder.id)
 
   return (
     <div className="space-y-5">
+      {/* Active Bulk Order Enquiries Section */}
+      {bulkEnquiries.length > 0 && (
+        <div className="bg-gradient-to-br from-[#0C4240]/5 to-[#135E39]/10 rounded-2xl p-5 shadow-sm border border-emerald-800/20">
+          <div className="flex items-center gap-2 mb-4">
+            <ChefHat size={18} className="text-primary" />
+            <h2 className="font-poppins font-semibold text-dark text-lg">Bulk Order Enquiries</h2>
+          </div>
+          <div className="space-y-3">
+            {bulkEnquiries.map((enquiry) => (
+              <div
+                key={enquiry.id}
+                onClick={() => navigate(`/kitchen/${enquiry.kitchenId}`)}
+                className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-poppins font-bold text-sm text-dark truncate">
+                      {enquiry.kitchenName || `Kitchen #${enquiry.kitchenId}`}
+                    </span>
+                    <span
+                      className={cn(
+                        "text-[10px] font-poppins font-bold uppercase tracking-wide px-2.5 py-0.5 rounded-full border",
+                        enquiry.status === "pending"
+                          ? "bg-amber-50 text-amber-700 border-amber-200"
+                          : enquiry.status === "quoted"
+                          ? "bg-blue-50 text-blue-700 border-blue-200"
+                          : enquiry.status === "accepted"
+                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                          : "bg-gray-100 text-gray"
+                      )}
+                    >
+                      {enquiry.status === "pending"
+                        ? "Under Review"
+                        : enquiry.status === "quoted"
+                        ? "Quoted"
+                        : enquiry.status === "accepted"
+                        ? "Accepted"
+                        : enquiry.status}
+                    </span>
+                  </div>
+                  <p className="font-nunito text-xs text-gray line-clamp-1">"{enquiry.message}"</p>
+                  <p className="font-poppins font-bold text-xs text-primary mt-1">
+                    {enquiry.quotationAmount ? `Quoted: ₹${enquiry.quotationAmount}` : `Est: ₹${enquiry.estimatedValue}`}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="self-start sm:self-center px-4 py-2 bg-primary text-white rounded-xl font-poppins font-semibold text-xs flex items-center gap-1 hover:bg-primary-dark cursor-pointer flex-shrink-0"
+                >
+                  Manage <ChevronRight size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
         <div className="flex items-center gap-2 mb-4">
           <Package size={18} className="text-primary" />

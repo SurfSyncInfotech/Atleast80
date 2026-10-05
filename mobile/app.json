@@ -2,7 +2,7 @@
   "expo": {
     "name": "Atleast80",
     "slug": "mobile",
-    "version": "24.0.0",
+    "version": "201.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/logo.png",
     "scheme": "mobile",
@@ -11,17 +11,29 @@
       "icon": "./assets/images/logo.png"
     },
     "android": {
-      "package": "com.atleast80.mobile",
+      "package": "com.atleast80.app",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 24
+      "versionCode": 201
     },
     "web": {
-      "output": "static",
+      "output": "single",
       "favicon": "./assets/images/logo.png"
     },
     "plugins": [
       "expo-router",
-      "expo-video"
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#F4C400"
+        }
+      ],
+      [
+        "expo-video",
+        {
+          "supportsBackgroundPlayback": false,
+          "supportsPictureInPicture": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

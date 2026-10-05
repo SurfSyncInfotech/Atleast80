@@ -1,17 +1,19 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Store, User, MapPin, Mail, Clock, Save, CheckCircle, Camera,
-  ArrowLeft, ArrowRight, FileText, Upload, LocateFixed, Loader2
+  ArrowLeft, ArrowRight, FileText, Upload, LocateFixed, Loader2, Trash2
 } from "lucide-react"
 import KitchenLayout from "../../components/layout/KitchenLayout"
 import KitchenAvatar from "../../components/common/KitchenAvatar"
 import StateCitySelect from "../../components/common/StateCitySelect"
+import LocationMapModal from "../../components/common/LocationMapModal"
 import Button from "../../components/ui/Button"
 import { useAuth } from "../../context/AuthContext"
-import { api, uploadKitchenLogo, uploadKitchenFssaiLicense } from "../../lib/api"
+import { api, uploadKitchenLogo, uploadKitchenFssaiLicense, uploadKitchenImages } from "../../lib/api"
 import { patchSessionForRole } from "../../lib/authStorage"
 import { resolveMediaUrl } from "../../lib/media"
+import { validateBrowserLocation } from "../../lib/locationPreference"
 import { cn } from "../../lib/utils"
 
 const inputClass =
@@ -85,9 +87,11 @@ export default function KitchenProfilePage() {
   const [saving, setSaving] = useState(false)
   const [uploadingLogo, setUploadingLogo] = useState(false)
   const [uploadingFssai, setUploadingFssai] = useState(false)
+  const [uploadingImages, setUploadingImages] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
   const [detectingLocation, setDetectingLocation] = useState(false)
+  const kitchenImagesInputRef = useRef(null)
 
   const handleDetectLocation = () => {
     if (!navigator.geolocation) {
@@ -99,25 +103,31 @@ export default function KitchenProfilePage() {
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         try {
+          const validation = validateBrowserLocation(pos)
+          if (!validation.valid) {
+            setError(`Browser location is too coarse (~${Math.round((validation.accuracy || 0)/1000)} km). Please pick location on map or enter manually.`)
+            setDetectingLocation(false)
+            return
+          }
+
           const { latitude, longitude } = pos.coords
-          const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`,
-            {
-              headers: { "User-Agent": "Atleast80App/1.0" },
-            }
-          )
-          const data = await res.json()
-          if (data?.address) {
-            const addr = data.address
-            const rawState = addr.state || ""
-            const rawCity = addr.city || addr.town || addr.village || addr.county || ""
+          console.trace("[REVERSE GEOCODE CALLED]", {
+            latitude,
+            longitude,
+            caller: "KitchenProfilePage.handleDetectLocation"
+          })
+          const data = await api(`/api/locations/reverse?lat=${latitude}&lng=${longitude}`)
+          if (data) {
+            const addr = data.address || {}
+            const rawState = data.state || addr.state || ""
+            const rawCity = data.city || data.suburb || data.district || addr.city || addr.town || addr.village || addr.county || ""
             const state = rawState ? rawState.charAt(0).toUpperCase() + rawState.slice(1) : ""
             const city = rawCity ? rawCity.charAt(0).toUpperCase() + rawCity.slice(1) : ""
-            const road = addr.road || addr.suburb || addr.neighbourhood || ""
+            const road = data.suburb || addr.road || addr.suburb || addr.neighbourhood || ""
             const houseNumber = addr.house_number || ""
-            const postcode = addr.postcode || ""
+            const postcode = data.postcode || addr.postcode || ""
 
-            let streetAddress = [houseNumber, road].filter(Boolean).join(", ")
+            let streetAddress = data.formattedAddress || data.displayName || [houseNumber, road].filter(Boolean).join(", ")
             if (!streetAddress && data.display_name) {
               streetAddress = data.display_name.split(",").slice(0, 2).map((s) => s.trim()).join(", ")
             }
@@ -138,15 +148,37 @@ export default function KitchenProfilePage() {
           setDetectingLocation(false)
         }
       },
-      () => {
-        setError("Location permission denied. Please allow access or fill manually.")
+      (err) => {
+        if (err.code === 1) {
+          setError("Location permission denied. Please allow access or fill manually.")
+        } else if (err.code === 2) {
+          setError("Position unavailable. Please pick location on map or enter manually.")
+        } else if (err.code === 3) {
+          setError("Location detection timed out. Please pick location on map or enter manually.")
+        } else {
+          setError("Could not detect location. Please fill manually.")
+        }
         setDetectingLocation(false)
-      }
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     )
   }
 
+  const [isMapModalOpen, setIsMapModalOpen] = useState(false)
+  const handleConfirmMapLocation = (data) => {
+    if (!data) return
+    const { address, city, state, pincode } = data
+    setForm((f) => ({
+      ...f,
+      address: address || f.address,
+      state: state || f.state,
+      city: city || f.city,
+      pincode: pincode || f.pincode,
+    }))
+  }
+
   useEffect(() => {
-    refreshKitchen().catch(() => {})
+    refreshKitchen().catch(() => { })
   }, [refreshKitchen])
 
   useEffect(() => {
@@ -185,6 +217,10 @@ export default function KitchenProfilePage() {
     if (step === 1) {
       if (!form.name.trim() || !form.speciality.trim() || !form.bestItem.trim() || !form.description.trim()) {
         setError("Kitchen name, speciality, signature dish, and description are required")
+        return false
+      }
+      if ((kitchen?.kitchenImages?.length || 0) < 2) {
+        setError("Upload at least 2 kitchen setup photos before continuing")
         return false
       }
     }
@@ -261,6 +297,47 @@ export default function KitchenProfilePage() {
     } finally {
       setUploadingFssai(false)
       e.target.value = ""
+    }
+  }
+
+  const handleKitchenImagesUpload = async (e) => {
+    const files = Array.from(e.target.files || [])
+    e.target.value = ""
+    if (!files.length) return
+
+    const existingCount = kitchen?.kitchenImages?.length || 0
+    if (existingCount + files.length > 5) {
+      setError("You can upload at most 5 kitchen images")
+      return
+    }
+
+    setUploadingImages(true)
+    setError("")
+    setSuccess("")
+    try {
+      await uploadKitchenImages(files)
+      await refreshKitchen()
+      setSuccess("Kitchen images uploaded")
+    } catch (err) {
+      setError(err.message || "Failed to upload kitchen images")
+    } finally {
+      setUploadingImages(false)
+    }
+  }
+
+  // Delete a kitchen setup image
+  const handleDeleteImage = async (imageUrl) => {
+    setError("")
+    setSuccess("")
+    try {
+      await api("/api/kitchens/me/images", {
+        method: "DELETE",
+        body: JSON.stringify({ imageUrl }),
+      })
+      await refreshKitchen()
+      setSuccess("Image deleted")
+    } catch (err) {
+      setError(err.message || "Failed to delete image")
     }
   }
 
@@ -429,7 +506,7 @@ export default function KitchenProfilePage() {
                   >
                     <StepTitle title="Kitchen details" subtitle="Logo and how customers see your kitchen" />
 
-                    <div className="flex items-center gap-4 p-4 bg-[#f8f8f8] rounded-xl border border-[#eee]">
+                    <div className="flex items-start gap-4 p-4 bg-[#f8f8f8] rounded-xl border border-[#eee]">
                       <KitchenAvatar
                         kitchen={kitchen}
                         size="lg"
@@ -437,22 +514,78 @@ export default function KitchenProfilePage() {
                         uploading={uploadingLogo}
                         onUpload={handleLogoUpload}
                       />
-                      <div className="min-w-0 flex-1">
-                        <p className="font-poppins font-semibold text-sm text-[#1c1c1c]">Kitchen logo</p>
-                        <p className="font-nunito text-xs text-[#999] mt-1">
-                          Tap to upload. Initial shown if empty.
-                        </p>
-                        <p className="font-nunito text-[11px] text-primary mt-1.5 flex items-center gap-1">
-                          <Camera size={11} /> JPG, PNG or WebP
-                        </p>
-                        {kitchen?.status && (
-                          <span className={cn(
-                            "inline-block mt-2 text-[10px] font-poppins font-semibold px-2 py-0.5 rounded-full capitalize border",
-                            statusStyles[kitchen.status]
-                          )}>
-                            {kitchen.status}
-                          </span>
-                        )}
+                      <div className="min-w-0 flex-1 space-y-4">
+                        <div>
+                          <p className="font-poppins font-semibold text-sm text-[#1c1c1c]">Kitchen logo</p>
+                          <p className="font-nunito text-xs text-[#999] mt-1">
+                            Tap to upload. Initial shown if empty.
+                          </p>
+                          <p className="font-nunito text-[11px] text-primary mt-1.5 flex items-center gap-1">
+                            <Camera size={11} /> JPG, PNG or WebP
+                          </p>
+                          {kitchen?.status && (
+                            <span className={cn(
+                              "inline-block mt-2 text-[10px] font-poppins font-semibold px-2 py-0.5 rounded-full capitalize border",
+                              statusStyles[kitchen.status]
+                            )}>
+                              {kitchen.status}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="rounded-xl border border-dashed border-gray-200 bg-white p-4">
+                          <div className="flex items-center justify-between gap-4 mb-3">
+                            <div>
+                              <p className="font-poppins font-semibold text-sm text-[#1c1c1c]">Cooking Area Photos</p>
+                              <p className="font-nunito text-xs text-[#999] mt-1">
+                                Upload 2–5 clear photos of your kitchen setup. You can add or delete photos anytime.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => kitchenImagesInputRef.current?.click()}
+                              disabled={uploadingImages || (kitchen?.kitchenImages?.length || 0) >= 5}
+                              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-primary text-white text-xs font-semibold"
+                            >
+                              <Upload size={14} />
+                              {uploadingImages ? "Uploading..." : "Add photos"}
+                            </button>
+                          </div>
+
+                          <input
+                            ref={kitchenImagesInputRef}
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp,image/gif"
+                            multiple
+                            className="hidden"
+                            onChange={handleKitchenImagesUpload}
+                          />
+
+                          <div className="flex flex-wrap gap-3">
+                            {(kitchen?.kitchenImages || []).map((url, idx) => (
+                              <div key={url} className="relative w-28 h-28 sm:w-32 sm:h-32 overflow-hidden rounded-xl border border-gray-200 bg-gray-50 shadow-xs group">
+                                <img src={resolveMediaUrl(url)} alt={`Kitchen setup ${idx + 1}`} className="w-full h-full object-cover" />
+                                <span className="absolute top-1.5 left-1.5 text-[9px] font-poppins font-bold text-white bg-black/60 rounded px-1.5 py-0.5">
+                                  #{idx + 1}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteImage(url)}
+                                  className="absolute top-1.5 right-1.5 bg-white/90 rounded-full p-1.5 hover:bg-red-50 text-red-600 shadow-sm border border-red-100 transition-colors"
+                                  title="Delete image"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+
+                          <p className="mt-3 text-[11px] font-nunito text-gray">
+                            {Math.min(kitchen?.kitchenImages?.length || 0, 5)}/5 photos uploaded.
+                            {(kitchen?.kitchenImages?.length || 0) < 2 && " Upload at least 2 photos for admin approval."}
+                            {(kitchen?.kitchenImages?.length || 0) >= 2 && " Tap the trash icon on any photo to remove it."}
+                          </p>
+                        </div>
                       </div>
                     </div>
 
@@ -570,19 +703,29 @@ export default function KitchenProfilePage() {
                   >
                     <div className="flex items-center justify-between gap-2">
                       <StepTitle title="Location & hours" subtitle="Where customers can find you" />
-                      <button
-                        type="button"
-                        onClick={handleDetectLocation}
-                        disabled={detectingLocation}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-poppins font-semibold border border-emerald-200 hover:bg-emerald-100 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
-                      >
-                        {detectingLocation ? (
-                          <Loader2 size={13} className="animate-spin" />
-                        ) : (
-                          <LocateFixed size={13} />
-                        )}
-                        {detectingLocation ? "Detecting..." : "Auto-detect location"}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsMapModalOpen(true)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-poppins font-semibold hover:bg-primary-dark transition-colors cursor-pointer shrink-0"
+                        >
+                          <MapPin size={13} />
+                          Pin on Map
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleDetectLocation}
+                          disabled={detectingLocation}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-poppins font-semibold border border-emerald-200 hover:bg-emerald-100 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+                        >
+                          {detectingLocation ? (
+                            <Loader2 size={13} className="animate-spin" />
+                          ) : (
+                            <LocateFixed size={13} />
+                          )}
+                          {detectingLocation ? "Detecting..." : "Auto-detect location"}
+                        </button>
+                      </div>
                     </div>
 
                     <Field label="Full Address" required>
@@ -648,6 +791,15 @@ export default function KitchenProfilePage() {
             </div>
           </div>
         </form>
+        {/* Location Map Modal */}
+        <LocationMapModal
+          isOpen={isMapModalOpen}
+          onClose={() => setIsMapModalOpen(false)}
+          onConfirmLocation={handleConfirmMapLocation}
+          initialAddress={form.address}
+          initialCity={form.city}
+          initialState={form.state}
+        />
       </div>
     </KitchenLayout>
   )

@@ -1,9 +1,10 @@
-import React, { useState } from "react"
+import React, { useState, useEffect } from "react"
 import { View, Text, Pressable, Animated, Platform, ScrollView, TouchableOpacity } from "react-native"
 import { useRouter } from "expo-router"
 import { LinearGradient } from "expo-linear-gradient"
 import { SafeAreaView } from "react-native-safe-area-context"
 import { ChefHat, ShieldCheck, Truck, Heart } from "lucide-react-native"
+import { useAuth } from "../context/AuthContext"
 
 const SLIDES = [
   {
@@ -41,8 +42,22 @@ const SLIDES = [
 ]
 
 export default function OnboardingScreen() {
+  const { user } = useAuth()
   const [index, setIndex] = useState(0)
   const router = useRouter()
+
+  useEffect(() => {
+    if (user) {
+      if (user.role === "rider") {
+        router.replace("/(rider)/(tabs)/dashboard")
+      } else if (user.role === "admin") {
+        router.replace("/(admin)/dashboard")
+      } else {
+        router.replace("/(customer)/home")
+      }
+    }
+  }, [user, router])
+
   const slide = SLIDES[index]
   const Icon = slide.icon
   const isLast = index === SLIDES.length - 1

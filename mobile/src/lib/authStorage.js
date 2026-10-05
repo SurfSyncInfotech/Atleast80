@@ -71,6 +71,13 @@ export async function writeStoredAuth(auth) {
   }
 }
 
+const authListeners = new Set()
+
+export function subscribeAuthChange(fn) {
+  authListeners.add(fn)
+  return () => authListeners.delete(fn)
+}
+
 export async function patchStoredAuth(patch) {
   const stored = cachedAuth
   if (!stored?.token) return null
@@ -85,6 +92,13 @@ export async function patchStoredAuth(patch) {
   if (!next.user) return stored
 
   await writeStoredAuth(next)
+  authListeners.forEach((fn) => {
+    try {
+      fn(next)
+    } catch (e) {
+      console.warn("[authStorage] Listener error:", e)
+    }
+  })
   return next
 }
 

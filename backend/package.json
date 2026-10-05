@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
+    "reset:orders": "node scripts/resetTestOrders.js",
     "setup:db": "node scripts/setupDatabase.js",
     "migrate": "node scripts/migrate.js",
     "migrate:v2": "node scripts/migrateV2.js",
@@ -47,6 +48,7 @@
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.1.1",
     "mysql2": "^3.12.0",
-    "nodemailer": "^6.10.1"
+    "nodemailer": "^6.10.1",
+    "razorpay": "^2.9.8"
   }
 }

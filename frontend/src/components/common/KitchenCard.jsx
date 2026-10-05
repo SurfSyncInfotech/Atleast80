@@ -34,11 +34,23 @@ export default function KitchenCard({ kitchen, className, onClick }) {
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-black/10 to-transparent" />
 
-        {kitchen.offer && (
+        {kitchen.festivalOffer?.active ? (
+          <>
+            <div className="absolute top-2.5 left-2.5 bg-gradient-to-r from-amber-500 to-rose-500 text-white px-2.5 py-1 rounded-lg text-[10px] font-poppins font-extrabold shadow-md flex items-center gap-1 border border-white/30">
+              <span>🎉</span>
+              <span>{kitchen.festivalOffer.discountPercent}% OFF</span>
+              <span className="opacity-90 font-medium hidden sm:inline">· {kitchen.festivalOffer.title}</span>
+            </div>
+            <div className="absolute bottom-2 right-2 bg-black/60 backdrop-blur-sm border border-amber-300/40 text-amber-300 px-2 py-0.5 rounded-md text-[9px] font-poppins font-bold shadow-sm flex items-center gap-1">
+              <span>✨ Special Deals Live</span>
+              <span>→</span>
+            </div>
+          </>
+        ) : kitchen.offer ? (
           <div className="absolute top-2.5 left-2.5 bg-accent text-white px-2 py-0.5 rounded-md text-[10px] font-poppins font-bold shadow-sm">
             {kitchen.offer}
           </div>
-        )}
+        ) : null}
       </div>
 
       <div className="px-4 py-4">

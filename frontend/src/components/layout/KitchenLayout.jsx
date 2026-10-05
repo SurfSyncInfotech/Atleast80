@@ -33,6 +33,11 @@ import {
   MapPin,
   MessageSquare,
   IndianRupee,
+  AlertTriangle,
+  CheckCircle,
+  AlertCircle,
+  Pencil,
+  ArrowRight,
 } from "lucide-react"
 
 import { useAuth } from "../../context/AuthContext"
@@ -89,21 +94,89 @@ export default function KitchenLayout({ children, fullBleed = false, fullWidth =
   const [storyModalOpen, setStoryModalOpen] = useState(false)
 
   const [uploadingCover, setUploadingCover] = useState(false)
-
   const [storiesRevision, setStoriesRevision] = useState(0)
-
   const [stories, setStories] = useState([])
-
   const [storyViewerOpen, setStoryViewerOpen] = useState(false)
   const [alertsOpen, setAlertsOpen] = useState(false)
   const [alertCount, setAlertCount] = useState(0)
   const [unreadEnquiryCount, setUnreadEnquiryCount] = useState(0)
+  const [newOrdersCount, setNewOrdersCount] = useState(0)
+  const prevNewOrdersRef = useRef(-1)
+  
+  // Real-time live alert toast popup
+  const [liveAlert, setLiveAlert] = useState(null)
+  const seenAlertIdsRef = useRef(new Set())
+  const isFirstAlertFetchRef = useRef(true)
 
   const isApproved = kitchen?.status === "approved"
 
   useEffect(() => {
     refreshKitchen().catch(() => {})
   }, [refreshKitchen])
+
+  // Play audio chime when a new order arrives
+  const playOrderChime = () => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)()
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = "sine"
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime)
+      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15)
+      gain.gain.setValueAtTime(0.3, ctx.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start()
+      osc.stop(ctx.currentTime + 0.3)
+    } catch (e) {
+      // AudioContext might be blocked until user gesture
+    }
+  }
+
+  // Play alert notification chime
+  const playAlertChime = () => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)()
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = "triangle"
+      osc.frequency.setValueAtTime(440, ctx.currentTime)
+      osc.frequency.exponentialRampToValueAtTime(659.25, ctx.currentTime + 0.2)
+      gain.gain.setValueAtTime(0.3, ctx.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.35)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start()
+      osc.stop(ctx.currentTime + 0.35)
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  // Poll for new pending orders every 4 seconds
+  useEffect(() => {
+    if (!isApproved) return
+
+    const checkNewOrders = async () => {
+      try {
+        const stats = await api("/api/orders/kitchen/stats", {}, "kitchen")
+        const pending = Number(stats?.pendingOrders || stats?.pending_count || 0)
+        setNewOrdersCount(pending)
+
+        if (prevNewOrdersRef.current >= 0 && pending > prevNewOrdersRef.current) {
+          playOrderChime()
+        }
+        prevNewOrdersRef.current = pending
+      } catch (e) {
+        // silent
+      }
+    }
+
+    checkNewOrders()
+    const interval = setInterval(checkNewOrders, 4000)
+    return () => clearInterval(interval)
+  }, [isApproved])
 
   useEffect(() => {
     if (!isApproved) return
@@ -129,11 +202,48 @@ export default function KitchenLayout({ children, fullBleed = false, fullWidth =
     return () => clearInterval(interval)
   }, [isApproved, user?.id])
 
+  // Poll alerts every 3 seconds for real-time popups
   useEffect(() => {
-    api("/api/alerts", {}, "kitchen")
-      .then((d) => setAlertCount((d.alerts || []).length))
-      .catch(() => setAlertCount(0))
-  }, [alertsOpen, kitchen?.status])
+    if (!isApproved) return
+
+    const fetchAlerts = async () => {
+      try {
+        const d = await api("/api/alerts", {}, "kitchen")
+        const list = d.alerts || []
+        setAlertCount(list.length)
+
+        if (list.length > 0) {
+          // Find any unseen alert
+          const unseen = list.find((a) => !seenAlertIdsRef.current.has(a.id))
+          if (unseen) {
+            // If not first fetch or it's a critical menu alert, trigger live popup
+            if (!isFirstAlertFetchRef.current || unseen.title?.includes("Item") || unseen.title?.includes("Admin")) {
+              setLiveAlert(unseen)
+              playAlertChime()
+            }
+            list.forEach((a) => seenAlertIdsRef.current.add(a.id))
+          }
+        }
+        isFirstAlertFetchRef.current = false
+      } catch {
+        setAlertCount(0)
+      }
+    }
+
+    fetchAlerts()
+    const interval = setInterval(fetchAlerts, 3000)
+    return () => clearInterval(interval)
+  }, [isApproved, alertsOpen, kitchen?.status])
+
+  const dismissLiveAlert = async (id) => {
+    try {
+      await api(`/api/alerts/${id}/dismiss`, { method: "POST" }, "kitchen")
+      setLiveAlert(null)
+      setAlertCount((prev) => Math.max(0, prev - 1))
+    } catch {
+      setLiveAlert(null)
+    }
+  }
 
   useEffect(() => {
     if (!isApproved) {
@@ -299,6 +409,13 @@ export default function KitchenLayout({ children, fullBleed = false, fullWidth =
         <Icon size={18} />
 
         {item.label}
+
+        {item.label === "Orders" && newOrdersCount > 0 && (
+          <span className="ml-auto bg-red-500 text-white font-bold text-[10px] px-2 py-0.5 rounded-full animate-pulse shadow-sm flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+            {newOrdersCount} New
+          </span>
+        )}
 
         {item.label === "Enquiries" && unreadEnquiryCount > 0 && (
           <span className="ml-auto bg-red-500 text-white font-bold text-[10px] px-2 py-0.5 rounded-full animate-pulse shadow-sm">
@@ -478,17 +595,17 @@ export default function KitchenLayout({ children, fullBleed = false, fullWidth =
           <div className="flex items-center gap-2 min-w-0">
 
             <button
-
               onClick={() => setDrawerOpen(true)}
-
-              className="lg:hidden p-2.5 rounded-xl bg-[#f4f4f5] hover:bg-gray-200 cursor-pointer flex-shrink-0 transition-colors"
-
+              className="lg:hidden p-2.5 rounded-xl bg-[#f4f4f5] hover:bg-gray-200 cursor-pointer flex-shrink-0 transition-colors relative"
               aria-label="Open menu"
-
             >
-
               <Menu size={20} className="text-dark" />
-
+              {(newOrdersCount > 0 || unreadEnquiryCount > 0) && (
+                <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-white animate-ping" />
+              )}
+              {(newOrdersCount > 0 || unreadEnquiryCount > 0) && (
+                <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-white" />
+              )}
             </button>
 
             <div className="min-w-0">
@@ -547,6 +664,22 @@ export default function KitchenLayout({ children, fullBleed = false, fullWidth =
               </>
             )}
 
+            {isApproved && (
+              <div className="relative">
+                <HeaderIconButton
+                  icon={ShoppingBag}
+                  label="Orders"
+                  onClick={() => navigate("/kitchen/orders")}
+                  active={newOrdersCount > 0}
+                />
+                {newOrdersCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-500 text-white font-bold text-[9px] px-1.5 py-0.5 rounded-full ring-2 ring-white animate-pulse">
+                    {newOrdersCount}
+                  </span>
+                )}
+              </div>
+            )}
+
             <HeaderIconButton
               icon={Bell}
               label="Alerts"
@@ -594,6 +727,88 @@ export default function KitchenLayout({ children, fullBleed = false, fullWidth =
       )}
 
       <AlertsPanel open={alertsOpen} onClose={() => setAlertsOpen(false)} />
+
+      {/* Real-time Admin Action Pop-up Notification for Seller */}
+      {liveAlert && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[99999] max-w-lg w-[calc(100%-2rem)] animate-in fade-in slide-in-from-top-4 duration-300">
+          <div className={cn(
+            "rounded-2xl p-4 sm:p-5 shadow-2xl border-2 backdrop-blur-md",
+            liveAlert.title?.toLowerCase().includes("reject")
+              ? "bg-red-50/95 border-red-500 text-red-950 shadow-red-500/20"
+              : liveAlert.title?.toLowerCase().includes("edit")
+              ? "bg-rose-50/95 border-rose-500 text-rose-950 shadow-rose-500/20"
+              : liveAlert.title?.toLowerCase().includes("approve")
+              ? "bg-emerald-50/95 border-emerald-500 text-emerald-950 shadow-emerald-500/20"
+              : "bg-white/95 border-primary text-dark shadow-primary/20"
+          )}>
+            <div className="flex items-start gap-3.5">
+              <div className={cn(
+                "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5",
+                liveAlert.title?.toLowerCase().includes("reject")
+                  ? "bg-red-500 text-white"
+                  : liveAlert.title?.toLowerCase().includes("edit")
+                  ? "bg-rose-600 text-white"
+                  : liveAlert.title?.toLowerCase().includes("approve")
+                  ? "bg-emerald-600 text-white"
+                  : "bg-primary text-white"
+              )}>
+                {liveAlert.title?.toLowerCase().includes("reject") ? (
+                  <AlertTriangle size={22} />
+                ) : liveAlert.title?.toLowerCase().includes("edit") ? (
+                  <Pencil size={20} />
+                ) : liveAlert.title?.toLowerCase().includes("approve") ? (
+                  <CheckCircle size={22} />
+                ) : (
+                  <Bell size={22} />
+                )}
+              </div>
+
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="font-poppins font-bold text-sm sm:text-base leading-snug">
+                    {liveAlert.title}
+                  </h4>
+                  <button
+                    onClick={() => dismissLiveAlert(liveAlert.id)}
+                    className="text-gray-500 hover:text-dark p-1 rounded-lg hover:bg-black/5 cursor-pointer"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+                
+                <p className="font-nunito text-xs sm:text-sm mt-1.5 whitespace-pre-line leading-relaxed opacity-90 font-medium">
+                  {liveAlert.body}
+                </p>
+
+                <div className="flex items-center gap-2 mt-3.5 pt-2 border-t border-black/10">
+                  <button
+                    onClick={() => {
+                      dismissLiveAlert(liveAlert.id)
+                      navigate("/kitchen/menu")
+                    }}
+                    className={cn(
+                      "px-3.5 py-1.5 rounded-lg text-xs font-poppins font-bold flex items-center gap-1.5 cursor-pointer transition-all shadow-sm",
+                      liveAlert.title?.toLowerCase().includes("reject") || liveAlert.title?.toLowerCase().includes("edit")
+                        ? "bg-red-600 hover:bg-red-700 text-white"
+                        : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                    )}
+                  >
+                    <span>View in Menu</span>
+                    <ArrowRight size={13} />
+                  </button>
+
+                  <button
+                    onClick={() => dismissLiveAlert(liveAlert.id)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-poppins font-semibold bg-white/80 hover:bg-white text-gray-700 border border-gray-300 cursor-pointer"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
     </KitchenPanelContext.Provider>

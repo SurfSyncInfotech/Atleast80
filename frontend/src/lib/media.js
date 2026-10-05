@@ -3,7 +3,8 @@ const API_URL = (import.meta.env.VITE_API_URL || "https://backend.atleast80.com"
 export function resolveMediaUrl(url) {
   if (!url) return null
 
-  if (url.startsWith("/")) return `${API_URL}${url}`
+  if (url.startsWith("/uploads/")) return `${API_URL}${url}`
+  if (url.startsWith("/")) return url
   if (!url.startsWith("http://") && !url.startsWith("https://")) {
     return `${API_URL}/${url}`
   }

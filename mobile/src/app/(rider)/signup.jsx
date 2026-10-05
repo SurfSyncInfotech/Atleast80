@@ -13,7 +13,7 @@ import {
 } from "react-native"
 import { useRouter } from "expo-router"
 import { Linking } from "react-native"
-import { useSafeAreaInsets } from "react-native-safe-area-context"
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import {
   Truck,
   ArrowRight,
@@ -28,15 +28,27 @@ import {
   CheckCircle,
   Shield,
   HelpCircle,
-  FileDigit
+  FileDigit,
+  ExternalLink,
+  X
 } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import * as DocumentPicker from "expo-document-picker"
+import * as WebBrowser from "expo-web-browser"
 import Button from "../../components/ui/Button"
 import Input from "../../components/ui/Input"
 import PasswordInput from "../../components/ui/PasswordInput"
-import { useAuth } from "../../context/AuthContext"
-import { checkPhoneAvailability } from "../../lib/api"
+import { checkPhoneAvailability, api } from "../../lib/api"
+import { resolveMediaUrl } from "../../lib/media"
+
+let WebView = null
+if (Platform.OS !== "web") {
+  try {
+    WebView = require("react-native-webview").WebView
+  } catch (e) {
+    console.warn("react-native-webview not loaded", e)
+  }
+}
 
 const steps = [
   { id: 1, title: "Personal Details", subtitle: "Enter Profile Information", icon: User },
@@ -79,14 +91,22 @@ export default function RiderSignupPage() {
   const [agreement, setAgreement] = useState(null)
   const [agreementLoading, setAgreementLoading] = useState(false)
   const [agreementRead, setAgreementRead] = useState(false)
+  const [pdfModalVisible, setPdfModalVisible] = useState(false)
+  const [pdfViewerLoading, setPdfViewerLoading] = useState(true)
 
   // Fetch rider agreement when step 4 is reached
   useEffect(() => {
     if (step === 4 && !agreement) {
       setAgreementLoading(true)
-      fetch(`${process.env.EXPO_PUBLIC_API_URL || "http://localhost:3000"}/api/rider/rider-agreement`)
-        .then((r) => r.json())
-        .then((data) => setAgreement(data))
+      api("/api/rider/rider-agreement")
+        .then((data) => {
+          if (data?.url) {
+            setAgreement({
+              ...data,
+              url: resolveMediaUrl(data.url)
+            })
+          }
+        })
         .catch(() => {})
         .finally(() => setAgreementLoading(false))
     }
@@ -169,7 +189,7 @@ export default function RiderSignupPage() {
     }
     if (step === 4) {
       if (!agreementRead) {
-        setError("Please read the Rider Agreement before accepting")
+        setError("Please open and read the Rider Agreement before accepting the terms")
         return false
       }
       if (!termsAccepted) {
@@ -186,7 +206,7 @@ export default function RiderSignupPage() {
     if (step === 1) {
       setLoading(true)
       try {
-        await checkPhoneAvailability(form.phone, form.email)
+        await checkPhoneAvailability(form.phone, form.email, "rider")
       } catch (err) {
         setError(err.message || "Mobile number or email already registered")
         setLoading(false)
@@ -614,7 +634,12 @@ export default function RiderSignupPage() {
                 ) : agreement?.url ? (
                   <TouchableOpacity
                     onPress={() => {
-                      Linking.openURL(agreement.url)
+                      if (Platform.OS === "web") {
+                        setPdfViewerLoading(true)
+                      } else {
+                        setPdfViewerLoading(false)
+                      }
+                      setPdfModalVisible(true)
                       setAgreementRead(true)
                     }}
                     style={{
@@ -631,13 +656,13 @@ export default function RiderSignupPage() {
                     <FileText size={20} color={agreementRead ? "#0B6B3A" : "#B8900A"} />
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontFamily: "Poppins", fontWeight: "600", fontSize: 13, color: agreementRead ? "#0B6B3A" : "#B8900A" }}>
-                        {agreementRead ? "Agreement Read ✓" : "Read Rider Agreement (Required)"}
+                        {agreementRead ? "Agreement Read ✓" : "Read Rider Agreement (Official PDF)"}
                       </Text>
                       <Text style={{ fontFamily: "Nunito", fontSize: 11, color: "#7A7A7A", marginTop: 2 }}>
-                        Version {agreement.version} · Tap to open PDF
+                        Version {agreement.version || 1} · Tap to view PDF
                       </Text>
                     </View>
-                    {!agreementRead && <ArrowRight size={16} color="#B8900A" />}
+                    <ArrowRight size={16} color={agreementRead ? "#0B6B3A" : "#B8900A"} />
                   </TouchableOpacity>
                 ) : (
                   <View style={{ backgroundColor: "#FEF2F2", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#FECACA" }}>
@@ -647,38 +672,59 @@ export default function RiderSignupPage() {
                   </View>
                 )}
 
-                {agreementRead && (
-                  <TouchableOpacity
-                    onPress={() => setTermsAccepted(!termsAccepted)}
+                {/* Checkbox - Active only after reading agreement */}
+                <TouchableOpacity
+                  onPress={() => {
+                    if (!agreementRead) {
+                      setError("Please open and read the Rider Agreement (PDF) above before accepting.")
+                      if (Platform.OS === "web") {
+                        setPdfViewerLoading(true)
+                      } else {
+                        setPdfViewerLoading(false)
+                      }
+                      setPdfModalVisible(true)
+                      return
+                    }
+                    setTermsAccepted(!termsAccepted)
+                    setError("")
+                  }}
+                  activeOpacity={0.7}
+                  style={{
+                    flexDirection: "row",
+                    gap: 12,
+                    backgroundColor: agreementRead ? "#FAF9F6" : "#F5F5F5",
+                    borderRadius: 16,
+                    padding: 16,
+                    borderWidth: 1.5,
+                    borderColor: termsAccepted ? "#0B6B3A" : agreementRead ? "#0B6B3A" : "#E5E5E5",
+                  }}
+                >
+                  <View
                     style={{
-                      flexDirection: "row",
-                      gap: 12,
-                      backgroundColor: "#FAF9F6",
-                      borderRadius: 16,
-                      padding: 16,
-                      borderWidth: 1.5,
-                      borderColor: termsAccepted ? "#0B6B3A" : "#E5E5E5",
+                      width: 22,
+                      height: 22,
+                      borderRadius: 6,
+                      borderWidth: 2,
+                      borderColor: termsAccepted ? "#0B6B3A" : agreementRead ? "#0B6B3A" : "#BDBDBD",
+                      backgroundColor: termsAccepted ? "#0B6B3A" : "transparent",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      marginTop: 1,
                     }}
                   >
-                    <View
-                      style={{
-                        width: 20,
-                        height: 20,
-                        borderRadius: 6,
-                        borderWidth: 2,
-                        borderColor: "#0B6B3A",
-                        backgroundColor: termsAccepted ? "#0B6B3A" : "transparent",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      {termsAccepted && <Check size={14} color="#FFFFFF" />}
-                    </View>
-                    <Text className="flex-1 font-nunito text-xs text-dark leading-5">
+                    {termsAccepted && <Check size={14} color="#FFFFFF" strokeWidth={3} />}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text className="font-nunito text-xs text-dark leading-5">
                       I have read and agree to the Rider Agreement, terms and conditions, code of conduct, and consent to identity verification checks.
                     </Text>
-                  </TouchableOpacity>
-                )}
+                    {!agreementRead && (
+                      <Text style={{ fontFamily: "Nunito", fontSize: 11, color: "#B8900A", marginTop: 4, fontWeight: "600" }}>
+                        🔒 Tap "Read Rider Agreement" above to review & unlock
+                      </Text>
+                    )}
+                  </View>
+                </TouchableOpacity>
               </View>
             ) : null}
 
@@ -811,6 +857,180 @@ export default function RiderSignupPage() {
             </View>
           </View>
         </View>
+      </Modal>
+
+      {/* In-App Rider Agreement PDF Modal */}
+      <Modal
+        visible={pdfModalVisible}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setPdfModalVisible(false)}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: "#0B6B3A" }} edges={["top", "bottom"]}>
+          {/* Modal Header */}
+          <View style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            paddingHorizontal: 16,
+            paddingVertical: 14,
+            backgroundColor: "#0B6B3A"
+          }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
+              <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" }}>
+                <FileText size={20} color="#FFFFFF" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontFamily: "Poppins", fontWeight: "bold", fontSize: 15, color: "#FFFFFF" }} numberOfLines={1}>
+                  Rider Agreement
+                </Text>
+                <Text style={{ fontFamily: "Nunito", fontSize: 11, color: "rgba(255,255,255,0.8)" }}>
+                  Version {agreement?.version || 1} · Official Terms
+                </Text>
+              </View>
+            </View>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              {agreement?.url ? (
+                <TouchableOpacity
+                  onPress={() => Linking.openURL(agreement.url)}
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 18,
+                    backgroundColor: "rgba(255,255,255,0.2)",
+                    alignItems: "center",
+                    justifyContent: "center"
+                  }}
+                  accessibilityLabel="Open PDF in new tab"
+                >
+                  <ExternalLink size={18} color="#FFFFFF" />
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity
+                onPress={() => setPdfModalVisible(false)}
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 18,
+                  backgroundColor: "rgba(255,255,255,0.2)",
+                  alignItems: "center",
+                  justifyContent: "center"
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <X size={20} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* PDF Viewer Body */}
+          <View style={{ flex: 1, backgroundColor: "#FFFFFF", position: "relative" }}>
+            {pdfViewerLoading && (
+              <View style={{
+                position: "absolute",
+                inset: 0,
+                backgroundColor: "#FFFFFF",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 10,
+                gap: 12
+              }}>
+                <ActivityIndicator size="large" color="#0B6B3A" />
+                <Text style={{ fontFamily: "Nunito", fontSize: 13, color: "#7A7A7A" }}>
+                  Loading Rider Agreement...
+                </Text>
+              </View>
+            )}
+
+            {Platform.OS === "web" ? (
+              <iframe
+                src={agreement?.url || ""}
+                style={{ width: "100%", height: "100%", minHeight: "100%", border: "none", display: "block", backgroundColor: "#FFFFFF" }}
+                onLoad={() => setPdfViewerLoading(false)}
+              />
+            ) : (
+              <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
+                <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: "#EAF7EE", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                  <FileText size={42} color="#0B6B3A" />
+                </View>
+                <Text style={{ fontFamily: "Poppins", fontWeight: "bold", fontSize: 18, color: "#1F1F1F", textAlign: "center" }}>
+                  Rider Partnership Agreement
+                </Text>
+                <Text style={{ fontFamily: "Nunito", fontSize: 13, color: "#7A7A7A", textAlign: "center", marginTop: 8, lineHeight: 20, maxWidth: 300 }}>
+                  Version {agreement?.version || 1} · Official Terms & Conditions. Please review the official partnership document.
+                </Text>
+
+                {agreement?.url ? (
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (WebBrowser?.openBrowserAsync) {
+                        WebBrowser.openBrowserAsync(agreement.url).catch(() => Linking.openURL(agreement.url))
+                      } else {
+                        Linking.openURL(agreement.url)
+                      }
+                    }}
+                    style={{
+                      marginTop: 20,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                      backgroundColor: "#EAF7EE",
+                      borderWidth: 1.5,
+                      borderColor: "#0B6B3A",
+                      paddingHorizontal: 20,
+                      paddingVertical: 12,
+                      borderRadius: 14
+                    }}
+                  >
+                    <ExternalLink size={18} color="#0B6B3A" />
+                    <Text style={{ fontFamily: "Poppins", fontWeight: "bold", fontSize: 14, color: "#0B6B3A" }}>
+                      Open / View PDF Document
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            )}
+          </View>
+
+          {/* Modal Bottom Action Bar */}
+          <View style={{
+            paddingHorizontal: 16,
+            paddingVertical: 12,
+            backgroundColor: "#FFFFFF",
+            borderTopWidth: 1,
+            borderTopColor: "#E5E5E5",
+            flexDirection: "row",
+            gap: 12
+          }}>
+            <TouchableOpacity
+              onPress={() => {
+                setAgreementRead(true)
+                setTermsAccepted(true)
+                setPdfModalVisible(false)
+              }}
+              style={{
+                flex: 1,
+                height: 48,
+                backgroundColor: "#0B6B3A",
+                borderRadius: 14,
+                alignItems: "center",
+                justifyContent: "center",
+                flexDirection: "row",
+                gap: 8,
+                shadowColor: "#0B6B3A",
+                shadowOffset: { width: 0, height: 3 },
+                shadowOpacity: 0.2,
+                shadowRadius: 5,
+                elevation: 3
+              }}
+            >
+              <Check size={18} color="#FFFFFF" strokeWidth={2.5} />
+              <Text style={{ color: "#FFFFFF", fontFamily: "Poppins", fontWeight: "bold", fontSize: 14 }}>
+                I Have Read & Accept Terms
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
       </Modal>
     </KeyboardAvoidingView>
   )

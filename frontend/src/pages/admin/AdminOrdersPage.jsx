@@ -251,6 +251,13 @@ export default function AdminOrdersPage() {
 
   useEffect(() => { loadOrders() }, [loadOrders])
 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadOrders()
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [loadOrders])
+
   const selectedKitchen = kitchens.find((k) => k.id === selectedKitchenId)
 
   const kitchenOrders = useMemo(

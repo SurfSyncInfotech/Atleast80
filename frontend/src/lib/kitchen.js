@@ -24,5 +24,18 @@ export function toKitchenCard(kitchen) {
     offer: kitchen.offer,
     bestItem: kitchen.best_item || kitchen.bestItem,
     kitchenType: kitchen.kitchen_type || kitchen.kitchenType || "veg",
+    festivalOffer: kitchen.festivalOffer || (kitchen.festival_offer_enabled && Number(kitchen.festival_offer_discount_percent) > 0 ? {
+      active: true,
+      title: kitchen.festival_offer_title,
+      category: kitchen.festival_offer_category,
+      discountPercent: Number(kitchen.festival_offer_discount_percent),
+      startDate: kitchen.festival_offer_start_date,
+      endDate: kitchen.festival_offer_end_date,
+      description: kitchen.festival_offer_description,
+    } : null),
+    festival_offer_enabled: kitchen.festival_offer_enabled,
+    festival_offer_title: kitchen.festival_offer_title,
+    festival_offer_category: kitchen.festival_offer_category,
+    festival_offer_discount_percent: kitchen.festival_offer_discount_percent,
   }
 }

@@ -1,10 +1,30 @@
+import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import { Phone, Mail, ArrowRight } from "lucide-react"
+import { getPublicContactSettings } from "../../lib/api"
 
 export default function Footer() {
   const navigate = useNavigate()
+  const [contact, setContact] = useState({
+    supportPhone: "+91 40 3559 4439",
+    supportEmail: "contact@elifelo.com",
+  })
+
+  useEffect(() => {
+    getPublicContactSettings()
+      .then((data) => {
+        if (data?.supportPhone || data?.supportEmail) {
+          setContact({
+            supportPhone: data.supportPhone || "+91 40 3559 4439",
+            supportEmail: data.supportEmail || "contact@elifelo.com",
+          })
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   const linkClass = "hover:text-secondary cursor-pointer transition-colors text-left"
+  const cleanPhone = contact.supportPhone.replace(/[^0-9+]/g, "")
 
   return (
     <footer className="hidden md:block bg-[#0a1f13] text-white">
@@ -35,11 +55,11 @@ export default function Footer() {
               Trusted homemade food and essentials delivered from verified local home kitchens.
             </p>
             <div className="mt-5 space-y-2.5">
-              <a href="tel:+914035594439" className="flex items-center gap-2 text-sm text-white/50 hover:text-secondary transition-colors">
-                <Phone size={14} className="text-secondary flex-shrink-0" /> +91 40 3559 4439
+              <a href={`tel:${cleanPhone}`} className="flex items-center gap-2 text-sm text-white/50 hover:text-secondary transition-colors">
+                <Phone size={14} className="text-secondary flex-shrink-0" /> {contact.supportPhone}
               </a>
-              <a href="mailto:contact@elifelo.com" className="flex items-center gap-2 text-sm text-white/50 hover:text-secondary transition-colors">
-                <Mail size={14} className="text-secondary flex-shrink-0" /> contact@elifelo.com
+              <a href={`mailto:${contact.supportEmail}`} className="flex items-center gap-2 text-sm text-white/50 hover:text-secondary transition-colors">
+                <Mail size={14} className="text-secondary flex-shrink-0" /> {contact.supportEmail}
               </a>
             </div>
           </div>
@@ -68,6 +88,7 @@ export default function Footer() {
               <li><button type="button" onClick={() => navigate("/contact")} className={linkClass}>Contact</button></li>
               <li><button type="button" onClick={() => navigate("/privacy")} className={linkClass}>Privacy Policy</button></li>
               <li><button type="button" onClick={() => navigate("/terms")} className={linkClass}>Terms of Service</button></li>
+              <li><button type="button" onClick={() => navigate("/user-account-deletion")} className={linkClass}>Delete Account</button></li>
             </ul>
           </div>
         </div>

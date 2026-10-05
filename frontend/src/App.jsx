@@ -13,6 +13,7 @@ import ContactPage from "./pages/ContactPage"
 import PrivacyPolicyPage from "./pages/PrivacyPolicyPage"
 import TermsOfServicePage from "./pages/TermsOfServicePage"
 import HygieneGuidelinesPage from "./pages/HygieneGuidelinesPage"
+import UserAccountDeletionPage from "./pages/UserAccountDeletionPage"
 import KitchenPage from "./pages/KitchenPage"
 import CartPage from "./pages/CartPage"
 import CheckoutPage from "./pages/CheckoutPage"
@@ -68,6 +69,7 @@ function AppContent() {
           <Route path="/privacy" element={<PrivacyPolicyPage />} />
           <Route path="/terms" element={<TermsOfServicePage />} />
           <Route path="/hygiene-guidelines" element={<HygieneGuidelinesPage />} />
+          <Route path="/user-account-deletion" element={<UserAccountDeletionPage />} />
           <Route path="/stories" element={<HomePage />} />
           <Route path="/kitchen/login" element={<KitchenLoginPage />} />
           <Route path="/kitchen/signup" element={<KitchenSignupPage />} />

@@ -18,13 +18,14 @@ function generateOtp() {
   return DEMO_OTP
 }
 
-export function getDemoOtp() {
+export function getDemoOtp(key = null) {
   return isChannelConfigured() ? null : DEMO_OTP
 }
 
 export function createOtp(key) {
   const otp = generateOtp()
   store.set(key, { otp, expiresAt: Date.now() + OTP_TTL_MS })
+  console.log(`[OTP Generated for key: ${key}] -> OTP Code: ${otp}`)
   return otp
 }
 
@@ -36,9 +37,17 @@ export async function createAndSendOtp(key, contact) {
   const { phone, email } = typeof contact === "string" ? { phone: contact } : contact || {}
   const otp = createOtp(key)
   if (phone && isSmsConfigured()) {
-    await sendOtpSms(phone, otp)
+    try {
+      await sendOtpSms(phone, otp)
+    } catch (err) {
+      console.error(`[SMS Delivery Failed for ${phone}]:`, err.message)
+    }
   } else if (email && isEmailConfigured()) {
-    await sendOtpEmail(email, otp)
+    try {
+      await sendOtpEmail(email, otp)
+    } catch (err) {
+      console.error(`[Email Delivery Failed for ${email}]:`, err.message)
+    }
   }
   return otp
 }

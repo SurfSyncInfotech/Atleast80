@@ -1,16 +1,19 @@
-import { useEffect, useState } from "react"
-import { View, Text, ScrollView, TouchableOpacity, Modal, ActivityIndicator, KeyboardAvoidingView, Platform, Image, Alert } from "react-native"
+import { useEffect, useState, useCallback } from "react"
+import { View, Text, ScrollView, TouchableOpacity, Modal, ActivityIndicator, KeyboardAvoidingView, Platform, Image, Alert, Linking } from "react-native"
 import * as Location from "expo-location"
-import { useRouter } from "expo-router"
+import { useRouter, useFocusEffect } from "expo-router"
 import { SafeAreaView } from "react-native-safe-area-context"
-import { Mail, Phone, MapPin, Pencil, LogOut, ChevronRight, X, ShoppingBag, Clock, User, Award, Check, Sparkles, Truck, ChefHat } from "lucide-react-native"
+import { Mail, Phone, MapPin, Pencil, LogOut, ChevronRight, X, ShoppingBag, Clock, User, Award, Check, Sparkles, Truck, ChefHat, Navigation, ShieldCheck, FileText, Trash2 } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import Button from "../../../components/ui/Button"
 import Input from "../../../components/ui/Input"
+import LocationMapModal from "../../../components/common/LocationMapModal"
+import PolicyModal from "../../../components/common/PolicyModal"
 import { useAuth } from "../../../context/AuthContext"
-import { api } from "../../../lib/api"
+import { api, getContactSettings } from "../../../lib/api"
 import { resolveMediaUrl } from "../../../lib/media"
 import FloatingCart from "../../../components/common/FloatingCart"
+import { getLocationPreference, setLocationPreference } from "../../../lib/locationPreference"
 
 const STATUS_LABELS = {
   pending: "Pending",
@@ -160,10 +163,33 @@ export default function ProfileScreen() {
 
   // Edit Modal State
   const [showEdit, setShowEdit] = useState(false)
+  const [policyType, setPolicyType] = useState(null)
+  const [isMapModalVisible, setIsMapModalVisible] = useState(false)
   const [form, setForm] = useState({ name: "", email: "", phone: "", address: "", city: "", pincode: "" })
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
   const [detectingLocation, setDetectingLocation] = useState(false)
+  const [deletionEmail, setDeletionEmail] = useState("liveatleast80@gmail.com")
+
+  useEffect(() => {
+    getContactSettings()
+      .then((data) => {
+        if (data?.accountDeletionEmail) setDeletionEmail(data.accountDeletionEmail)
+      })
+      .catch(() => {})
+  }, [])
+
+  const handleConfirmMapLocation = (data) => {
+    if (data) {
+      setForm(prev => ({
+        ...prev,
+        address: data.address || prev.address,
+        city: data.city || prev.city,
+        pincode: data.pincode || prev.pincode
+      }))
+    }
+    setIsMapModalVisible(false)
+  }
 
   const handleAutoDetectLocation = async () => {
     setDetectingLocation(true)
@@ -178,20 +204,21 @@ export default function ProfileScreen() {
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
       const { latitude, longitude } = loc.coords
 
-      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`, {
-        headers: {
-          "User-Agent": "Atleast80App/1.0"
-        }
-      })
-      const data = await res.json()
-      if (data && data.address) {
-        const addr = data.address
-        const road = addr.road || addr.suburb || addr.neighbourhood || ""
-        const houseNumber = addr.house_number || ""
-        const city = addr.city || addr.town || addr.village || addr.county || ""
-        const postcode = addr.postcode || ""
+      let data = null
+      try {
+        data = await api(`/api/locations/reverse?lat=${latitude}&lng=${longitude}`)
+      } catch (err) {
+        console.warn("SurfSync reverse geocode error:", err)
+      }
 
-        let streetAddress = [houseNumber, road].filter(Boolean).join(", ")
+      if (data) {
+        const addr = data.address || {}
+        const road = data.suburb || addr.road || addr.suburb || addr.neighbourhood || ""
+        const houseNumber = addr.house_number || ""
+        const city = data.city || data.suburb || data.district || addr.city || addr.town || addr.village || addr.county || ""
+        const postcode = data.postcode || addr.postcode || ""
+
+        let streetAddress = data.formattedAddress || data.displayName || [houseNumber, road].filter(Boolean).join(", ")
         if (!streetAddress && data.display_name) {
           streetAddress = data.display_name.split(",").slice(0, 2).map(s => s.trim()).join(", ")
         }
@@ -246,6 +273,16 @@ export default function ProfileScreen() {
     setShowEdit(true)
   }
 
+  const [prefLocation, setPrefLocation] = useState({ address: "", city: "", state: "", pincode: "" })
+
+  useFocusEffect(
+    useCallback(() => {
+      getLocationPreference().then((loc) => {
+        if (loc) setPrefLocation(loc)
+      })
+    }, [user])
+  )
+
   const handleUpdate = async () => {
     if (!form.name.trim() || !form.email.trim() || !form.phone.trim() || !form.address.trim() || !form.city.trim() || !form.pincode.trim()) {
       setError("Please fill in all fields")
@@ -268,6 +305,8 @@ export default function ProfileScreen() {
     setError("")
     try {
       await updateProfile(form)
+      const nextLoc = await setLocationPreference({ state: form.state, city: form.city, address: form.address, pincode: form.pincode })
+      setPrefLocation(nextLoc)
       setShowEdit(false)
     } catch (err) {
       setError(err.message || "Failed to update profile")
@@ -303,8 +342,25 @@ export default function ProfileScreen() {
     )
   }
 
-  const hasAddress = Boolean(user.address && user.city && user.pincode)
-  const fullAddress = hasAddress ? `${user.address}, ${user.city} - ${user.pincode}` : null
+  let fullAddress = null
+  if (prefLocation?.address && prefLocation.address.trim() && !prefLocation.isCleared) {
+    fullAddress = prefLocation.address.trim()
+  } else if (prefLocation?.city && !prefLocation.isCleared) {
+    const validSuburb = prefLocation.suburb && prefLocation.city && prefLocation.suburb.toLowerCase() !== prefLocation.city.toLowerCase() ? prefLocation.suburb : ""
+    const parts = [validSuburb, prefLocation.city, prefLocation.state].filter(Boolean)
+    fullAddress = parts.join(", ") + (prefLocation.pincode ? ` - ${prefLocation.pincode}` : "")
+  } else if (user?.address && user.address.trim()) {
+    let addr = user.address.trim()
+    if (user.city && !addr.toLowerCase().includes(user.city.toLowerCase())) {
+      addr += `, ${user.city}`
+    }
+    if (user.pincode && !addr.includes(user.pincode)) {
+      addr += ` - ${user.pincode}`
+    }
+    fullAddress = addr
+  }
+  
+  const hasAddress = Boolean(fullAddress)
   
   const activeStepIdx = currentOrder 
     ? TRACKING_STEPS.findIndex(s => s.status === currentOrder.status)
@@ -601,6 +657,101 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           )}
 
+          <TouchableOpacity
+            onPress={() => {
+              const body = `Please delete my Atleast80 account.\n\nName: ${user?.name || ""}\nPhone: ${user?.phone || ""}\nRegistered email: ${user?.email || ""}`
+              const params = new URLSearchParams({
+                view: "cm",
+                fs: "1",
+                to: deletionEmail,
+                su: "Account deletion request",
+                body,
+              })
+              Linking.openURL(`https://mail.google.com/mail/?${params.toString()}`)
+            }}
+            activeOpacity={0.8}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: 16,
+              borderRadius: 20,
+              backgroundColor: "#FFF5F5",
+              borderWidth: 1,
+              borderColor: "#FECACA",
+              marginTop: 8,
+              marginBottom: 8,
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12, flex: 1 }}>
+              <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center" }}>
+                <Trash2 size={18} color="#DC2626" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 13, fontFamily: "Poppins", fontWeight: "bold", color: "#1F1F1F" }}>Delete your Atleast80 account</Text>
+                <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#7A7A7A", marginTop: 2 }}>Request deletion at {deletionEmail}</Text>
+              </View>
+            </View>
+            <ChevronRight size={16} color="#7A7A7A" />
+          </TouchableOpacity>
+
+          {/* Legal & Policies Section */}
+          <Text style={{ fontSize: 16, fontFamily: "Poppins", fontWeight: "bold", color: "#1F2937", marginTop: 12, marginBottom: 16 }}>Legal & Policies</Text>
+
+          <TouchableOpacity
+            onPress={() => setPolicyType("privacy")}
+            activeOpacity={0.8}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: 16,
+              borderRadius: 20,
+              backgroundColor: "#FFFFFF",
+              borderWidth: 1,
+              borderColor: "#F0F0F0",
+              marginBottom: 12,
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+              <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: "#EAF7EE", alignItems: "center", justifyContent: "center" }}>
+                <ShieldCheck size={18} color="#0B6B3A" />
+              </View>
+              <View>
+                <Text style={{ fontSize: 13, fontFamily: "Poppins", fontWeight: "bold", color: "#1F1F1F" }}>Privacy Policy</Text>
+                <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#7A7A7A", marginTop: 2 }}>How we protect your data</Text>
+              </View>
+            </View>
+            <ChevronRight size={16} color="#7A7A7A" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => setPolicyType("terms")}
+            activeOpacity={0.8}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: 16,
+              borderRadius: 20,
+              backgroundColor: "#FFFFFF",
+              borderWidth: 1,
+              borderColor: "#F0F0F0",
+              marginBottom: 20,
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+              <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: "#EAF7EE", alignItems: "center", justifyContent: "center" }}>
+                <FileText size={18} color="#0B6B3A" />
+              </View>
+              <View>
+                <Text style={{ fontSize: 13, fontFamily: "Poppins", fontWeight: "bold", color: "#1F1F1F" }}>Terms of Service</Text>
+                <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#7A7A7A", marginTop: 2 }}>Platform rules & agreement</Text>
+              </View>
+            </View>
+            <ChevronRight size={16} color="#7A7A7A" />
+          </TouchableOpacity>
+
           {/* Active Order tracking subtitle */}
           {currentOrder ? (
             <View style={{ marginBottom: 16 }}>
@@ -658,7 +809,7 @@ export default function ProfileScreen() {
       <Modal visible={showEdit} animationType="slide" transparent>
         <View className="flex-1 bg-black/60 justify-end">
           <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            behavior={Platform.OS === "ios" ? "padding" : "padding"}
             className="w-full bg-white rounded-t-3xl border-t border-gray-100 max-h-[90%]"
           >
             {/* Modal Header */}
@@ -710,18 +861,27 @@ export default function ProfileScreen() {
                 <View className="mb-3">
                   <View className="flex-row justify-between items-center mb-1.5">
                     <Text className="font-poppins text-xs font-bold text-dark-light">Delivery Address</Text>
-                    <TouchableOpacity
-                      onPress={handleAutoDetectLocation}
-                      disabled={detectingLocation}
-                      className="flex-row items-center gap-1"
-                    >
-                      {detectingLocation ? (
-                        <ActivityIndicator size="small" color="#0B6B3A" />
-                      ) : (
-                        <MapPin size={12} color="#0B6B3A" />
-                      )}
-                      <Text className="text-[11px] font-poppins font-bold text-primary">Auto Detect</Text>
-                    </TouchableOpacity>
+                    <View className="flex-row items-center gap-3">
+                      <TouchableOpacity
+                        onPress={() => setIsMapModalVisible(true)}
+                        className="flex-row items-center gap-1"
+                      >
+                        <Navigation size={12} color="#0B6B3A" />
+                        <Text className="text-[11px] font-poppins font-bold text-primary">Pick on Map</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={handleAutoDetectLocation}
+                        disabled={detectingLocation}
+                        className="flex-row items-center gap-1"
+                      >
+                        {detectingLocation ? (
+                          <ActivityIndicator size="small" color="#0B6B3A" />
+                        ) : (
+                          <MapPin size={12} color="#0B6B3A" />
+                        )}
+                        <Text className="text-[11px] font-poppins font-bold text-primary">Auto Detect</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                   <Input
                     value={form.address}
@@ -754,6 +914,20 @@ export default function ProfileScreen() {
           </KeyboardAvoidingView>
         </View>
       </Modal>
+
+      <LocationMapModal
+        visible={isMapModalVisible}
+        onClose={() => setIsMapModalVisible(false)}
+        onConfirmLocation={handleConfirmMapLocation}
+        initialAddress={form.address || ""}
+        initialCity={form.city || ""}
+      />
+
+      <PolicyModal
+        visible={Boolean(policyType)}
+        onClose={() => setPolicyType(null)}
+        type={policyType || "privacy"}
+      />
     </SafeAreaView>
   )
 }

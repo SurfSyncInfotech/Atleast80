@@ -5,44 +5,32 @@ import { useParams, useNavigate } from "react-router-dom"
 import { motion } from "framer-motion"
 
 import {
-
   ArrowLeft, Star, ShieldCheck, Clock, Share2, MapPin, Phone,
-
-  ShoppingCart, ChevronRight, UtensilsCrossed, ShoppingBag, Tag, Sparkles,
-
-  Plus, Minus,
-
+  ShoppingCart, ChevronLeft, ChevronRight, UtensilsCrossed, ShoppingBag, Tag, Sparkles,
+  Plus, Minus, ChefHat, ArrowRight,
 } from "lucide-react"
 
 import MenuListItem from "../components/common/MenuListItem"
-
 import MenuItemDetailModal from "../components/common/MenuItemDetailModal"
-
 import KitchenAvatar from "../components/common/KitchenAvatar"
 import BulkOrderChatbot from "../components/common/BulkOrderChatbot"
-
+import InlineBulkEnquiryCard from "../components/kitchen/InlineBulkEnquiryCard"
+import BulkOrderEnquiryModal from "../components/common/BulkOrderEnquiryModal"
 import { useCart } from "../context/CartContext"
-
+import { useAuth } from "../context/AuthContext"
 import { api } from "../lib/api"
 import { resolveMenuItemMedia, resolveMediaUrl } from "../lib/media"
 import { toKitchenCard } from "../lib/kitchen"
-
 import { kitchens as mockKitchens, menuItems as mockMenu, groceryItems as mockGrocery } from "../data/mockData"
-
 import { cn } from "../lib/utils"
 
-
-
 const BANNER = "/banner.png"
-
 const KITCHEN_TYPE = { veg: "Pure Veg", non_veg: "Non-Veg", both: "Veg & Non-Veg" }
-
-
 
 const tabs = [
   { id: "food", label: "Food", icon: UtensilsCrossed },
   { id: "grocery", label: "Ration", icon: ShoppingBag },
-  { id: "combo", label: "Combo", icon: Sparkles },
+  { id: "offer", label: "Offer", icon: Sparkles },
   { id: "hygiene", label: "Check Hygiene", icon: ShieldCheck },
 ]
 
@@ -58,103 +46,130 @@ function mapApiKitchen(k) {
     image: k.image || null,
     isFreshFoodActive: k.is_fresh_food_active ?? 1,
     isGroceryActive: k.is_grocery_active ?? 1,
+    festivalOffer: k.festivalOffer || null,
+    festival_offer_enabled: k.festival_offer_enabled,
+    festival_offer_title: k.festival_offer_title,
+    festival_offer_category: k.festival_offer_category,
+    festival_offer_discount_percent: k.festival_offer_discount_percent,
+    festival_offer_start_date: k.festival_offer_start_date,
+    festival_offer_end_date: k.festival_offer_end_date,
+    festival_offer_description: k.festival_offer_description,
+    festival_offer_image: k.festival_offer_image,
+    festival_offer_image_2: k.festival_offer_image_2,
   }
 }
 
+function mapApiMenuItem(item, kitchenName, kitchenId, festivalOffer) {
+  const isGrocery = item.category === "grocery"
+  const pkgType = item.packaging_type || item.packagingType || "packaged"
+  const defaultGst = isGrocery ? (pkgType === "loose" ? 0 : 5) : 5
+  const gst = item.gst_rate !== undefined && item.gst_rate !== null
+    ? Number(item.gst_rate)
+    : (item.gstRate !== undefined && item.gstRate !== null ? Number(item.gstRate) : defaultGst)
 
+  const originalPrice = Number(item.price)
+  let offerPrice = null
+  let discountPercent = null
+  let festivalOfferTitle = null
 
-function mapApiMenuItem(item, kitchenName, kitchenId) {
+  if (festivalOffer?.active && Number(festivalOffer.discountPercent) > 0) {
+    const isCatMatch =
+      festivalOffer.category === "both" ||
+      (festivalOffer.category === "food" && item.category === "food") ||
+      (festivalOffer.category === "grocery" && item.category === "grocery")
+
+    if (isCatMatch) {
+      discountPercent = Number(festivalOffer.discountPercent)
+      offerPrice = Number(Math.max(1, originalPrice * (1 - discountPercent / 100)).toFixed(2))
+      festivalOfferTitle = festivalOffer.title
+    }
+  }
+
   return resolveMenuItemMedia({
+    ...item,
     id: item.id,
     name: item.name,
+    localName: item.local_name || item.localName || null,
+    local_name: item.local_name || item.localName || null,
     description: item.description,
-    price: Number(item.price),
+    price: originalPrice,
+    originalPrice,
+    offerPrice,
+    discountPercent,
+    festivalOfferTitle,
     category: item.category || "food",
     itemType: item.item_type || "veg",
+    packagingType: pkgType,
+    packaging_type: pkgType,
+    gstRate: gst,
+    gst_rate: gst,
     offer: item.offer || null,
     image: item.image,
     images: item.images,
     videos: item.videos,
     kitchen: kitchenName,
     kitchenId: kitchenId || item.kitchen_id,
+    is_available: item.is_available === undefined || item.is_available === null ? true : Boolean(item.is_available),
+    isAvailable: item.is_available === undefined || item.is_available === null ? true : Boolean(item.is_available),
     isCombo: item.isCombo || item.is_combo,
     comboItems: item.comboItems || [],
   })
 }
 
-
-
-function mapMockFood(item) {
-
-  return {
-
-    id: item.id,
-
-    name: item.name,
-
-    description: item.kitchen,
-
-    price: item.price,
-
-    category: "food",
-
-    itemType: "veg",
-
-    image: item.image,
-
-    kitchen: item.kitchen,
-
-  }
-
-}
-
-
-
-function mapMockGrocery(item) {
-
-  return {
-
-    id: item.id + 1000,
-
-    name: item.name,
-
-    description: item.weight,
-
-    price: item.price,
-
-    category: "grocery",
-
-    itemType: "veg",
-
-    image: item.image,
-
-    kitchen: item.kitchen,
-
-  }
-
-}
-
-
-
 export default function KitchenPage() {
-
   const { id } = useParams()
-
   const navigate = useNavigate()
-
   const [activeTab, setActiveTab] = useState("food")
-
   const [kitchen, setKitchen] = useState(null)
-
   const [menu, setMenu] = useState([])
-
   const [loading, setLoading] = useState(true)
-
   const [selectedItem, setSelectedItem] = useState(null)
-
+  const [activeOfferImageIndex, setActiveOfferImageIndex] = useState(0)
   const [hygieneData, setHygieneData] = useState({ videos: [], compliant: false, areas: [] })
 
+  const [activeEnquiry, setActiveEnquiry] = useState(null)
+  const [enquiryModalOpen, setEnquiryModalOpen] = useState(false)
+  const [refreshingEnquiry, setRefreshingEnquiry] = useState(false)
+
   const { itemCount, total, requireCustomer } = useCart()
+  const { customerUser } = useAuth()
+
+  const handleRefreshEnquiry = async () => {
+    if (!id || !customerUser) return
+    setRefreshingEnquiry(true)
+    try {
+      const data = await api(`/api/bulk-enquiries/kitchen/${id}`, {}, "customer")
+      setActiveEnquiry(data.enquiry || null)
+    } catch {
+      setActiveEnquiry(null)
+    } finally {
+      setRefreshingEnquiry(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!id || !customerUser) {
+      setActiveEnquiry(null)
+      return
+    }
+
+    let cancelled = false
+    const pollEnquiry = async () => {
+      try {
+        const data = await api(`/api/bulk-enquiries/kitchen/${id}`, {}, "customer")
+        if (!cancelled) setActiveEnquiry(data.enquiry || null)
+      } catch {
+        if (!cancelled) setActiveEnquiry(null)
+      }
+    }
+
+    pollEnquiry()
+    const interval = setInterval(pollEnquiry, 5000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [id, customerUser])
 
 
 
@@ -186,7 +201,7 @@ export default function KitchenPage() {
 
         setKitchen(k)
 
-        const mappedMenu = menuRes.items.map((item) => mapApiMenuItem(item, k.name, k.id))
+        const mappedMenu = menuRes.items.map((item) => mapApiMenuItem(item, k.name, k.id, k.festivalOffer))
         setMenu(mappedMenu)
 
         setHygieneData(hygieneRes)
@@ -254,8 +269,31 @@ export default function KitchenPage() {
 
     load()
 
-    return () => { cancelled = true }
+    const pollInterval = setInterval(() => {
+      Promise.all([
+        api(`/api/kitchens/${id}`).catch(() => null),
+        api(`/api/menu/kitchen/${id}`).catch(() => null),
+      ])
+        .then(([kRes, mRes]) => {
+          if (cancelled) return
+          let latestKitchen = kitchen
+          if (kRes?.kitchen) {
+            latestKitchen = mapApiKitchen(kRes.kitchen)
+            setKitchen(latestKitchen)
+          }
+          if (mRes?.items) {
+            const kName = latestKitchen?.name || ""
+            const festOffer = latestKitchen?.festivalOffer
+            setMenu(mRes.items.map((item) => mapApiMenuItem(item, kName, id, festOffer)))
+          }
+        })
+        .catch(() => {})
+    }, 3000)
 
+    return () => {
+      cancelled = true
+      clearInterval(pollInterval)
+    }
   }, [id])
 
 
@@ -263,6 +301,16 @@ export default function KitchenPage() {
   const foodItems = menu.filter((i) => i.category === "food" && !(i.isCombo || i.is_combo))
   const groceryItems = menu.filter((i) => i.category === "grocery" && !(i.isCombo || i.is_combo))
   const comboItems = menu.filter((i) => i.isCombo || i.is_combo)
+  const festivalOffer = kitchen?.festivalOffer
+  const isOfferActive = Boolean(festivalOffer?.active)
+  const festivalOfferItems = isOfferActive
+    ? menu.filter((item) => {
+        if (festivalOffer.category === "both") return true
+        if (festivalOffer.category === "food") return item.category === "food"
+        if (festivalOffer.category === "grocery") return item.category === "grocery"
+        return true
+      })
+    : []
   const offerItems = menu.filter((i) => i.offer)
   const offerCount = (kitchen?.offer ? 1 : 0) + offerItems.length
 
@@ -443,89 +491,129 @@ export default function KitchenPage() {
 
 
 
-        {/* Mobile about */}
+        {/* Inline Bulk Order Enquiry CTA & Active Status Card */}
+        <InlineBulkEnquiryCard
+          enquiry={activeEnquiry}
+          onOpenModal={() => setEnquiryModalOpen(true)}
+          onRefresh={handleRefreshEnquiry}
+          refreshing={refreshingEnquiry}
+          onRequireCustomer={requireCustomer}
+        />
 
-        <div className="lg:hidden mt-4 bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
+        {/* Festival Offer Banner CTA (Exact HomePage style) */}
+        {kitchen?.festivalOffer?.active && activeTab !== "offer" && (
+          <div
+            onClick={() => setActiveTab("offer")}
+            className="mt-4 bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 rounded-3xl p-5 text-white shadow-lg hover:shadow-xl transition-all duration-300 cursor-pointer relative overflow-hidden group"
+          >
+            {/* Floating Festival Visual Badge / Illustration on the right */}
+            <div className="absolute -right-4 -top-4 w-28 h-28 rounded-full overflow-hidden border-2 border-white/20 opacity-25 group-hover:opacity-40 group-hover:scale-110 transition-all pointer-events-none shadow-2xl">
+              <img
+                src={resolveMediaUrl(kitchen.festivalOffer.image || kitchen.festival_offer_image) || "/festival_offer_default.jpg"}
+                alt=""
+                onError={(e) => {
+                  e.currentTarget.onerror = null
+                  e.currentTarget.src = "/festival_offer_default.jpg"
+                }}
+                className="w-full h-full object-cover"
+              />
+            </div>
+            <div className="absolute -right-6 -bottom-6 opacity-15 pointer-events-none group-hover:scale-110 transition-transform">
+              <Sparkles size={120} />
+            </div>
 
-          <AboutPanel kitchen={kitchen} compact />
+            <div className="flex items-center justify-between gap-2 mb-3 relative z-10">
+              <span className="bg-white/20 backdrop-blur-sm border border-white/30 text-white text-[10px] font-poppins font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                {kitchen.festivalOffer.category === "both" ? "🍲 Food & Ration" : kitchen.festivalOffer.category === "grocery" ? "🌾 Ration Only" : "🍲 Homemade Food"}
+              </span>
+              <span className="bg-white text-rose-600 font-poppins font-extrabold text-xs px-3 py-1 rounded-full shadow-sm">
+                Flat {kitchen.festivalOffer.discountPercent}% OFF
+              </span>
+            </div>
 
-        </div>
+            <div className="flex items-center gap-3.5 my-2 relative z-10">
+              <div className="w-12 h-12 rounded-2xl bg-white p-0.5 overflow-hidden shadow-md flex-shrink-0">
+                <img
+                  src={resolveMediaUrl(kitchen.logo || kitchen.image) || "https://images.unsplash.com/photo-1556910103-1c02745aae4d?w=200&h=200&fit=crop"}
+                  alt={kitchen.name}
+                  className="w-full h-full rounded-[14px] object-cover"
+                />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h4 className="font-poppins font-bold text-white text-base sm:text-lg leading-tight truncate">
+                  {kitchen.name}
+                </h4>
+                <p className="font-nunito text-amber-200 text-xs font-semibold mt-0.5 truncate">
+                  ✨ {kitchen.festivalOffer.title}
+                </p>
+              </div>
+              {/* Floating Preview Pill */}
+              <div className="w-10 h-10 rounded-xl overflow-hidden border border-white/40 shadow-sm flex-shrink-0 bg-white/20">
+                <img
+                  src={resolveMediaUrl(kitchen.festivalOffer.image || kitchen.festival_offer_image) || "/festival_offer_default.jpg"}
+                  alt=""
+                  onError={(e) => {
+                    e.currentTarget.onerror = null
+                    e.currentTarget.src = "/festival_offer_default.jpg"
+                  }}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+            </div>
 
+            <p className="font-nunito text-white/90 text-xs mt-1 mb-4 line-clamp-2 leading-relaxed relative z-10">
+              {kitchen.festivalOffer.description || "Handcrafted festive delicacies and special packages available for a limited time."}
+            </p>
 
+            <div className="bg-white text-dark rounded-xl py-2.5 px-4 flex items-center justify-between shadow-sm group-hover:bg-amber-50 transition-colors relative z-10">
+              <span className="font-poppins font-bold text-xs text-[#0a1f13]">
+                Unlock Secret Festival Menu
+              </span>
+              <ArrowRight size={14} className="text-orange-600 group-hover:translate-x-1 transition-transform" />
+            </div>
+          </div>
+        )}
 
         {/* Tabs */}
-
         <div className="sticky top-0 z-20 mt-5 py-2 -mx-4 px-4 sm:mx-0 sm:px-0 bg-[#f5f5f4]/95 backdrop-blur-md">
-
           <div className="flex gap-2 p-1.5 bg-white rounded-2xl shadow-sm border border-gray-100 max-w-2xl">
-
             {tabs.filter(tab => {
-              if (tab.id === "food" && kitchen?.isFreshFoodActive === 0) return false
-              if (tab.id === "grocery" && kitchen?.isGroceryActive === 0) return false
+              if (tab.id === "food" && (kitchen?.isFreshFoodActive === 0 || foodItems.length === 0)) return false
+              if (tab.id === "grocery" && (kitchen?.isGroceryActive === 0 || groceryItems.length === 0)) return false
               if (tab.id === "combo" && comboItems.length === 0) return false
+              if (tab.id === "offer" && !kitchen?.festivalOffer?.active) return false
               return true
             }).map((tab) => {
-
               const Icon = tab.icon
-
               const active = activeTab === tab.id
-
               return (
-
                 <button
-
                   key={tab.id}
-
                   onClick={() => setActiveTab(tab.id)}
-
                   className={cn(
-
                     "flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-poppins font-semibold cursor-pointer transition-all duration-200",
-
                     active
-
                       ? "bg-primary text-white shadow-sm"
-
                       : "text-gray hover:text-dark hover:bg-gray-50"
-
                   )}
-
                 >
-
                   <Icon size={15} />
-
                   {tab.label}
-
                 </button>
-
               )
-
             })}
-
           </div>
-
         </div>
 
-
-
         {/* Content */}
-
         <div className="mt-4 lg:grid lg:grid-cols-[1fr_320px] lg:gap-6 lg:items-start">
-
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden min-h-[50vh]">
-
             {activeTab === "food" && (
-
               <MenuSection title="Food Menu" subtitle="Fresh homemade dishes" count={foodItems.length} empty="No food items listed yet">
-
                 {foodItems.map((item) => (
-
                   <MenuListItem key={item.id} item={item} onOpen={setSelectedItem} />
-
                 ))}
-
               </MenuSection>
-
             )}
 
             {activeTab === "grocery" && (
@@ -544,11 +632,183 @@ export default function KitchenPage() {
               </MenuSection>
             )}
 
+            {activeTab === "offer" && kitchen?.festivalOffer?.active && (() => {
+              const offerImages = [
+                kitchen.festivalOffer.image || kitchen.festival_offer_image || "/festival_offer_default.jpg",
+                kitchen.festivalOffer.image2 || kitchen.festival_offer_image_2,
+              ].filter(Boolean)
+              const activeOfferImg = offerImages[activeOfferImageIndex] || offerImages[0]
+              const activeOfferImgSrc = resolveMediaUrl(activeOfferImg) || "/festival_offer_default.jpg"
+
+              return (
+              <div className="p-4 sm:p-6">
+                {/* Festival Offer Full Uncropped Poster Card */}
+                <div className="bg-white rounded-3xl border border-amber-200 shadow-xl overflow-hidden mb-6 animate-in fade-in transition-all">
+                  {/* Top Header Strip with Title & Badges */}
+                  <div className="p-4 sm:p-5 bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+                    <div>
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Sparkles size={14} className="text-amber-200" />
+                        <span className="text-amber-100 font-poppins font-extrabold text-[10px] sm:text-xs uppercase tracking-wider">
+                          {kitchen.festivalOffer.category === "both"
+                            ? "Food & Ration Festival"
+                            : kitchen.festivalOffer.category === "food"
+                            ? "Fresh Food Festival"
+                            : "Grocery & Ration Festival"}
+                        </span>
+                      </div>
+                      <h2 className="font-poppins font-black text-xl sm:text-2xl text-white">
+                        {kitchen.festivalOffer.title}
+                      </h2>
+                    </div>
+
+                    <div className="self-start sm:self-auto bg-white px-4 py-1.5 rounded-full shadow-md">
+                      <span className="text-rose-600 font-poppins font-black text-xs sm:text-sm uppercase tracking-wide">
+                        Flat {kitchen.festivalOffer.discountPercent}% OFF
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Clean Full Uncropped Poster Image with Blurred Background Fill */}
+                  <div className="relative w-full h-72 sm:h-88 md:h-96 overflow-hidden flex items-center justify-center border-b border-amber-100 bg-neutral-900 group/poster">
+                    {/* Blurred Background Layer (Fill Side Spaces) */}
+                    <img
+                      key={`blur-${activeOfferImg}`}
+                      src={activeOfferImgSrc}
+                      alt=""
+                      aria-hidden="true"
+                      onError={(e) => {
+                        e.currentTarget.onerror = null
+                        e.currentTarget.src = "/festival_offer_default.jpg"
+                      }}
+                      className="absolute inset-0 w-full h-full object-cover blur-2xl scale-125 opacity-60 pointer-events-none"
+                    />
+                    <div className="absolute inset-0 bg-black/25 pointer-events-none" />
+
+                    {/* Crisp Foreground Poster Layer */}
+                    <img
+                      key={`sharp-${activeOfferImg}`}
+                      src={activeOfferImgSrc}
+                      alt={kitchen.festivalOffer.title || "Festival Offer"}
+                      onError={(e) => {
+                        e.currentTarget.onerror = null
+                        e.currentTarget.src = "/festival_offer_default.jpg"
+                      }}
+                      className="relative z-10 max-h-full max-w-full object-contain p-2 drop-shadow-2xl rounded-2xl transition-all duration-300"
+                    />
+
+                    {/* < > Arrow Controls if 2 images exist */}
+                    {offerImages.length > 1 && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setActiveOfferImageIndex((prev) => (prev > 0 ? prev - 1 : offerImages.length - 1))
+                          }}
+                          className="absolute left-3 top-1/2 -translate-y-1/2 z-20 w-10 h-10 rounded-full bg-black/55 hover:bg-black/85 text-white flex items-center justify-center cursor-pointer transition-all shadow-xl backdrop-blur-md border border-white/30 active:scale-95 hover:scale-105"
+                          aria-label="Previous Image"
+                        >
+                          <ChevronLeft size={22} />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setActiveOfferImageIndex((prev) => (prev < offerImages.length - 1 ? prev + 1 : 0))
+                          }}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 z-20 w-10 h-10 rounded-full bg-black/55 hover:bg-black/85 text-white flex items-center justify-center cursor-pointer transition-all shadow-xl backdrop-blur-md border border-white/30 active:scale-95 hover:scale-105"
+                          aria-label="Next Image"
+                        >
+                          <ChevronRight size={22} />
+                        </button>
+
+                        {/* Dot / Slide Indicator */}
+                        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/60 backdrop-blur-md border border-white/20">
+                          {offerImages.map((_, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setActiveOfferImageIndex(idx)
+                              }}
+                              className={cn(
+                                "h-2 rounded-full transition-all cursor-pointer",
+                                activeOfferImageIndex === idx ? "w-6 bg-amber-400 shadow-xs" : "w-2 bg-white/50 hover:bg-white"
+                              )}
+                              aria-label={`Go to slide ${idx + 1}`}
+                            />
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Bottom Highlights & Details Strip */}
+                  <div className="p-4 sm:p-5 bg-white flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex-1">
+                      <p className="font-nunito text-sm sm:text-base text-gray-800 leading-relaxed font-semibold">
+                        Enjoy <strong className="text-amber-700 font-extrabold">{kitchen.festivalOffer.discountPercent}% Instant Discount</strong> on all{" "}
+                        <span className="text-dark font-bold underline decoration-amber-400">
+                          {kitchen.festivalOffer.category === "both"
+                            ? "Food & Ration items"
+                            : kitchen.festivalOffer.category === "food"
+                            ? "Fresh Homemade Food"
+                            : "Grocery & Ration items"}
+                        </span>
+                      </p>
+
+                      {kitchen.festivalOffer.description && (
+                        <div className="mt-2 bg-amber-50 p-2.5 rounded-xl border border-amber-200/70 inline-block">
+                          <p className="font-nunito text-xs sm:text-sm text-gray-700 italic">
+                            "{kitchen.festivalOffer.description}"
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    {kitchen.festivalOffer.endDate && (
+                      <div className="bg-amber-100 border border-amber-300/80 px-4 py-2.5 rounded-2xl flex items-center gap-2.5 self-start md:self-auto flex-shrink-0 shadow-xs">
+                        <Clock size={16} className="text-amber-800" />
+                        <div>
+                          <p className="font-nunito text-[11px] font-bold text-amber-800 uppercase tracking-wide">Offer Valid Till</p>
+                          <p className="font-poppins font-bold text-xs sm:text-sm text-dark mt-0.5">
+                            {new Date(kitchen.festivalOffer.endDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mb-4">
+                  <h3 className="font-poppins font-bold text-dark text-lg sm:text-xl">
+                    Special Offer Dishes & Items
+                  </h3>
+                  <p className="font-nunito text-xs sm:text-sm text-gray mt-0.5">
+                    {festivalOfferItems.length} items with {kitchen.festivalOffer.discountPercent}% festival discount applied
+                  </p>
+                </div>
+
+                {festivalOfferItems.length === 0 ? (
+                  <div className="py-16 text-center text-gray font-nunito bg-gray-50 rounded-2xl border border-dashed border-gray-200">
+                    No menu items listed under this offer category yet
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {festivalOfferItems.map((item) => (
+                      <MenuListItem key={item.id} item={item} onOpen={setSelectedItem} />
+                    ))}
+                  </div>
+                )}
+              </div>
+              )
+            })()}
 
             {activeTab === "hygiene" && (
-
               <HygieneTab data={hygieneData} kitchen={kitchen} />
-
             )}
 
           </div>
@@ -587,11 +847,32 @@ export default function KitchenPage() {
 
       <MenuItemDetailModal item={selectedItem} onClose={() => setSelectedItem(null)} />
 
-      <BulkOrderChatbot
+      <BulkOrderEnquiryModal
+        isOpen={enquiryModalOpen}
+        onClose={() => setEnquiryModalOpen(false)}
         kitchenId={kitchen.id}
         kitchenName={kitchen.name}
-        cartVisible={itemCount > 0}
+        enquiry={activeEnquiry}
+        onEnquiryChange={(updated) => setActiveEnquiry(updated)}
+        onRefresh={handleRefreshEnquiry}
+        refreshing={refreshingEnquiry}
       />
+
+      {/* Floating Enquiry Trigger Button */}
+      <div className={cn("fixed right-4 z-40 transition-all", itemCount > 0 ? "bottom-24 sm:bottom-28" : "bottom-6")}>
+        <button
+          type="button"
+          onClick={() => {
+            if (requireCustomer()) {
+              setEnquiryModalOpen(true)
+            }
+          }}
+          className="flex items-center gap-2 bg-[#0C4240] hover:bg-[#135E39] text-white px-5 py-3 rounded-full shadow-2xl transition-all cursor-pointer font-poppins font-bold text-sm active:scale-95 border border-emerald-700/50"
+        >
+          <ChefHat size={18} className="text-[#F4C400]" />
+          <span>{activeEnquiry ? "Enquiry Status" : "Enquire now"}</span>
+        </button>
+      </div>
 
       {itemCount > 0 && (
 
@@ -711,7 +992,7 @@ function AboutPanel({ kitchen, compact }) {
 
         {kitchen.openingTime && <InfoRow icon={Clock} text={kitchen.openingTime} />}
 
-        {kitchen.phone && <InfoRow icon={Phone} text={kitchen.phone} />}
+        
 
       </div>
 

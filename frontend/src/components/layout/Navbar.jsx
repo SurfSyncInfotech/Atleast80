@@ -1,8 +1,10 @@
+import { useState } from "react"
 import { Search, Bell, ShoppingCart, User, LogOut } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { useCart } from "../../context/CartContext"
 import { useAuth } from "../../context/AuthContext"
 import LocationPicker from "../common/LocationPicker"
+import AlertsPanel from "../common/AlertsPanel"
 
 function initials(name) {
   return (name || "U")
@@ -17,6 +19,7 @@ export default function Navbar({ transparent = false }) {
   const navigate = useNavigate()
   const { itemCount, requireCustomer } = useCart()
   const { customerUser, isCustomer, logoutCustomer } = useAuth()
+  const [alertsOpen, setAlertsOpen] = useState(false)
 
   const goCart = () => {
     if (!requireCustomer()) return
@@ -95,7 +98,13 @@ export default function Navbar({ transparent = false }) {
           </button>
         </nav>
 
-        <button className={`relative p-2.5 rounded-full cursor-pointer ${transparent ? "hover:bg-white/10" : "hover:bg-gray-light/50"}`}>
+        <button
+          onClick={() => setAlertsOpen(true)}
+          title="Notifications"
+          className={`relative p-2.5 rounded-full cursor-pointer transition-colors ${
+            transparent ? "hover:bg-white/10" : "hover:bg-gray-light/50"
+          }`}
+        >
           <Bell size={20} className={transparent ? "text-white" : "text-dark"} />
           <span className="absolute top-2 right-2 w-2 h-2 bg-accent rounded-full" />
         </button>
@@ -147,6 +156,8 @@ export default function Navbar({ transparent = false }) {
           </button>
         )}
       </div>
+
+      <AlertsPanel open={alertsOpen} onClose={() => setAlertsOpen(false)} role="customer" />
     </header>
   )
 }

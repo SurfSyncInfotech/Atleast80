@@ -53,8 +53,13 @@ export default function StoryViewerModal({ visible, stories, kitchenName, kitche
 
   // Setup video player
   const player = useVideoPlayer(isVideo ? mediaUrl : null, (playerInstance) => {
-    playerInstance.loop = false
-    playerInstance.play()
+    if (playerInstance) {
+      playerInstance.showNowPlayingNotification = false
+      playerInstance.staysActiveInBackground = false
+      playerInstance.audioMixingMode = "mixWithOthers"
+      playerInstance.loop = false
+      playerInstance.play()
+    }
   })
 
   // Track video player status
