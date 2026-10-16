@@ -39,3 +39,4 @@ build/
 **/.cxx/**
 .expo/
 **/.expo/**
+backend/src/config/firebase-service-account.json
