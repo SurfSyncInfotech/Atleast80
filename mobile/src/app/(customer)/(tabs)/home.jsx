@@ -1,11 +1,11 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import {
   View, Text, ScrollView, Image, TouchableOpacity, Platform,
   Animated, useWindowDimensions, RefreshControl, Modal, Pressable, ActivityIndicator, Alert, TextInput
 } from "react-native"
 import * as Location from "expo-location"
 import * as Notifications from "expo-notifications"
-import { useRouter } from "expo-router"
+import { useRouter, useFocusEffect } from "expo-router"
 import { SafeAreaView } from "react-native-safe-area-context"
 import { LinearGradient } from "expo-linear-gradient"
 import {
@@ -489,6 +489,32 @@ export default function HomeScreen() {
     startupLocation()
     loadStates()
   }, [])
+
+  // Sync stored location preference if user changed address in profile or checkout
+  useFocusEffect(
+    useCallback(() => {
+      getLocationPreference().then((loc) => {
+        if (loc && !loc.isCleared && (loc.state || loc.city || loc.address)) {
+          setLocation((prev) => {
+            if (
+              prev?.city !== loc.city ||
+              prev?.address !== loc.address ||
+              prev?.pincode !== loc.pincode ||
+              prev?.state !== loc.state
+            ) {
+              setTempState(loc.state || "")
+              setTempStateIso(loc.stateIso || "")
+              setTempCity(loc.city || "")
+              setTempAddress(loc.address || "")
+              setTempPincode(loc.pincode || "")
+              return loc
+            }
+            return prev
+          })
+        }
+      }).catch(() => {})
+    }, [])
+  )
 
   // Load States list
   const loadStates = async () => {

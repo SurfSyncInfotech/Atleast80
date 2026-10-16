@@ -284,6 +284,26 @@ export const trainingVideoUpload = multer({
   limits: { fileSize: 100 * 1024 * 1024 },
 })
 
+const groceryPresetStorage = multer.diskStorage({
+  destination(_req, _file, cb) {
+    cb(null, UPLOADS_DIR)
+  },
+  filename(_req, file, cb) {
+    const ext = path.extname(file.originalname).toLowerCase() || ".jpg"
+    cb(null, `preset-${Date.now()}-${Math.random().toString(36).slice(2, 9)}${ext}`)
+  },
+})
+
+export const groceryPresetUpload = multer({
+  storage: groceryPresetStorage,
+  fileFilter: imageOnlyFilter,
+  limits: { fileSize: 10 * 1024 * 1024 },
+})
+
+export function getGroceryPresetFileUrl(req, filename) {
+  return `${getPublicBaseUrl(req)}/uploads/menu/${filename}`
+}
+
 export function getTrainingVideoFileUrl(req, filename) {
   return `${getPublicBaseUrl(req)}/uploads/agreements/${filename}`
 }

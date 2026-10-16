@@ -421,7 +421,7 @@ router.post("/", authRequired, requireRole("customer"), async (req, res) => {
 
   try {
     const [kitchens] = await pool.query(
-      "SELECT id, name, city, status, user_id FROM kitchens WHERE id = ?",
+      "SELECT * FROM kitchens WHERE id = ?",
       [kitchenId]
     )
     if (kitchens.length === 0) {
@@ -447,31 +447,75 @@ router.post("/", authRequired, requireRole("customer"), async (req, res) => {
     }
 
     // Validate live item availability and approval from database, and fetch assigned gst_rate
-    const itemIds = items.map((i) => i.id || i.menuItemId).filter(Boolean)
+    const isBulkItem = (item) => {
+      if (!item) return false
+      if (item.isBulk) return true
+      const idStr = String(item.id || item.menuItemId || "")
+      return idStr.startsWith("bulk_")
+    }
+
+    const regularItems = items.filter((it) => !isBulkItem(it))
+    const bulkItems = items.filter((it) => isBulkItem(it))
+
     let dbItemMap = new Map()
-    if (itemIds.length > 0) {
-      const [dbMenuItems] = await pool.query(
-        "SELECT id, name, is_available, approval_status, gst_rate, category FROM menu_items WHERE id IN (?) AND kitchen_id = ?",
-        [itemIds, kitchenId]
-      )
+    const unavailableItems = []
 
-      dbItemMap = new Map(dbMenuItems.map((item) => [item.id, item]))
-      const unavailableItems = []
+    if (regularItems.length > 0) {
+      const regularItemIds = regularItems
+        .map((i) => Number(i.id || i.menuItemId))
+        .filter((id) => !isNaN(id) && id > 0)
 
-      for (const reqItem of items) {
-        const itemId = reqItem.id || reqItem.menuItemId
-        const found = dbItemMap.get(Number(itemId))
-        if (!found || !found.is_available || found.approval_status !== "approved") {
-          unavailableItems.push(reqItem.name || found?.name || `Item #${itemId}`)
+      if (regularItemIds.length > 0) {
+        const [dbMenuItems] = await pool.query(
+          "SELECT id, name, is_available, approval_status, gst_rate, category FROM menu_items WHERE id IN (?) AND kitchen_id = ?",
+          [regularItemIds, kitchenId]
+        )
+
+        dbItemMap = new Map(dbMenuItems.map((item) => [item.id, item]))
+
+        for (const reqItem of regularItems) {
+          const itemId = Number(reqItem.id || reqItem.menuItemId)
+          const found = dbItemMap.get(itemId)
+          if (!found || !found.is_available || found.approval_status !== "approved") {
+            unavailableItems.push(reqItem.name || found?.name || `Item #${itemId}`)
+          }
+        }
+      } else {
+        for (const reqItem of regularItems) {
+          unavailableItems.push(reqItem.name || "Item")
         }
       }
+    }
 
-      if (unavailableItems.length > 0) {
-        return res.status(400).json({
-          message: `${unavailableItems.join(", ")} ${unavailableItems.length > 1 ? "are" : "is"} currently unavailable. Please remove ${unavailableItems.length > 1 ? "them" : "it"} from your cart to proceed.`,
-          unavailableItems,
-        })
+    if (bulkItems.length > 0) {
+      for (const reqItem of bulkItems) {
+        const idStr = String(reqItem.id || reqItem.menuItemId || "")
+        const bulkEnquiryId = Number(idStr.replace("bulk_", ""))
+        if (bulkEnquiryId && !isNaN(bulkEnquiryId)) {
+          const [enquiries] = await pool.query(
+            "SELECT id, kitchen_id, customer_id, status FROM bulk_order_enquiries WHERE id = ?",
+            [bulkEnquiryId]
+          )
+          const enq = enquiries[0]
+          if (
+            !enq ||
+            Number(enq.kitchen_id) !== Number(kitchenId) ||
+            Number(enq.customer_id) !== Number(req.user.id) ||
+            !["quoted", "accepted"].includes(enq.status)
+          ) {
+            unavailableItems.push(reqItem.name || `Bulk Order Service (#${bulkEnquiryId})`)
+          }
+        } else {
+          unavailableItems.push(reqItem.name || "Bulk Order Service")
+        }
       }
+    }
+
+    if (unavailableItems.length > 0) {
+      return res.status(400).json({
+        message: `${unavailableItems.join(", ")} ${unavailableItems.length > 1 ? "are" : "is"} currently unavailable. Please remove ${unavailableItems.length > 1 ? "them" : "it"} from your cart to proceed.`,
+        unavailableItems,
+      })
     }
 
     const itemTotal = items.reduce((sum, item) => sum + Number(item.price) * Number(item.qty), 0)
@@ -495,6 +539,7 @@ router.post("/", authRequired, requireRole("customer"), async (req, res) => {
     if (activeFestival && activeFestival.discountPercent > 0) {
       const percent = Number(activeFestival.discountPercent)
       for (const reqItem of items) {
+        if (isBulkItem(reqItem)) continue
         const itemId = reqItem.id || reqItem.menuItemId
         const found = dbItemMap.get(Number(itemId))
         const category = found?.category || reqItem.category || "food"
@@ -604,8 +649,9 @@ router.post("/", authRequired, requireRole("customer"), async (req, res) => {
         )
 
         // If this order item is from a bulk order quotation checkout, auto-complete the enquiry status
-        if (item.id && typeof item.id === "string" && item.id.startsWith("bulk_")) {
-          const bulkEnquiryId = Number(item.id.replace("bulk_", ""))
+        const itemIdentifier = String(item.id || item.menuItemId || "")
+        if (itemIdentifier.startsWith("bulk_") || item.isBulk) {
+          const bulkEnquiryId = Number(itemIdentifier.replace("bulk_", ""))
           if (bulkEnquiryId && !isNaN(bulkEnquiryId)) {
             await connection.query(
               "UPDATE bulk_order_enquiries SET status = 'completed' WHERE id = ?",

@@ -308,6 +308,7 @@ export default function ProfileScreen() {
       const nextLoc = await setLocationPreference({ state: form.state, city: form.city, address: form.address, pincode: form.pincode })
       setPrefLocation(nextLoc)
       setShowEdit(false)
+      router.replace("/(customer)/(tabs)/home")
     } catch (err) {
       setError(err.message || "Failed to update profile")
     } finally {

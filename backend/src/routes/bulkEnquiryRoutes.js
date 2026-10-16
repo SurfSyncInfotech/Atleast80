@@ -67,7 +67,7 @@ router.post("/", authRequired, requireRole("customer"), async (req, res) => {
 
   try {
     const [kitchens] = await pool.query(
-      "SELECT id, name, status FROM kitchens WHERE id = ?",
+      "SELECT id, name, status, user_id FROM kitchens WHERE id = ?",
       [kitchenId]
     )
     if (kitchens.length === 0) {
@@ -90,6 +90,24 @@ router.post("/", authRequired, requireRole("customer"), async (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?)`,
       [kitchenId, req.user.id, message, estimatedValue, peopleCount, 1]
     )
+
+    // Trigger Push Notification to Kitchen Seller
+    if (kitchens[0].user_id) {
+      const customerName = req.user.name || "A customer"
+      sendPushToUser(
+        kitchens[0].user_id,
+        "New Bulk Order Enquiry! 📋",
+        `${customerName} sent an enquiry for ₹${estimatedValue} (${peopleCount} people)`,
+        {
+          type: "bulk_enquiry",
+          enquiryId: String(result.insertId),
+          kitchenId: String(kitchenId),
+          customerName: customerName,
+          estimatedValue: String(estimatedValue),
+          peopleCount: String(peopleCount),
+        }
+      ).catch((e) => console.error("Error sending bulk enquiry push to kitchen:", e))
+    }
 
     res.status(201).json({
       message: "Enquiry sent to the kitchen. You'll see the quotation here once uploaded.",
@@ -652,6 +670,20 @@ router.post("/:id/chat", authRequired, async (req, res) => {
     // Increment unread count for recipient & send push notification
     if (req.user.id === enq.customer_id) {
       await pool.query("UPDATE bulk_order_enquiries SET kitchen_unread_count = kitchen_unread_count + 1 WHERE id = ?", [enquiryId])
+
+      // Trigger Push Notification to Kitchen Seller
+      const customerName = req.user.name || "Customer"
+      sendPushToUser(
+        enq.kitchen_user_id,
+        `New Message from ${customerName} 💬`,
+        message.length > 55 ? `${message.substring(0, 55)}...` : message,
+        {
+          type: "chat_message",
+          enquiryId: String(enquiryId),
+          senderName: customerName,
+          message: message,
+        }
+      ).catch((e) => console.error("Error sending chat push to kitchen:", e))
     } else if (req.user.id === enq.kitchen_user_id) {
       await pool.query("UPDATE bulk_order_enquiries SET customer_unread_count = customer_unread_count + 1 WHERE id = ?", [enquiryId])
 

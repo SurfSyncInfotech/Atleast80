@@ -5,7 +5,7 @@ import { authRequired, requireRole } from "../middleware/auth.js"
 import { normalizePublicUrl } from "../utils/mediaUrl.js"
 import { formatMenuItem } from "../utils/menuItem.js"
 import { getKitchenVisibilityInfo } from "../utils/hygieneCompliance.js"
-import { agreementUpload, getAgreementFileUrl, trainingVideoUpload, getTrainingVideoFileUrl } from "../middleware/upload.js"
+import { agreementUpload, getAgreementFileUrl, trainingVideoUpload, getTrainingVideoFileUrl, groceryPresetUpload, getGroceryPresetFileUrl } from "../middleware/upload.js"
 import { sendPushToUser } from "../utils/pushNotifications.js"
 
 const router = Router()
@@ -1749,9 +1749,9 @@ router.get("/payments/summary", async (_req, res) => {
       SELECT 
         COALESCE(SUM(CASE 
           WHEN payment_method IN ('online', 'upi', 'razorpay') AND (status != 'cancelled' OR LOWER(COALESCE(refund_status, 'none')) NOT IN ('refunded', 'approved', 'processed', 'completed')) THEN grand_total
-          WHEN payment_method IN ('online', 'upi', 'razorpay') AND status = 'cancelled' AND LOWER(COALESCE(refund_status, 'none')) IN ('refunded', 'approved', 'processed', 'completed') AND delivery_status IN ('rescue_active', 'rescue_timeout', 'cancelled_unreachable') THEN COALESCE(NULLIF(delivery_fee, 0), 30.00)
+          WHEN payment_method IN ('online', 'upi', 'razorpay') AND status = 'cancelled' AND LOWER(COALESCE(refund_status, 'none')) IN ('refunded', 'approved', 'processed', 'completed') AND (delivery_status IN ('rescue_active', 'rescue_timeout', 'returned', 'cancelled_unreachable') OR cancel_fee_paid = 1) THEN COALESCE(NULLIF(delivery_fee, 0), 30.00)
           WHEN payment_method = 'cod' AND (status != 'cancelled' OR LOWER(COALESCE(refund_status, 'none')) NOT IN ('refunded', 'approved', 'processed', 'completed')) THEN (COALESCE(NULLIF(advance_amount, 0), 30.00) + CASE WHEN status = 'delivered' AND doorstep_payment_method = 'admin_qr_online' THEN COALESCE(NULLIF(remaining_amount, 0), GREATEST(0, grand_total - 30.00)) ELSE 0 END)
-          WHEN payment_method = 'cod' AND status = 'cancelled' AND LOWER(COALESCE(refund_status, 'none')) IN ('refunded', 'approved', 'processed', 'completed') AND delivery_status IN ('rescue_active', 'rescue_timeout', 'cancelled_unreachable') THEN COALESCE(NULLIF(advance_amount, 0), 30.00)
+          WHEN payment_method = 'cod' AND status = 'cancelled' AND LOWER(COALESCE(refund_status, 'none')) IN ('refunded', 'approved', 'processed', 'completed') AND (delivery_status IN ('rescue_active', 'rescue_timeout', 'returned', 'cancelled_unreachable') OR cancel_fee_paid = 1) THEN COALESCE(NULLIF(advance_amount, 0), 30.00)
           ELSE 0 
         END), 0) AS onlineTotal,
         
@@ -1936,7 +1936,7 @@ router.get("/payments/refunds", async (req, res) => {
       FROM orders
       WHERE status = 'cancelled'
         AND (
-          (delivery_status IS NULL OR delivery_status NOT IN ('rescue_active', 'rescue_timeout', 'cancelled_unreachable'))
+          ((delivery_status IS NULL OR delivery_status NOT IN ('rescue_active', 'rescue_timeout', 'returned', 'cancelled_unreachable')) AND COALESCE(cancel_fee_paid, 0) = 0)
           OR (payment_method IN ('online', 'upi', 'razorpay'))
         )
     `)
@@ -1944,7 +1944,7 @@ router.get("/payments/refunds", async (req, res) => {
     const total = countRows[0]?.total || 0
 
     const [rows] = await pool.query(
-      `SELECT o.id, o.order_number, o.status, o.delivery_status, o.payment_method, o.grand_total, o.advance_amount, o.delivery_fee, o.refund_status, o.created_at, o.updated_at,
+      `SELECT o.id, o.order_number, o.status, o.delivery_status, o.cancel_fee_paid, o.payment_method, o.grand_total, o.advance_amount, o.delivery_fee, o.refund_status, o.created_at, o.updated_at,
               k.name AS kitchen_name,
               u.name AS customer_name, u.phone AS customer_phone
        FROM orders o
@@ -1952,7 +1952,7 @@ router.get("/payments/refunds", async (req, res) => {
        LEFT JOIN users u ON u.id = o.user_id
        WHERE o.status = 'cancelled'
          AND (
-           (o.delivery_status IS NULL OR o.delivery_status NOT IN ('rescue_active', 'rescue_timeout', 'cancelled_unreachable'))
+           ((o.delivery_status IS NULL OR o.delivery_status NOT IN ('rescue_active', 'rescue_timeout', 'returned', 'cancelled_unreachable')) AND COALESCE(o.cancel_fee_paid, 0) = 0)
            OR (o.payment_method IN ('online', 'upi', 'razorpay'))
          )
        ORDER BY o.updated_at DESC
@@ -1963,7 +1963,7 @@ router.get("/payments/refunds", async (req, res) => {
     res.json({
       refunds: rows.map((r) => {
         const isOnline = ['online', 'upi', 'razorpay'].includes(r.payment_method)
-        const isDoorstepCancel = ['rescue_active', 'rescue_timeout', 'cancelled_unreachable'].includes(r.delivery_status)
+        const isDoorstepCancel = ['rescue_active', 'rescue_timeout', 'returned', 'cancelled_unreachable'].includes(r.delivery_status) || Boolean(Number(r.cancel_fee_paid) === 1)
         
         let refundAmount = 0
         if (isOnline) {
@@ -2001,7 +2001,7 @@ router.get("/payments/refunds", async (req, res) => {
 // 2c. Update Refund Status (Mark Refunded & Razorpay Auto-Refund)
 router.patch("/payments/refunds/:id", async (req, res) => {
   try {
-    const { refundStatus = "refunded" } = req.body
+    const { refundStatus = "refunded", manual = false } = req.body
     const orderId = req.params.id
 
     // 1. Fetch order details
@@ -2018,7 +2018,7 @@ router.patch("/payments/refunds/:id", async (req, res) => {
 
     // 2. Calculate refund amount
     const isOnline = ["online", "upi", "razorpay"].includes(String(order.payment_method).toLowerCase())
-    const isDoorstepCancel = ["rescue_active", "rescue_timeout", "cancelled_unreachable"].includes(order.delivery_status)
+    const isDoorstepCancel = ["rescue_active", "rescue_timeout", "returned", "cancelled_unreachable"].includes(order.delivery_status) || Boolean(Number(order.cancel_fee_paid) === 1)
 
     let refundAmount = 0
     if (req.body.amount !== undefined && req.body.amount !== null && !isNaN(Number(req.body.amount))) {
@@ -2037,12 +2037,13 @@ router.patch("/payments/refunds/:id", async (req, res) => {
     let rzpRefundId = null
     let rzpErrorMsg = null
 
-    // 3. Trigger Razorpay Auto-Refund if refundStatus === 'refunded' and refundAmount > 0
-    if (refundStatus === "refunded" && refundAmount > 0) {
+    // 3. Trigger Razorpay Auto-Refund if refundStatus === 'refunded' and refundAmount > 0 and not manual
+    if (refundStatus === "refunded" && refundAmount > 0 && !manual) {
       if (isOnline) {
         const pRef = order.payment_ref || null
         if (!pRef) {
           return res.status(400).json({
+            missingPaymentRef: true,
             message: "Cannot auto-refund: Razorpay payment reference (payment_ref) is missing for this order. Please check your Razorpay dashboard.",
           })
         }
@@ -2723,6 +2724,137 @@ router.put("/payments/settings", async (req, res) => {
   } catch (error) {
     console.error("Update settlement settings error:", error)
     res.status(500).json({ message: "Failed to update settlement settings" })
+  }
+})
+
+// ==========================================
+// Admin Grocery Preset Gallery Management
+// ==========================================
+router.get("/grocery-presets", async (_req, res) => {
+  try {
+    const [rows] = await pool.query(
+      "SELECT * FROM grocery_presets ORDER BY display_order ASC, id DESC"
+    )
+    const formatted = rows.map((r) => ({
+      ...r,
+      image: normalizePublicUrl(r.image),
+    }))
+    res.json({ presets: formatted })
+  } catch (error) {
+    console.error("Fetch grocery presets error:", error)
+    res.status(500).json({ message: "Failed to fetch grocery presets" })
+  }
+})
+
+router.post("/grocery-presets", (req, res) => {
+  groceryPresetUpload.single("image")(req, res, async (err) => {
+    if (err) {
+      return res.status(400).json({ message: err.message || "Upload failed" })
+    }
+
+    const name = req.body?.name?.trim() || "Grocery Item"
+    const defaultQty = req.body?.default_qty?.trim() || req.body?.defaultQty?.trim() || "1"
+    const defaultUnit = req.body?.default_unit?.trim() || req.body?.defaultUnit?.trim() || "kg"
+    const category = req.body?.category?.trim() || "grocery"
+    const displayOrder = Number(req.body?.display_order || req.body?.displayOrder || 0)
+
+    let imageUrl = req.body?.image?.trim() || ""
+    if (req.file) {
+      imageUrl = getGroceryPresetFileUrl(req, req.file.filename)
+    }
+
+    if (!imageUrl) {
+      return res.status(400).json({ message: "Image is required" })
+    }
+
+    try {
+      const presetId = `g_custom_${Date.now()}`
+      const [result] = await pool.query(
+        `INSERT INTO grocery_presets (preset_id, name, category, default_qty, default_unit, image, is_active, display_order)
+         VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
+        [presetId, name, category, defaultQty, defaultUnit, imageUrl, displayOrder]
+      )
+
+      const [created] = await pool.query("SELECT * FROM grocery_presets WHERE id = ?", [result.insertId])
+      res.status(201).json({
+        message: "Grocery preset added successfully",
+        preset: {
+          ...created[0],
+          image: normalizePublicUrl(created[0].image),
+        },
+      })
+    } catch (error) {
+      console.error("Create grocery preset error:", error)
+      res.status(500).json({ message: "Failed to create grocery preset" })
+    }
+  })
+})
+
+router.put("/grocery-presets/:id", (req, res) => {
+  groceryPresetUpload.single("image")(req, res, async (err) => {
+    if (err) {
+      return res.status(400).json({ message: err.message || "Upload failed" })
+    }
+
+    const { id } = req.params
+    const name = req.body?.name?.trim()
+    const defaultQty = req.body?.default_qty?.trim() || req.body?.defaultQty?.trim()
+    const defaultUnit = req.body?.default_unit?.trim() || req.body?.defaultUnit?.trim()
+    const isActive = req.body?.is_active !== undefined ? Number(req.body.is_active) : undefined
+    const displayOrder = req.body?.display_order !== undefined ? Number(req.body.display_order) : undefined
+
+    let imageUrl = req.body?.image?.trim()
+    if (req.file) {
+      imageUrl = getGroceryPresetFileUrl(req, req.file.filename)
+    }
+
+    try {
+      const [existing] = await pool.query("SELECT * FROM grocery_presets WHERE id = ?", [id])
+      if (existing.length === 0) {
+        return res.status(404).json({ message: "Preset not found" })
+      }
+
+      const prev = existing[0]
+      const updatedName = name !== undefined ? name : prev.name
+      const updatedQty = defaultQty !== undefined ? defaultQty : prev.default_qty
+      const updatedUnit = defaultUnit !== undefined ? defaultUnit : prev.default_unit
+      const updatedActive = isActive !== undefined ? isActive : prev.is_active
+      const updatedOrder = displayOrder !== undefined ? displayOrder : prev.display_order
+      const updatedImage = imageUrl ? imageUrl : prev.image
+
+      await pool.query(
+        `UPDATE grocery_presets 
+         SET name = ?, default_qty = ?, default_unit = ?, is_active = ?, display_order = ?, image = ?
+         WHERE id = ?`,
+        [updatedName, updatedQty, updatedUnit, updatedActive, updatedOrder, updatedImage, id]
+      )
+
+      const [updated] = await pool.query("SELECT * FROM grocery_presets WHERE id = ?", [id])
+      res.json({
+        message: "Grocery preset updated successfully",
+        preset: {
+          ...updated[0],
+          image: normalizePublicUrl(updated[0].image),
+        },
+      })
+    } catch (error) {
+      console.error("Update grocery preset error:", error)
+      res.status(500).json({ message: "Failed to update grocery preset" })
+    }
+  })
+})
+
+router.delete("/grocery-presets/:id", async (req, res) => {
+  try {
+    const { id } = req.params
+    const [result] = await pool.query("DELETE FROM grocery_presets WHERE id = ?", [id])
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "Preset not found" })
+    }
+    res.json({ message: "Grocery preset deleted successfully" })
+  } catch (error) {
+    console.error("Delete grocery preset error:", error)
+    res.status(500).json({ message: "Failed to delete grocery preset" })
   }
 })
 

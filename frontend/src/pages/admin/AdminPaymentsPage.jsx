@@ -160,7 +160,25 @@ export default function AdminPaymentsPage() {
       alert(`Refund Processed Successfully! ₹${res.refundAmount || ''} has been refunded to customer & notification sent.`)
       await loadRefunds()
     } catch (err) {
-      alert(err.message || "Failed to update refund status")
+      if (err.message && err.message.includes("payment_ref")) {
+        const confirmManual = window.confirm(
+          `${err.message}\n\nDo you want to mark this order as 'Refunded' manually (after refunding via GPay / UPI / Razorpay Dashboard)?`
+        )
+        if (confirmManual) {
+          try {
+            const manualRes = await api(`/api/admin/payments/refunds/${orderId}`, {
+              method: "PATCH",
+              body: JSON.stringify({ refundStatus: "refunded", manual: true })
+            })
+            alert(`Order marked as Refunded! ₹${manualRes.refundAmount || ''} recorded.`)
+            await loadRefunds()
+          } catch (mErr) {
+            alert(mErr.message || "Failed to mark refund manually")
+          }
+        }
+      } else {
+        alert(err.message || "Failed to update refund status")
+      }
     } finally {
       setUpdatingRefundId(null)
     }

@@ -11,7 +11,9 @@ import {
   Modal,
   Platform,
   KeyboardAvoidingView,
-  Pressable
+  Pressable,
+  Keyboard,
+  BackHandler
 } from "react-native"
 import { SafeAreaView } from "react-native-safe-area-context"
 import {
@@ -88,7 +90,7 @@ export default function KitchenMenuScreen() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
 
-
+  const [groceryPresets, setGroceryPresets] = useState(PRESET_GROCERY_ITEMS)
 
   const [activeTab, setActiveTab] = useState("all")
   const [deleteConfirmId, setDeleteConfirmId] = useState(null)
@@ -100,7 +102,19 @@ export default function KitchenMenuScreen() {
   const seenAlertIdsRef = useRef(new Set())
   const isFirstAlertFetchRef = useRef(true)
 
+  const loadPresets = async () => {
+    try {
+      const data = await api("/api/menu/grocery-presets")
+      if (data?.presets && data.presets.length > 0) {
+        setGroceryPresets(data.presets)
+      }
+    } catch {
+      // Keep initial fallback if offline
+    }
+  }
+
   const loadMenu = async () => {
+    loadPresets()
     if (!isApproved) return
     setLoading(true)
     try {
@@ -115,6 +129,7 @@ export default function KitchenMenuScreen() {
 
   useEffect(() => {
     refreshKitchen().catch(() => {})
+    loadPresets()
   }, [])
 
   // Initial load and fast 3s polling for real-time menu status & alerts
@@ -167,6 +182,7 @@ export default function KitchenMenuScreen() {
   }
 
   const closeForm = () => {
+    Keyboard.dismiss()
     setShowForm(false)
     setEditingId(null)
     setForm(emptyForm)
@@ -181,6 +197,22 @@ export default function KitchenMenuScreen() {
     setPendingVideos([])
     setError("")
   }
+
+  useEffect(() => {
+    if (!showForm) return
+
+    const backAction = () => {
+      if (groceryPickerModalOpen) {
+        setGroceryPickerModalOpen(false)
+        return true
+      }
+      closeForm()
+      return true
+    }
+
+    const backHandler = BackHandler.addEventListener("hardwareBackPress", backAction)
+    return () => backHandler.remove()
+  }, [showForm, groceryPickerModalOpen])
 
   const openAdd = () => {
     setForm(emptyForm)
@@ -666,14 +698,23 @@ export default function KitchenMenuScreen() {
       {showForm && (
         <Modal animationType="slide" transparent={true} visible={showForm} onRequestClose={closeForm} statusBarTranslucent={true}>
           <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
             style={{ flex: 1 }}
           >
-            <Pressable
+            <View
               style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}
-              onPress={closeForm}
             >
               <Pressable
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                }}
+                onPress={closeForm}
+              />
+              <View
                 style={{
                   backgroundColor: "#FFFFFF",
                   borderTopLeftRadius: 28,
@@ -682,7 +723,6 @@ export default function KitchenMenuScreen() {
                   width: "100%",
                   overflow: "hidden"
                 }}
-                onPress={(e) => e.stopPropagation()}
               >
                 {/* Header */}
                 <View className="flex-row items-center justify-between px-5 py-4 border-b border-gray-light/35">
@@ -1130,7 +1170,7 @@ export default function KitchenMenuScreen() {
                           <View className="flex-row items-center gap-1.5">
                             <ShoppingBag size={15} color="#047857" />
                             <Text className="font-poppins font-bold text-xs text-emerald-950 uppercase tracking-wider">
-                              Grocery Gallery ({PRESET_GROCERY_ITEMS.length})
+                              Grocery Gallery ({groceryPresets.length})
                             </Text>
                           </View>
                           <Text className="font-nunito text-[10px] text-emerald-700 font-semibold">
@@ -1139,7 +1179,7 @@ export default function KitchenMenuScreen() {
                         </View>
 
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-row gap-2.5 py-1">
-                          {PRESET_GROCERY_ITEMS.map((preset) => {
+                          {groceryPresets.map((preset) => {
                             const isAdded = existingImages.includes(preset.image)
                             return (
                               <TouchableOpacity
@@ -1236,7 +1276,8 @@ export default function KitchenMenuScreen() {
                       placeholder="Describe ingredients, taste, freshness, specialty..."
                       multiline
                       numberOfLines={3}
-                      className="w-full px-4 py-3 bg-cream/40 rounded-xl border border-gray-light font-nunito text-sm text-dark h-24 text-top"
+                      textAlignVertical="top"
+                      className="w-full px-4 py-3 bg-cream/40 rounded-xl border border-gray-light font-nunito text-sm text-dark h-24"
                     />
                   </View>
                   {/* Price */}
@@ -1304,7 +1345,7 @@ export default function KitchenMenuScreen() {
                         <View className="flex-row items-center gap-1.5">
                           <ShoppingBag size={15} color="#047857" />
                           <Text className="font-poppins font-bold text-xs text-emerald-950 uppercase tracking-wider">
-                            Grocery Gallery ({PRESET_GROCERY_ITEMS.length})
+                            Grocery Gallery ({groceryPresets.length})
                           </Text>
                         </View>
                         <Text className="font-nunito text-[10px] text-emerald-700 font-semibold">
@@ -1313,7 +1354,7 @@ export default function KitchenMenuScreen() {
                       </View>
 
                       <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-row gap-2.5 py-1">
-                        {PRESET_GROCERY_ITEMS.map((preset) => {
+                        {groceryPresets.map((preset) => {
                           const isAdded = existingImages.includes(preset.image)
                           return (
                             <TouchableOpacity
@@ -1467,8 +1508,8 @@ export default function KitchenMenuScreen() {
                     </Button>
                   </View>
                 </ScrollView>
-              </Pressable>
-            </Pressable>
+              </View>
+            </View>
           </KeyboardAvoidingView>
         </Modal>
       )}

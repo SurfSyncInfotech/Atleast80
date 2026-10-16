@@ -121,22 +121,35 @@ router.get("/me", optionalAuth, async (req, res) => {
   }
 })
 
-router.patch("/location", authRequired, async (req, res) => {
+router.patch("/location", optionalAuth, async (req, res) => {
   try {
     const { city, state, suburb, address, pincode } = req.body
     if (address && (address.toLowerCase().includes("guruwar peth") || address.toLowerCase().includes("pant sachiv"))) {
       return res.json({ success: true, message: "Ignored legacy address" })
     }
     const cleanAddress = address || [suburb, city, state].filter(Boolean).join(", ")
-    await pool.query(
-      "UPDATE users SET city = ?, address = ?, pincode = ? WHERE id = ?",
-      [city || null, cleanAddress || null, pincode || null, req.user.id]
-    )
-    const [updatedUsers] = await pool.query(
-      "SELECT id, name, email, phone, role, city, address, pincode FROM users WHERE id = ?",
-      [req.user.id]
-    )
-    res.json({ success: true, message: "Location updated successfully", user: updatedUsers[0] })
+    if (req.user && req.user.id) {
+      await pool.query(
+        "UPDATE users SET city = ?, address = ?, pincode = ? WHERE id = ?",
+        [city || null, cleanAddress || null, pincode || null, req.user.id]
+      )
+      const [updatedUsers] = await pool.query(
+        "SELECT id, name, email, phone, role, city, address, pincode FROM users WHERE id = ?",
+        [req.user.id]
+      )
+      return res.json({
+        success: true,
+        message: "Location updated successfully",
+        user: updatedUsers[0] ? customerUser(updatedUsers[0]) : null,
+      })
+    }
+    res.json({
+      success: true,
+      message: "Delivery location set for session",
+      city: city || null,
+      address: cleanAddress || null,
+      pincode: pincode || null,
+    })
   } catch (error) {
     console.error("Update location error:", error)
     res.status(500).json({ message: "Failed to update location" })
@@ -549,12 +562,20 @@ router.patch("/customer/profile", authRequired, requireRole("customer"), async (
   }
 
   try {
-    const normUserPhone = normalizeIndianPhone(req.user.phone)
-    const normUserEmail = (req.user.email || "").trim().toLowerCase()
+    const [currentUserRows] = await pool.query(
+      "SELECT id, name, email, phone, role FROM users WHERE id = ?",
+      [req.user.id]
+    )
+    if (!currentUserRows.length) {
+      return res.status(404).json({ message: "User not found" })
+    }
+    const currentUser = currentUserRows[0]
+    const normDbPhone = normalizeIndianPhone(currentUser.phone)
+    const normDbEmail = (currentUser.email || "").trim().toLowerCase()
 
-    if (email && email !== normUserEmail) {
+    if (email && email !== normDbEmail) {
       const [existingEmail] = await pool.query(
-        "SELECT id FROM users WHERE email = ? AND role = 'customer' AND id != ?",
+        "SELECT id FROM users WHERE LOWER(email) = ? AND role = 'customer' AND id != ?",
         [email, req.user.id]
       )
       if (existingEmail.length > 0) {
@@ -562,7 +583,7 @@ router.patch("/customer/profile", authRequired, requireRole("customer"), async (
       }
     }
 
-    if (phone && phone !== normUserPhone) {
+    if (phone && phone !== normDbPhone) {
       const [existingPhone] = await pool.query(
         "SELECT id FROM users WHERE (phone = ? OR RIGHT(phone, 10) = ?) AND role = 'customer' AND id != ?",
         [phone, phone, req.user.id]
@@ -1309,52 +1330,7 @@ router.post("/rider/login/verify-otp", async (req, res) => {
   }
 })
 
-// Update user's current delivery location in the database
-router.patch("/location", optionalAuth, async (req, res) => {
-  const { city, address, pincode } = req.body
-  try {
-    if (req.user && req.user.id) {
-      const updates = []
-      const params = []
 
-      if (city !== undefined) {
-        updates.push("city = ?")
-        params.push(city ? city.toString().trim() : null)
-      }
-      if (address !== undefined) {
-        updates.push("address = ?")
-        params.push(address ? address.toString().trim() : null)
-      }
-      if (pincode !== undefined) {
-        updates.push("pincode = ?")
-        params.push(pincode ? pincode.toString().replace(/\D/g, "") : null)
-      }
-
-      if (updates.length > 0) {
-        params.push(req.user.id)
-        await pool.query(
-          `UPDATE users SET ${updates.join(", ")} WHERE id = ?`,
-          params
-        )
-      }
-    }
-
-    res.json({
-      message: "Delivery location set successfully",
-      city: city || null,
-      address: address || null,
-      pincode: pincode || null
-    })
-  } catch (error) {
-    console.error("Update user location error:", error)
-    res.json({
-      message: "Delivery location set for session",
-      city: city || null,
-      address: address || null,
-      pincode: pincode || null
-    })
-  }
-})
 
 // Update FCM push token
 const updatePushTokenHandler = async (req, res) => {

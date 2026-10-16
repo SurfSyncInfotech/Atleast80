@@ -53,6 +53,15 @@ import PasswordInput from "../../components/ui/PasswordInput"
 import { useAuth } from "../../context/AuthContext"
 import { api, getPartnerAgreement, checkPhoneAvailability } from "../../lib/api"
 
+let WebView = null
+if (Platform.OS !== "web") {
+  try {
+    WebView = require("react-native-webview").WebView
+  } catch (e) {
+    console.warn("react-native-webview not loaded in signup", e)
+  }
+}
+
 const steps = [
   { id: 1, title: "Kitchen Info", subtitle: "Tell Us About Your Kitchen", icon: Store },
   { id: 2, title: "Account", subtitle: "Create Your Account", icon: User },
@@ -1638,6 +1647,30 @@ export default function KitchenSignupPage() {
                 title="Partner Agreement PDF"
                 onLoad={() => setPdfScrolledToBottom(true)}
               />
+            ) : WebView && agreement?.url ? (
+              <View style={{ flex: 1, width: "100%", height: "100%", backgroundColor: "#FFFFFF" }}>
+                <WebView
+                  source={{
+                    uri: `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(agreement.url)}`
+                  }}
+                  style={{ flex: 1, backgroundColor: "#FFFFFF" }}
+                  startInLoadingState={true}
+                  renderLoading={() => (
+                    <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", backgroundColor: "#FFFFFF" }}>
+                      <ActivityIndicator size="large" color="#0B6B3A" />
+                      <Text style={{ fontFamily: "Nunito", fontSize: 13, color: "#7A7A7A", marginTop: 10 }}>
+                        Loading Agreement PDF...
+                      </Text>
+                    </View>
+                  )}
+                  onLoadEnd={() => setPdfScrolledToBottom(true)}
+                  javaScriptEnabled={true}
+                  domStorageEnabled={true}
+                  scalesPageToFit={true}
+                  originWhitelist={["*"]}
+                  mixedContentMode="always"
+                />
+              </View>
             ) : (
               <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
                 <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: "#EAF7EE", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>

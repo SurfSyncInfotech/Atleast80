@@ -108,6 +108,9 @@ export function patchSessionForRole(role, patch) {
   if (!next.user) return stored
 
   writeSessionForRole(role, next)
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("auth-session-updated", { detail: { role, session: next } }))
+  }
   return next
 }
 

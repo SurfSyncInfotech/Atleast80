@@ -9,10 +9,13 @@ export function resolveMediaUrl(url) {
     return `${API_URL}/${url}`
   }
 
-  // Normalize stored URLs: http → https when they point at our API host
+  // Normalize stored URLs: always map uploads to the currently active API host
   try {
     const parsed = new URL(url)
     const api = new URL(API_URL)
+    if (parsed.pathname.startsWith("/uploads/")) {
+      return `${api.origin}${parsed.pathname}${parsed.search}`
+    }
     if (parsed.host === api.host) {
       return `${api.origin}${parsed.pathname}${parsed.search}`
     }

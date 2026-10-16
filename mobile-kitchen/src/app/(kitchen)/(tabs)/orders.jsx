@@ -31,7 +31,6 @@ import {
   Phone,
   MapPin,
   RefreshCw,
-  XCircle,
   Star,
   X
 } from "lucide-react-native"
@@ -483,16 +482,6 @@ export default function KitchenOrdersScreen() {
                          </TouchableOpacity>
                        )
                      )}
-
-                     {["pending", "confirmed", "preparing"].includes(order.status) && (
-                       <TouchableOpacity
-                         onPress={() => handleStatusUpdate(order.id, "cancelled")}
-                         disabled={updating}
-                         className="p-2.5 bg-red-50 border border-red-100 rounded-xl items-center justify-center"
-                       >
-                         <XCircle size={18} color="#EF4444" />
-                       </TouchableOpacity>
-                     )}
                    </View>
                  )}
               </View>
@@ -712,21 +701,6 @@ export default function KitchenOrdersScreen() {
                               {NEXT_STATUS[detailOrder.status].label}
                             </Text>
                           )}
-                        </TouchableOpacity>
-                      )}
-
-                      {["pending", "confirmed", "preparing"].includes(detailOrder.status) && (
-                        <TouchableOpacity
-                          onPress={() => {
-                            handleStatusUpdate(detailOrder.id, "cancelled")
-                            setDetailOrder(null)
-                          }}
-                          disabled={updating}
-                          className="w-full py-3 bg-red-50 border border-red-200 rounded-xl items-center justify-center mt-2"
-                        >
-                          <Text className="font-poppins font-bold text-sm text-red-600">
-                            Cancel Order
-                          </Text>
                         </TouchableOpacity>
                       )}
                     </>

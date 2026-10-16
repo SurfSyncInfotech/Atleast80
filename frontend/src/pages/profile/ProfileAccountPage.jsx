@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react"
-import { Mail, Phone, MapPin, Pencil, X, Trash2, ChevronRight } from "lucide-react"
+import { useNavigate } from "react-router-dom"
+import { Mail, Phone, MapPin, Pencil, X, Trash2, ChevronRight, Navigation, Map } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import Button from "../../components/ui/Button"
+import LocationMapModal from "../../components/common/LocationMapModal"
 import { useAuth } from "../../context/AuthContext"
-import { getPublicContactSettings } from "../../lib/api"
+import { api, getPublicContactSettings } from "../../lib/api"
 import { gmailDeletionUrl } from "../../lib/deletionMail"
+import { getLocationPreference, setLocationPreference, validateBrowserLocation } from "../../lib/locationPreference"
 import { cn } from "../../lib/utils"
 
 function InfoTile({ icon: Icon, label, value, muted }) {
@@ -24,6 +27,7 @@ function InfoTile({ icon: Icon, label, value, muted }) {
 }
 
 export default function ProfileAccountPage() {
+  const navigate = useNavigate()
   const { user, updateProfile } = useAuth()
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState({
@@ -32,8 +36,24 @@ export default function ProfileAccountPage() {
   const [saveError, setSaveError] = useState("")
   const [saving, setSaving] = useState(false)
   const [deletionEmail, setDeletionEmail] = useState("liveatleast80@gmail.com")
+  const [detectingLocation, setDetectingLocation] = useState(false)
+  const [isMapModalOpen, setIsMapModalOpen] = useState(false)
 
-  const hasAddress = Boolean(user?.address || user?.city || user?.pincode)
+  const [locationPref, setLocationPref] = useState(getLocationPreference)
+
+  useEffect(() => {
+    const handleLocChange = (e) => {
+      setLocationPref(e.detail || getLocationPreference())
+    }
+    window.addEventListener("location-preference-change", handleLocChange)
+    return () => window.removeEventListener("location-preference-change", handleLocChange)
+  }, [])
+
+  const currentAddress = user?.address || locationPref?.address || ""
+  const currentCity = user?.city || locationPref?.city || ""
+  const currentPincode = user?.pincode || locationPref?.pincode || ""
+  const displayAddress = [currentAddress, currentCity, currentPincode].filter(Boolean).join(", ")
+  const hasAddress = Boolean(displayAddress)
 
   useEffect(() => {
     getPublicContactSettings()
@@ -45,15 +65,85 @@ export default function ProfileAccountPage() {
 
   useEffect(() => {
     if (!user) return
+    const pref = getLocationPreference()
     setForm({
       name: user.name || "",
       email: user.email || "",
       phone: user.phone || "",
-      address: user.address || "",
-      city: user.city || "",
-      pincode: user.pincode || "",
+      address: user.address || pref.address || "",
+      city: user.city || pref.city || "",
+      pincode: user.pincode || pref.pincode || "",
     })
   }, [user])
+
+  const handleAutoDetectLocation = () => {
+    if (!navigator.geolocation) {
+      alert("Geolocation is not supported by your browser.")
+      return
+    }
+
+    setDetectingLocation(true)
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const validation = validateBrowserLocation(position)
+        if (!validation.valid) {
+          alert(`Browser location is too coarse. Please pick location on map or enter manually.`)
+          setDetectingLocation(false)
+          return
+        }
+
+        const { latitude, longitude } = position.coords
+        try {
+          const data = await api(`/api/locations/reverse?lat=${latitude}&lng=${longitude}`)
+          if (data) {
+            const addr = data.address || {}
+            const road = data.suburb || addr.road || addr.suburb || addr.neighbourhood || ""
+            const houseNumber = addr.house_number || ""
+            const city = data.city || data.suburb || data.district || addr.city || addr.town || addr.village || addr.county || ""
+            const postcode = data.postcode || addr.postcode || ""
+
+            let streetAddress = data.formattedAddress || data.displayName || [houseNumber, road].filter(Boolean).join(", ")
+            if (!streetAddress && data.display_name) {
+              streetAddress = data.display_name.split(",").slice(0, 2).map((s) => s.trim()).join(", ")
+            }
+
+            setForm((prev) => ({
+              ...prev,
+              address: streetAddress || prev.address,
+              city: city || prev.city,
+              pincode: postcode || prev.pincode,
+            }))
+          } else {
+            alert("Could not resolve address details. Please fill manually.")
+          }
+        } catch (err) {
+          alert("Failed to auto-detect location: " + err.message)
+        } finally {
+          setDetectingLocation(false)
+        }
+      },
+      (err) => {
+        let msg = "Failed to get location."
+        if (err.code === 1) msg = "Location permission denied. Please allow access or fill manually."
+        else if (err.code === 2) msg = "Position unavailable. Please pick location on map or enter manually."
+        else if (err.code === 3) msg = "Location detection timed out. Please try again."
+        alert(msg)
+        setDetectingLocation(false)
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    )
+  }
+
+  const handleConfirmMapLocation = (loc) => {
+    if (!loc) return
+    setForm((prev) => ({
+      ...prev,
+      address: loc.address || prev.address,
+      city: loc.city || prev.city,
+      pincode: loc.pincode || prev.pincode,
+    }))
+    setIsMapModalOpen(false)
+  }
 
   const handleSave = async (e) => {
     e.preventDefault()
@@ -61,6 +151,12 @@ export default function ProfileAccountPage() {
     setSaving(true)
     try {
       await updateProfile(form)
+      // Sync address changes with global location preference
+      setLocationPreference({
+        city: form.city,
+        address: form.address,
+        pincode: form.pincode,
+      }, { source: "manual" })
       setEditing(false)
     } catch (err) {
       setSaveError(err.message || "Failed to update profile")
@@ -89,11 +185,7 @@ export default function ProfileAccountPage() {
           <InfoTile
             icon={MapPin}
             label="Delivery address"
-            value={
-              hasAddress
-                ? [user.address, user.city, user.pincode].filter(Boolean).join(", ")
-                : "No address saved yet"
-            }
+            value={hasAddress ? displayAddress : "No address saved yet"}
             muted={!hasAddress}
           />
         </div>
@@ -109,18 +201,13 @@ export default function ProfileAccountPage() {
         </button>
       )}
 
-      <a
-        href={gmailDeletionUrl(deletionEmail, {
-          name: user?.name || "",
-          phone: user?.phone || "",
-          registeredEmail: user?.email || "",
-        })}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="mt-6 flex items-center justify-between gap-3 p-4 rounded-2xl border border-red-100 bg-red-50/70 hover:bg-red-50 transition-colors"
+      <button
+        type="button"
+        onClick={() => navigate("/user-account-deletion")}
+        className="mt-6 w-full flex items-center justify-between gap-3 p-4 rounded-2xl border border-red-100 bg-red-50/70 hover:bg-red-50 transition-colors text-left cursor-pointer"
       >
         <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center flex-shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center flex-shrink-0 shadow-xs">
             <Trash2 size={16} className="text-red-600" />
           </div>
           <div className="min-w-0">
@@ -129,7 +216,7 @@ export default function ProfileAccountPage() {
           </div>
         </div>
         <ChevronRight size={16} className="text-gray flex-shrink-0" />
-      </a>
+      </button>
 
       <AnimatePresence>
         {editing && (
@@ -177,7 +264,31 @@ export default function ProfileAccountPage() {
                   ["pincode", "Pincode", "tel"],
                 ].map(([key, label, type]) => (
                   <div key={key}>
-                    <label className="text-xs font-poppins font-semibold text-dark">{label}</label>
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-poppins font-semibold text-dark">{label}</label>
+                      {key === "address" && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setIsMapModalOpen(true)}
+                            className="flex items-center gap-1 text-[11px] font-poppins font-bold text-primary hover:text-primary-dark cursor-pointer"
+                          >
+                            <Map size={12} />
+                            Pin on Map
+                          </button>
+                          <span className="text-gray-300">|</span>
+                          <button
+                            type="button"
+                            onClick={handleAutoDetectLocation}
+                            disabled={detectingLocation}
+                            className="flex items-center gap-1 text-[11px] font-poppins font-bold text-primary hover:text-primary-dark cursor-pointer disabled:opacity-50"
+                          >
+                            <Navigation size={12} />
+                            {detectingLocation ? "Detecting..." : "Auto Detect"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
                     <input
                       type={type}
                       value={form[key]}
@@ -202,6 +313,14 @@ export default function ProfileAccountPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <LocationMapModal
+        isOpen={isMapModalOpen}
+        onClose={() => setIsMapModalOpen(false)}
+        onConfirmLocation={handleConfirmMapLocation}
+        initialAddress={form.address}
+        initialCity={form.city}
+      />
     </div>
   )
 }

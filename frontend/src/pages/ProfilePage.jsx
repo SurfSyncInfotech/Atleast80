@@ -8,7 +8,7 @@ import {
 import Button from "../components/ui/Button"
 import { useAuth } from "../context/AuthContext"
 import { api } from "../lib/api"
-import { validateBrowserLocation, getLocationPreference } from "../lib/locationPreference"
+import { validateBrowserLocation, getLocationPreference, setLocationPreference } from "../lib/locationPreference"
 import { cn } from "../lib/utils"
 
 const STATUS_LABELS = {
@@ -284,6 +284,11 @@ export default function ProfilePage() {
     setSaving(true)
     try {
       await updateProfile(form)
+      setLocationPreference({
+        city: form.city,
+        address: form.address,
+        pincode: form.pincode,
+      }, { source: "manual" })
       setEditing(false)
     } catch (err) {
       setSaveError(err.message || "Failed to update profile")

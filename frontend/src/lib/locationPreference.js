@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { api } from "./api"
+import { patchSessionForRole } from "./authStorage"
 
 const STORAGE_KEY = "atleast80_location"
 const EVENT_NAME = "location-preference-change"
@@ -123,11 +124,19 @@ export function setLocationPreference(
     api("/api/auth/location", {
       method: "PATCH",
       body: JSON.stringify({
+        state: next.state,
         city: next.city,
+        suburb: next.suburb,
         address: next.address,
         pincode: next.pincode
       })
-    }).catch(() => null)
+    })
+      .then((res) => {
+        if (res?.user) {
+          patchSessionForRole("customer", { user: res.user })
+        }
+      })
+      .catch(() => null)
   } catch (e) {
     // Ignore error
   }

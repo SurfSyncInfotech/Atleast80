@@ -1,7 +1,30 @@
+# App Builds & Binaries
 *.apk
 *.apk*
 *.aab
 *.aab*
+atleast80-kitchen*
+atleast80-user*
+NEW-APKS/
+
+# Java & Gradle crash/replay logs
+hs_err_pid*
+replay_pid*
+*.log
+
+# Play Store graphics
+playstore-*
+kitchen-playstore-*
+kitchen-feature-graphic-*
+tablet-*-7inch*
+tablet-*-10inch*
+screenshot-*
+kitchen-phone-*
+kitchen-tablet-*
+kitchen-desktop-*
+kitchen-xr-*
+
+# Project generated folders & build caches
 .codex_ref_frames/
 uploads/
 **/uploads/**
@@ -16,4 +39,3 @@ build/
 **/.cxx/**
 .expo/
 **/.expo/**
-NEW-APKS/

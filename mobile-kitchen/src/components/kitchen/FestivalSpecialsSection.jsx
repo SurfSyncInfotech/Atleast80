@@ -241,7 +241,7 @@ function CalendarPickerModal({
             </TouchableOpacity>
           </View>
 
-          <ScrollView showsVerticalScrollIndicator={false} className="mt-3">
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" nestedScrollEnabled={true} className="mt-3">
             {/* Quick Presets Row */}
             <Text className="font-poppins font-bold text-[11px] text-gray-500 mb-1.5 uppercase tracking-wider">
               Quick Shortcuts
@@ -313,10 +313,10 @@ function CalendarPickerModal({
               </View>
 
               {/* Calendar Days Matrix */}
-              <View className="flex-row flex-wrap">
+              <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
                 {/* Empty offset days */}
                 {Array.from({ length: startDayOfWeek }).map((_, i) => (
-                  <View key={`empty-${i}`} className="w-[14.28%] aspect-square p-0.5" />
+                  <View key={`empty-${i}`} style={{ width: "14.285%", aspectRatio: 1, padding: 2 }} />
                 ))}
 
                 {/* Days of Month */}
@@ -329,27 +329,40 @@ function CalendarPickerModal({
                     <TouchableOpacity
                       key={`day-${dayNum}`}
                       onPress={() => setSelectedDay(dayNum)}
-                      className="w-[14.28%] aspect-square p-0.5"
+                      activeOpacity={0.7}
+                      style={{ width: "14.285%", aspectRatio: 1, padding: 2 }}
                     >
                       <View
-                        className={cn(
-                          "w-full h-full rounded-xl items-center justify-center border",
-                          isSelected
-                            ? "bg-primary border-primary shadow-xs"
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          borderRadius: 12,
+                          alignItems: "center",
+                          justifyContent: "center",
+                          backgroundColor: isSelected
+                            ? "#0B6B3A"
                             : isToday
-                            ? "bg-amber-100 border-amber-300"
-                            : "bg-white border-transparent hover:bg-gray-100"
-                        )}
+                            ? "#FEF3C7"
+                            : "#FFFFFF",
+                          borderWidth: 1,
+                          borderColor: isSelected
+                            ? "#0B6B3A"
+                            : isToday
+                            ? "#FCD34D"
+                            : "transparent",
+                        }}
                       >
                         <Text
-                          className={cn(
-                            "font-poppins text-xs font-semibold",
-                            isSelected
-                              ? "text-white font-bold"
+                          style={{
+                            fontFamily: "Poppins",
+                            fontSize: 12,
+                            fontWeight: isSelected || isToday ? "700" : "600",
+                            color: isSelected
+                              ? "#FFFFFF"
                               : isToday
-                              ? "text-amber-900 font-bold"
-                              : "text-dark"
-                          )}
+                              ? "#78350F"
+                              : "#1F1F1F",
+                          }}
                         >
                           {dayNum}
                         </Text>

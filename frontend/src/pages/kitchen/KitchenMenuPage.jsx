@@ -80,38 +80,34 @@ export default function KitchenMenuPage() {
 
   const isApproved = kitchen?.status === "approved"
 
+  const [groceryPresets, setGroceryPresets] = useState(PRESET_GROCERY_ITEMS)
 
-
-  const loadMenu = async () => {
-
-    if (!isApproved) return
-
-    setLoading(true)
-
+  const loadPresets = async () => {
     try {
-
-      const data = await api("/api/menu/me", {}, "kitchen")
-
-      setItems((data.items || []).map(resolveMenuItemMedia))
-
-    } catch (err) {
-
-      setError(err.message)
-
-    } finally {
-
-      setLoading(false)
-
-    }
-
+      const data = await api("/api/menu/grocery-presets")
+      if (data?.presets && data.presets.length > 0) {
+        setGroceryPresets(data.presets)
+      }
+    } catch {}
   }
 
-
+  const loadMenu = async () => {
+    loadPresets()
+    if (!isApproved) return
+    setLoading(true)
+    try {
+      const data = await api("/api/menu/me", {}, "kitchen")
+      setItems((data.items || []).map(resolveMenuItemMedia))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
-
+    loadPresets()
     refreshKitchen().catch(() => {})
-
   }, [refreshKitchen])
 
 
@@ -981,14 +977,14 @@ export default function KitchenMenuPage() {
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-xs font-poppins font-bold text-emerald-950 flex items-center gap-1.5">
                         <ShoppingBag size={14} className="text-emerald-700" />
-                        Grocery Photo Gallery ({PRESET_GROCERY_ITEMS.length})
+                        Grocery Photo Gallery ({groceryPresets.length})
                       </span>
                       <span className="text-[10px] font-nunito text-emerald-700 font-semibold">
                         Click photo to attach
                       </span>
                     </div>
                     <div className="flex gap-2 overflow-x-auto pb-1.5 pt-0.5">
-                      {PRESET_GROCERY_ITEMS.map((preset) => {
+                      {groceryPresets.map((preset) => {
                         const isAdded = existingImages.includes(preset.image)
                         return (
                           <div

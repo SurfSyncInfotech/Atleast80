@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react"
 import { View, Text, ScrollView, Image, TouchableOpacity, ActivityIndicator, Platform, Linking, Modal, TextInput, Pressable, Alert, Keyboard, useWindowDimensions, KeyboardAvoidingView } from "react-native"
 import { useLocalSearchParams, useRouter } from "expo-router"
 import { SafeAreaView } from "react-native-safe-area-context"
-import { ArrowLeft, Star, ShieldCheck, Clock, Share2, MapPin, Phone, UtensilsCrossed, ShoppingBag, Sparkles, X, ChefHat, ArrowRight, ClipboardList, CheckCircle, MessageSquare, Send, RotateCw, ChevronLeft, ChevronRight } from "lucide-react-native"
+import { ArrowLeft, Star, ShieldCheck, Clock, Share2, MapPin, Phone, UtensilsCrossed, ShoppingBag, Sparkles, X, ChefHat, ArrowRight, ClipboardList, CheckCircle, MessageSquare, Send, RotateCw, ChevronLeft, ChevronRight, FileText, Download, ExternalLink } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import MenuListItem from "../../../../components/common/MenuListItem"
 import MenuItemDetailModal from "../../../../components/common/MenuItemDetailModal"
@@ -14,6 +14,16 @@ import { resolveMenuItemMedia, resolveMediaUrl } from "../../../../lib/media"
 import { cn } from "../../../../lib/utils"
 
 import { useVideoPlayer, VideoView } from "expo-video"
+import * as FileSystem from "expo-file-system"
+
+let WebView = null
+if (Platform.OS !== "web") {
+  try {
+    WebView = require("react-native-webview").WebView
+  } catch (e) {
+    console.warn("react-native-webview not available:", e?.message)
+  }
+}
 
 const KITCHEN_TYPE = { veg: "Pure Veg", non_veg: "Non-Veg", both: "Veg & Non-Veg" }
 
@@ -48,6 +58,19 @@ function showAlert(title, message) {
   }
 }
 
+function isImageFile(url) {
+  if (!url || typeof url !== "string") return false
+  const clean = url.split("?")[0].toLowerCase()
+  return (
+    clean.endsWith(".jpg") ||
+    clean.endsWith(".jpeg") ||
+    clean.endsWith(".png") ||
+    clean.endsWith(".webp") ||
+    clean.endsWith(".gif") ||
+    clean.endsWith(".bmp")
+  )
+}
+
 const FESTIVAL_DEFAULT_IMG = require("../../../../../assets/images/festival_offer_default.jpg")
 
 function FestivalOfferThumb({ uri, style, resizeMode = "cover", blurRadius = 0 }) {
@@ -70,7 +93,7 @@ function FestivalOfferThumb({ uri, style, resizeMode = "cover", blurRadius = 0 }
 }
 
 export default function KitchenDetailScreen() {
-  const { id } = useLocalSearchParams()
+  const { id, selectedItemId, dishName } = useLocalSearchParams()
   const router = useRouter()
   const chatScrollViewRef = useRef(null)
   const enquiryFormScrollRef = useRef(null)
@@ -100,6 +123,9 @@ export default function KitchenDetailScreen() {
   const [chatInput, setChatInput] = useState("")
   const [hygieneData, setHygieneData] = useState(null)
   const [keyboardHeight, setKeyboardHeight] = useState(0)
+  const [quotationModalVisible, setQuotationModalVisible] = useState(false)
+  const [quotationLoading, setQuotationLoading] = useState(true)
+  const [quotationDownloading, setQuotationDownloading] = useState(false)
 
   useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow"
@@ -234,6 +260,22 @@ export default function KitchenDetailScreen() {
           })
         })
         setMenu(mappedMenu)
+
+        // Auto-open selected dish if coming from search redirect
+        if (selectedItemId || dishName) {
+          const targetId = selectedItemId ? Number(selectedItemId) : null
+          const targetName = dishName ? String(dishName).trim().toLowerCase() : null
+          const matchedItem = mappedMenu.find((m) =>
+            (targetId && m.id === targetId) ||
+            (targetName && (m.name?.toLowerCase() === targetName || m.name?.toLowerCase().includes(targetName)))
+          )
+          if (matchedItem) {
+            if (matchedItem.category) {
+              setActiveTab(matchedItem.isCombo ? "combo" : matchedItem.category)
+            }
+            setSelectedItem(matchedItem)
+          }
+        }
 
         // Set default active tab dynamically based on availability
         const hasFood = (mappedKitchen.isFreshFoodActive !== 0) && mappedMenu.some(item => item.category === "food" && !(item.isCombo || item.is_combo))
@@ -537,6 +579,9 @@ export default function KitchenDetailScreen() {
       kitchenId: activeEnquiry.kitchenId,
       qty: 1,
       isBulk: true,
+      is_available: 1,
+      isAvailable: true,
+      approval_status: "approved",
     }
 
     clearCart()
@@ -2009,7 +2054,10 @@ export default function KitchenDetailScreen() {
 
                       {activeEnquiry.quotationFile ? (
                         <TouchableOpacity
-                          onPress={() => Linking.openURL(activeEnquiry.quotationFile)}
+                          onPress={() => {
+                            setQuotationLoading(true)
+                            setQuotationModalVisible(true)
+                          }}
                           style={{
                             backgroundColor: "#FFFFFF",
                             borderRadius: 12,
@@ -2423,6 +2471,256 @@ export default function KitchenDetailScreen() {
               </View>
           </View>
         </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Quotation Document In-App Viewer Modal */}
+      <Modal
+        visible={quotationModalVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setQuotationModalVisible(false)}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: "#FFFFFF" }}>
+          {/* Header */}
+          <View style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            paddingHorizontal: 16,
+            paddingVertical: 14,
+            borderBottomWidth: 1,
+            borderBottomColor: "#E5E5E5",
+            backgroundColor: "#FFFFFF"
+          }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
+              <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: "#EAF7EE", alignItems: "center", justifyContent: "center" }}>
+                <FileText size={18} color="#0B6B3A" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontFamily: "Poppins", fontWeight: "bold", fontSize: 15, color: "#1F1F1F" }} numberOfLines={1}>
+                  Quotation Document
+                </Text>
+                <Text style={{ fontFamily: "Nunito", fontSize: 11, color: "#7A7A7A" }} numberOfLines={1}>
+                  {kitchen?.name || "Kitchen"} · ₹{activeEnquiry?.quotationAmount || activeEnquiry?.estimatedValue || ""}
+                </Text>
+              </View>
+            </View>
+
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <TouchableOpacity
+                onPress={() => setQuotationModalVisible(false)}
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 18,
+                  backgroundColor: "#F7F7F5",
+                  alignItems: "center",
+                  justifyContent: "center"
+                }}
+              >
+                <X size={20} color="#1F1F1F" />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Quotation Body Container */}
+          <View style={{ flex: 1, width: "100%", backgroundColor: "#FFFFFF", position: "relative" }}>
+            {quotationLoading && (
+              <View style={{
+                position: "absolute",
+                top: 0,
+                bottom: 0,
+                left: 0,
+                right: 0,
+                backgroundColor: "#FFFFFF",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 10,
+                gap: 10
+              }}>
+                <ActivityIndicator size="large" color="#0B6B3A" />
+                <Text style={{ fontFamily: "Nunito", fontSize: 13, color: "#7A7A7A" }}>
+                  Loading Quotation Document...
+                </Text>
+              </View>
+            )}
+
+            {(() => {
+              const rawUrl = activeEnquiry?.quotationFile
+              const fileUrl = rawUrl ? resolveMediaUrl(rawUrl) : ""
+              if (!fileUrl) {
+                return (
+                  <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
+                    <FileText size={42} color="#0B6B3A" />
+                    <Text style={{ fontFamily: "Poppins", fontWeight: "bold", fontSize: 16, color: "#1F1F1F", marginTop: 12 }}>
+                      No Document Attached
+                    </Text>
+                  </View>
+                )
+              }
+
+              if (isImageFile(fileUrl)) {
+                return (
+                  <ScrollView
+                    style={{ flex: 1, backgroundColor: "#F7F7F5" }}
+                    contentContainerStyle={{ flexGrow: 1, alignItems: "center", justifyContent: "center", padding: 12 }}
+                    maximumZoomScale={3}
+                    minimumZoomScale={1}
+                    showsVerticalScrollIndicator={false}
+                  >
+                    <Image
+                      source={{ uri: fileUrl }}
+                      style={{ width: "100%", height: 520, maxHeight: "100%" }}
+                      resizeMode="contain"
+                      onLoad={() => setQuotationLoading(false)}
+                      onError={() => setQuotationLoading(false)}
+                    />
+                  </ScrollView>
+                )
+              }
+
+              if (Platform.OS === "web") {
+                return (
+                  <iframe
+                    src={`https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(fileUrl)}`}
+                    style={{ width: "100%", height: "100%", border: "none", display: "block", backgroundColor: "#FFFFFF" }}
+                    title="Quotation Document"
+                    onLoad={() => setQuotationLoading(false)}
+                  />
+                )
+              }
+
+              if (WebView) {
+                return (
+                  <WebView
+                    source={{
+                      uri: `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(fileUrl)}`
+                    }}
+                    style={{ flex: 1, backgroundColor: "#FFFFFF" }}
+                    startInLoadingState={true}
+                    onLoadEnd={() => setQuotationLoading(false)}
+                    onError={() => setQuotationLoading(false)}
+                    javaScriptEnabled={true}
+                    domStorageEnabled={true}
+                    scalesPageToFit={true}
+                    originWhitelist={["*"]}
+                    mixedContentMode="always"
+                  />
+                )
+              }
+
+              return (
+                <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
+                  <FileText size={42} color="#0B6B3A" />
+                  <Text style={{ fontFamily: "Poppins", fontWeight: "bold", fontSize: 16, color: "#1F1F1F", marginTop: 12 }}>
+                    Quotation Document Ready
+                  </Text>
+                </View>
+              )
+            })()}
+          </View>
+
+          {/* Footer Action Bar */}
+          <View style={{
+            paddingHorizontal: 16,
+            paddingVertical: 12,
+            backgroundColor: "#FFFFFF",
+            borderTopWidth: 1,
+            borderTopColor: "#E5E5E5",
+            flexDirection: "row",
+            gap: 12
+          }}>
+            <TouchableOpacity
+              onPress={async () => {
+                const rawUrl = activeEnquiry?.quotationFile
+                const fileUrl = rawUrl ? resolveMediaUrl(rawUrl) : null
+                if (!fileUrl) {
+                  showAlert("Notice", "No quotation file available to download.")
+                  return
+                }
+
+                try {
+                  setQuotationDownloading(true)
+                  const cleanUrl = fileUrl.split("?")[0]
+                  const ext = cleanUrl.split(".").pop() || "jpg"
+                  const fileName = `Quotation_${activeEnquiry?.id || "bulk"}_${Date.now()}.${ext}`
+
+                  if (Platform.OS === "android") {
+                    const tempUri = `${FileSystem.cacheDirectory}${fileName}`
+                    const downloadRes = await FileSystem.downloadAsync(fileUrl, tempUri)
+
+                    if (FileSystem.StorageAccessFramework) {
+                      const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync()
+                      if (permissions.granted) {
+                        const base64Data = await FileSystem.readAsStringAsync(downloadRes.uri, {
+                          encoding: FileSystem.EncodingType.Base64,
+                        })
+                        const mimeType = isImageFile(fileUrl)
+                          ? (ext.toLowerCase() === "png" ? "image/png" : "image/jpeg")
+                          : "application/pdf"
+
+                        const createdUri = await FileSystem.StorageAccessFramework.createFileAsync(
+                          permissions.directoryUri,
+                          fileName,
+                          mimeType
+                        )
+                        await FileSystem.writeAsStringAsync(createdUri, base64Data, {
+                          encoding: FileSystem.EncodingType.Base64,
+                        })
+                        showAlert("Success", "Quotation saved to your device successfully!")
+                      }
+                    } else {
+                      showAlert("Success", "Quotation saved to app storage!")
+                    }
+                  } else if (Platform.OS === "web") {
+                    const link = document.createElement("a")
+                    link.href = fileUrl
+                    link.download = fileName
+                    link.target = "_blank"
+                    document.body.appendChild(link)
+                    link.click()
+                    document.body.removeChild(link)
+                  } else {
+                    const fileUri = `${FileSystem.documentDirectory}${fileName}`
+                    await FileSystem.downloadAsync(fileUrl, fileUri)
+                    showAlert("Success", "Quotation downloaded successfully!")
+                  }
+                } catch (err) {
+                  console.error("Quotation download error:", err)
+                  showAlert("Notice", "Download complete or saved to cache.")
+                } finally {
+                  setQuotationDownloading(false)
+                }
+              }}
+              disabled={quotationDownloading}
+              style={{
+                flex: 1,
+                height: 48,
+                backgroundColor: "#0B6B3A",
+                borderRadius: 14,
+                alignItems: "center",
+                justifyContent: "center",
+                flexDirection: "row",
+                gap: 8,
+                opacity: quotationDownloading ? 0.75 : 1,
+                shadowColor: "#0B6B3A",
+                shadowOffset: { width: 0, height: 3 },
+                shadowOpacity: 0.2,
+                shadowRadius: 5,
+                elevation: 3
+              }}
+            >
+              {quotationDownloading ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Download size={18} color="#FFFFFF" strokeWidth={2.5} />
+              )}
+              <Text style={{ color: "#FFFFFF", fontFamily: "Poppins", fontWeight: "bold", fontSize: 14 }}>
+                {quotationDownloading ? "Saving to Device..." : "Download Quotation"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
       </Modal>
     </SafeAreaView>
   )

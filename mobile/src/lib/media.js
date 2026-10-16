@@ -10,9 +10,12 @@ export function resolveMediaUrl(url) {
     return `${cleanedApiUrl}/${url}`
   }
 
-  // Normalize stored URLs: http → https when they point at our API host
+  // Normalize stored URLs: always map uploads to the currently active API host
   try {
-    // In React Native, the global URL constructor is available or can fall back
+    const parsed = new URL(url)
+    if (parsed.pathname.startsWith("/uploads/")) {
+      return `${cleanedApiUrl}${parsed.pathname}${parsed.search}`
+    }
     if (url.includes(cleanedApiUrl)) {
       return url
     }

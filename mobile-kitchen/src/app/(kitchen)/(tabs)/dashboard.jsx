@@ -232,13 +232,10 @@ export default function KitchenDashboardScreen() {
     try {
       const data = await api("/api/bulk-enquiries/partner", {}, "kitchen")
       const list = data.enquiries || []
-      const unread = list.reduce((sum, e) => {
-        if (e.kitchenUnreadCount > 0 && e.messageCount > 0 && e.lastMessageSenderId === e.customerId) {
-          return sum + e.kitchenUnreadCount
-        }
-        return sum
-      }, 0)
-      setEnquiryUnreadCount(unread)
+      const activeCount = list.filter((e) => !["completed", "rejected", "cancelled"].includes(e.status)).length
+      const unreadMessages = list.reduce((sum, e) => sum + (e.kitchenUnreadCount || 0), 0)
+      const count = Math.max(activeCount, unreadMessages)
+      setEnquiryUnreadCount(count)
     } catch (err) {
       // silent fail — badge just stays as last known value
     }

@@ -30,7 +30,27 @@ async function populateComboItems(items) {
   return formattedItems
 }
 
-
+// Fetch active grocery presets for sellers & mobile app
+router.get("/grocery-presets", async (_req, res) => {
+  try {
+    const [rows] = await pool.query(
+      "SELECT id, preset_id, name, category, default_qty, default_unit, image, display_order FROM grocery_presets WHERE is_active = 1 ORDER BY display_order ASC, id DESC"
+    )
+    const formatted = rows.map((r) => ({
+      id: r.preset_id || `g_${r.id}`,
+      dbId: r.id,
+      name: r.name,
+      category: r.category,
+      defaultQty: r.default_qty,
+      defaultUnit: r.default_unit,
+      image: normalizePublicUrl(r.image),
+    }))
+    res.json({ presets: formatted })
+  } catch (error) {
+    console.error("Fetch active grocery presets error:", error)
+    res.status(500).json({ message: "Failed to fetch presets" })
+  }
+})
 
 router.post(
 
@@ -440,6 +460,106 @@ router.get("/kitchen/:kitchenId", async (req, res) => {
 
   }
 
+})
+
+router.get("/search-dishes", async (req, res) => {
+  const q = (req.query.q || "").toString().trim()
+  const city = (req.query.city || "").toString().trim()
+  if (!q) {
+    return res.json({ dishes: [] })
+  }
+
+  const searchTerm = `%${q}%`
+
+  try {
+    // 1. Search menu items strictly by dish name matching query
+    const [menuRows] = await pool.query(
+      `SELECT m.id AS item_id, m.name AS dish_name, m.price, m.description AS short_description,
+              m.image, m.category, m.item_type,
+              k.id AS kitchen_id, k.name AS kitchen_name, k.city AS kitchen_city, k.state AS kitchen_state,
+              k.best_item AS signature_dish
+       FROM menu_items m
+       INNER JOIN kitchens k ON k.id = m.kitchen_id
+       WHERE k.status = 'approved' AND k.is_active = 1 AND m.approval_status = 'approved' AND m.is_available = 1
+         AND (
+           m.name LIKE ? OR
+           m.local_name LIKE ?
+         )
+       ORDER BY (m.name LIKE ?) DESC, m.created_at DESC`,
+      [searchTerm, searchTerm, searchTerm]
+    )
+
+    // 2. Search kitchens whose signature dish strictly matches query
+    const [kitchenRows] = await pool.query(
+      `SELECT k.id AS kitchen_id, k.name AS kitchen_name, k.city AS kitchen_city, k.state AS kitchen_state,
+              k.best_item AS signature_dish, k.speciality, k.description AS kitchen_desc, k.image
+       FROM kitchens k
+       WHERE k.status = 'approved' AND k.is_active = 1
+         AND k.best_item IS NOT NULL AND k.best_item != ''
+         AND k.best_item LIKE ?`,
+      [searchTerm]
+    )
+
+    const dishes = []
+    const seen = new Set()
+
+    for (const row of menuRows) {
+      const key = `${row.kitchen_id}_${row.item_id}`
+      seen.add(key)
+      const isCityMatch = city ? (row.kitchen_city || "").toLowerCase().trim() === city.toLowerCase().trim() : true
+      const sig = (row.signature_dish || "").toLowerCase().trim()
+      const dName = (row.dish_name || "").toLowerCase().trim()
+      const isSigMatch = Boolean(sig && (dName.includes(sig) || sig.includes(dName)))
+
+      dishes.push({
+        id: row.item_id,
+        dishName: row.dish_name,
+        price: Number(row.price || 0),
+        kitchenName: row.kitchen_name,
+        shortDescription: row.short_description || `Prepared by ${row.kitchen_name}`,
+        kitchenId: row.kitchen_id,
+        city: row.kitchen_city,
+        state: row.kitchen_state,
+        image: row.image,
+        isCityMatch,
+        isSignatureDish: isSigMatch,
+      })
+    }
+
+    for (const k of kitchenRows) {
+      const alreadyHasKitchenItem = dishes.some(d => d.kitchenId === k.kitchen_id && d.dishName.toLowerCase().includes(q.toLowerCase()))
+      if (!alreadyHasKitchenItem) {
+        const isCityMatch = city ? (k.kitchen_city || "").toLowerCase().trim() === city.toLowerCase().trim() : true
+        dishes.push({
+          id: null,
+          dishName: k.signature_dish,
+          price: null,
+          kitchenName: k.kitchen_name,
+          shortDescription: k.speciality || k.kitchen_desc || `Signature dish of ${k.kitchen_name}`,
+          kitchenId: k.kitchen_id,
+          city: k.kitchen_city,
+          state: k.kitchen_state,
+          image: k.image,
+          isCityMatch,
+          isSignatureDish: true,
+        })
+      }
+    }
+
+    // Sort: 1st priority = Signature dishes (line-wise), followed by regular dishes
+    dishes.sort((a, b) => {
+      if (a.isSignatureDish && !b.isSignatureDish) return -1
+      if (!a.isSignatureDish && b.isSignatureDish) return 1
+      if (a.isCityMatch && !b.isCityMatch) return -1
+      if (!a.isCityMatch && b.isCityMatch) return 1
+      return 0
+    })
+
+    res.json({ dishes })
+  } catch (error) {
+    console.error("Search dishes error:", error)
+    res.status(500).json({ message: "Failed to search dishes" })
+  }
 })
 
 router.get("/popular", async (req, res) => {

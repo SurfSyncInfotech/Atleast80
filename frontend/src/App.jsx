@@ -43,6 +43,7 @@ import AdminRidersPage from "./pages/admin/AdminRidersPage"
 import AdminAlertsPage from "./pages/admin/AdminAlertsPage"
 import AdminSettingsPage from "./pages/admin/AdminSettingsPage"
 import AdminMenuPage from "./pages/admin/AdminMenuPage"
+import AdminGroceryPresetsPage from "./pages/admin/AdminGroceryPresetsPage"
 import AdminHygienePage from "./pages/admin/AdminHygienePage"
 import AdminOrdersPage from "./pages/admin/AdminOrdersPage"
 import AdminPaymentsPage from "./pages/admin/AdminPaymentsPage"
@@ -70,6 +71,8 @@ function AppContent() {
           <Route path="/terms" element={<TermsOfServicePage />} />
           <Route path="/hygiene-guidelines" element={<HygieneGuidelinesPage />} />
           <Route path="/user-account-deletion" element={<UserAccountDeletionPage />} />
+          <Route path="/kitchen-account-deletion" element={<UserAccountDeletionPage />} />
+          <Route path="/seller-account-deletion" element={<UserAccountDeletionPage />} />
           <Route path="/stories" element={<HomePage />} />
           <Route path="/kitchen/login" element={<KitchenLoginPage />} />
           <Route path="/kitchen/signup" element={<KitchenSignupPage />} />
@@ -207,6 +210,14 @@ function AppContent() {
             element={
               <ProtectedRoute role="admin">
                 <AdminMenuPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/grocery-presets"
+            element={
+              <ProtectedRoute role="admin">
+                <AdminGroceryPresetsPage />
               </ProtectedRoute>
             }
           />

@@ -549,6 +549,64 @@ export async function connectDB() {
       console.error("❌ Auto-migration of cms_policies table failed:", e.message)
     }
 
+    // Auto-migrate grocery_presets table for Dynamic Grocery Gallery Management
+    try {
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS grocery_presets (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          preset_id VARCHAR(100) NULL,
+          name VARCHAR(255) NOT NULL,
+          category VARCHAR(50) NOT NULL DEFAULT 'grocery',
+          default_qty VARCHAR(50) NOT NULL DEFAULT '1',
+          default_unit VARCHAR(50) NOT NULL DEFAULT 'kg',
+          image TEXT NOT NULL,
+          is_active TINYINT(1) NOT NULL DEFAULT 1,
+          display_order INT NOT NULL DEFAULT 0,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          INDEX idx_active_order (is_active, display_order)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `)
+
+      const [existing] = await connection.query("SELECT COUNT(*) AS cnt FROM grocery_presets")
+      if (existing[0]?.cnt === 0) {
+        const initialSeeds = [
+          ["g_sugar", "Sugar / Chini", "grocery", "1", "kg", "https://images.unsplash.com/photo-1581441363689-1f3c3c414635?w=500&auto=format&fit=crop", 1, 1],
+          ["g_atta", "Wheat Flour / Chakki Atta", "grocery", "5", "kg", "https://images.unsplash.com/photo-1574323347407-f5e1ad6d020b?w=500&auto=format&fit=crop", 1, 2],
+          ["g_rice", "Basmati Rice", "grocery", "1", "kg", "https://images.unsplash.com/photo-1586201375761-83865001e31c?w=500&auto=format&fit=crop", 1, 3],
+          ["g_oil", "Cooking Oil / Refined Oil", "grocery", "1", "L", "https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?w=500&auto=format&fit=crop", 1, 4],
+          ["g_mustard_oil", "Mustard Oil / Sarson Tel", "grocery", "1", "L", "https://images.unsplash.com/photo-1620706857370-e1b9770e8bb1?w=500&auto=format&fit=crop", 1, 5],
+          ["g_salt", "Salt / Tata Namak", "grocery", "1", "kg", "https://images.unsplash.com/photo-1612203985729-70726954388c?w=500&auto=format&fit=crop", 1, 6],
+          ["g_haldi", "Turmeric Powder / Haldi", "grocery", "200", "gm", "https://images.unsplash.com/photo-1615485290382-441e4d049cb5?w=500&auto=format&fit=crop", 1, 7],
+          ["g_chili", "Red Chili Powder", "grocery", "200", "gm", "https://images.unsplash.com/photo-1599940824399-b87987ceb72a?w=500&auto=format&fit=crop", 1, 8],
+          ["g_toor_dal", "Toor Dal / Arhar Dal", "grocery", "1", "kg", "https://images.unsplash.com/photo-1515543237350-b3eea1ec8082?w=500&auto=format&fit=crop", 1, 9],
+          ["g_moong_dal", "Moong Dal", "grocery", "1", "kg", "https://images.unsplash.com/photo-1585996824364-53900a30b5d5?w=500&auto=format&fit=crop", 1, 10],
+          ["g_ghee", "Pure Cow Ghee", "grocery", "500", "ml", "https://images.unsplash.com/photo-1631451095765-2c91616fc9e6?w=500&auto=format&fit=crop", 1, 11],
+          ["g_tea", "Tea Powder / Chai Patti", "grocery", "250", "gm", "https://images.unsplash.com/photo-1576092768241-dec231879fc3?w=500&auto=format&fit=crop", 1, 12],
+          ["g_coffee", "Coffee Powder", "grocery", "100", "gm", "https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?w=500&auto=format&fit=crop", 1, 13],
+          ["g_poha", "Thick Poha / Flattened Rice", "grocery", "1", "kg", "https://images.unsplash.com/photo-1626082927389-6cd097cdc6ec?w=500&auto=format&fit=crop", 1, 14],
+          ["g_suji", "Suji / Rava", "grocery", "500", "gm", "https://images.unsplash.com/photo-1607349913338-fca6f7429606?w=500&auto=format&fit=crop", 1, 15],
+          ["g_besan", "Gram Flour / Besan", "grocery", "500", "gm", "https://images.unsplash.com/photo-1627308595229-7830a5c91f9f?w=500&auto=format&fit=crop", 1, 16],
+          ["g_jeera", "Cumin Seeds / Jeera", "grocery", "100", "gm", "https://images.unsplash.com/photo-1596040033229-a9821ebd058d?w=500&auto=format&fit=crop", 1, 17],
+          ["g_mustard", "Mustard Seeds / Rai", "grocery", "100", "gm", "https://images.unsplash.com/photo-1615485290382-441e4d049cb5?w=500&auto=format&fit=crop", 1, 18],
+          ["g_paneer", "Fresh Malai Paneer", "grocery", "200", "gm", "https://images.unsplash.com/photo-1589647363585-f4a7d3877b10?w=500&auto=format&fit=crop", 1, 19],
+          ["g_dahi", "Fresh Curd / Dahi", "grocery", "400", "gm", "https://images.unsplash.com/photo-1488477181946-6428a0291777?w=500&auto=format&fit=crop", 1, 20],
+          ["g_milk", "Fresh Milk", "grocery", "1", "L", "https://images.unsplash.com/photo-1550583724-b2692b85b150?w=500&auto=format&fit=crop", 1, 21],
+          ["g_butter", "Table Butter", "grocery", "100", "gm", "https://images.unsplash.com/photo-1589985270826-4b7bb135bc9d?w=500&auto=format&fit=crop", 1, 22]
+        ]
+        for (const row of initialSeeds) {
+          await connection.query(
+            "INSERT INTO grocery_presets (preset_id, name, category, default_qty, default_unit, image, is_active, display_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            row
+          )
+        }
+        console.log("✅ Seeded initial grocery_presets gallery")
+      }
+      console.log("✅ Auto-migrated grocery_presets table")
+    } catch (e) {
+      console.error("❌ Auto-migration of grocery_presets table failed:", e.message)
+    }
+
     connection.release()
     console.log("✅ Database connected successfully")
     return pool

@@ -49,6 +49,8 @@ const links = [
 
   { to: "/admin/menu", label: "Menu", icon: UtensilsCrossed, badge: "menu" },
 
+  { to: "/admin/grocery-presets", label: "Grocery Gallery", icon: ShoppingBag },
+
   { to: "/admin/orders", label: "Orders", icon: ShoppingBag, badge: "orders" },
 
   { to: "/admin/payments", label: "Payments", icon: Wallet },

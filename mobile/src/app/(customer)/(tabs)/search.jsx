@@ -1,14 +1,16 @@
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import { View, Text, ScrollView, TextInput, TouchableOpacity, ActivityIndicator } from "react-native"
 import { useLocalSearchParams, useRouter } from "expo-router"
 import { SafeAreaView } from "react-native-safe-area-context"
-import { Search, ChefHat, SlidersHorizontal, X, ArrowLeft } from "lucide-react-native"
+import { Search, ChefHat, SlidersHorizontal, X, ArrowLeft, UtensilsCrossed, AlertTriangle } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import KitchenCard from "../../../components/common/KitchenCard"
+import DishCard from "../../../components/common/DishCard"
 import Chip from "../../../components/common/Chip"
 import FloatingCart from "../../../components/common/FloatingCart"
 import { api } from "../../../lib/api"
 import { toKitchenCard } from "../../../lib/kitchen"
+import { getLocationPreference } from "../../../lib/locationPreference"
 
 const filters = [
   { id: "all", label: "All" },
@@ -129,6 +131,11 @@ export default function SearchScreen() {
   const [sortBy, setSortBy] = useState("relevance")
   const [showSort, setShowSort] = useState(false)
 
+  const [userLocation, setUserLocation] = useState(null)
+  const [dishes, setDishes] = useState([])
+  const [searchingDishes, setSearchingDishes] = useState(false)
+  const menuCacheRef = useRef({})
+
   const [prevCategory, setPrevCategory] = useState(null)
 
   // Sync category search query when changed from previous value during render
@@ -138,11 +145,144 @@ export default function SearchScreen() {
   }
 
   useEffect(() => {
+    getLocationPreference().then((loc) => setUserLocation(loc))
+  }, [])
+
+  useEffect(() => {
     api("/api/kitchens")
       .then((data) => setKitchens(data.kitchens.map(toKitchenCard)))
       .catch((err) => console.log("Failed to load kitchens in search", err))
       .finally(() => setLoading(false))
   }, [])
+
+  // Dish search effect (checks backend endpoint and client kitchens / menus)
+  useEffect(() => {
+    const q = query.trim()
+    if (!q) {
+      setDishes([])
+      setSearchingDishes(false)
+      return
+    }
+
+    let cancelled = false
+    setSearchingDishes(true)
+
+    const searchTimer = setTimeout(async () => {
+      try {
+        const userCity = userLocation?.city || ""
+
+        // 1. Try backend search endpoint
+        const apiRes = await api(
+          `/api/menu/search-dishes?q=${encodeURIComponent(q)}&city=${encodeURIComponent(userCity)}`
+        ).catch(() => null)
+
+        if (cancelled) return
+
+        if (apiRes && Array.isArray(apiRes.dishes) && apiRes.dishes.length > 0) {
+          const sorted = [...apiRes.dishes].sort((a, b) => {
+            if (a.isSignatureDish && !b.isSignatureDish) return -1
+            if (!a.isSignatureDish && b.isSignatureDish) return 1
+            return 0
+          })
+          setDishes(sorted)
+          setSearchingDishes(false)
+          return
+        }
+
+        // 2. Client-side fallback matching from kitchens' signature dishes & menus
+        const matched = []
+        const lowerQ = q.toLowerCase()
+
+        for (const k of kitchens) {
+          const sigDish = k.bestItem || k.best_item
+          const isSigMatch = sigDish && sigDish.toLowerCase().includes(lowerQ)
+          const isSpecMatch = k.speciality && k.speciality.toLowerCase().includes(lowerQ)
+
+          const isCityMatch = userCity
+            ? Boolean(
+                k.city &&
+                  (k.city.toLowerCase().trim() === userCity.toLowerCase().trim() ||
+                    k.city.toLowerCase().includes(userCity.toLowerCase().trim()) ||
+                    userCity.toLowerCase().includes(k.city.toLowerCase().trim()))
+              )
+            : true
+
+          let menuItems = menuCacheRef.current[k.id]
+          if (!menuItems) {
+            try {
+              const mRes = await api(`/api/menu/kitchen/${k.id}`).catch(() => null)
+              if (mRes?.items) {
+                menuCacheRef.current[k.id] = mRes.items
+                menuItems = mRes.items
+              }
+            } catch {}
+          }
+
+          let addedFromMenu = false
+          if (menuItems && Array.isArray(menuItems)) {
+            for (const item of menuItems) {
+              const itemNameMatches = Boolean(item.name && item.name.toLowerCase().includes(lowerQ))
+              const itemIsSig = Boolean(sigDish && item.name && (item.name.toLowerCase().trim() === sigDish.toLowerCase().trim() || item.name.toLowerCase().includes(sigDish.toLowerCase()) || sigDish.toLowerCase().includes(item.name.toLowerCase())))
+
+              // Only match if the dish itself matches the search query or is the matching signature dish
+              if (itemNameMatches || (isSigMatch && itemIsSig)) {
+                matched.push({
+                  id: item.id,
+                  dishName: item.name,
+                  price: Number(item.price || 0),
+                  kitchenName: k.name,
+                  shortDescription: item.description || k.speciality || `Special dish by ${k.name}`,
+                  kitchenId: k.id,
+                  city: k.city,
+                  state: k.state,
+                  isCityMatch,
+                  isSignatureDish: itemIsSig,
+                  image: item.image || item.images?.[0] || null,
+                })
+                if (itemIsSig) addedFromMenu = true
+              }
+            }
+          }
+
+          if (!addedFromMenu && isSigMatch) {
+            matched.push({
+              id: null,
+              dishName: sigDish,
+              price: null,
+              kitchenName: k.name,
+              shortDescription: k.speciality || `Signature dish of ${k.name}`,
+              kitchenId: k.id,
+              city: k.city,
+              state: k.state,
+              isCityMatch,
+              isSignatureDish: true,
+              image: k.image || null,
+            })
+          }
+        }
+
+        // Sort: 1st priority = Signature dishes (line-wise), followed by regular food/grocery items
+        matched.sort((a, b) => {
+          if (a.isSignatureDish && !b.isSignatureDish) return -1
+          if (!a.isSignatureDish && b.isSignatureDish) return 1
+          return 0
+        })
+
+        if (!cancelled) {
+          setDishes(matched)
+        }
+      } catch (err) {
+        console.log("Dish search failed", err)
+      } finally {
+        if (!cancelled) setSearchingDishes(false)
+      }
+    }, 200)
+
+    return () => {
+      cancelled = true
+      clearTimeout(searchTimer)
+    }
+  }, [query, kitchens, userLocation])
 
   const results = useMemo(() => {
     const filtered = kitchens.filter((k) => matchesQuery(k, query) && matchesFilter(k, activeFilter))
@@ -274,14 +414,29 @@ export default function SearchScreen() {
       {/* Results details */}
       <View className="px-4 pt-3 pb-1 flex-row justify-between items-center">
         <Text className="font-nunito text-gray text-xs">
-          {loading ? (
+          {loading || searchingDishes ? (
             "Searching..."
+          ) : query.trim() ? (
+            dishes.length > 0 ? (
+              <Text>
+                <Text className="font-bold text-dark">{dishes.length}</Text> dish{dishes.length !== 1 ? "es" : ""} found
+              </Text>
+            ) : (
+              <Text>
+                <Text className="font-bold text-dark">{results.length}</Text> kitchen{results.length !== 1 ? "s" : ""} found
+              </Text>
+            )
           ) : (
             <Text>
               <Text className="font-bold text-dark">{results.length}</Text> kitchen{results.length !== 1 ? "s" : ""} found
             </Text>
           )}
         </Text>
+        {userLocation?.city ? (
+          <Text className="font-nunito text-xs text-primary font-semibold">
+            📍 {userLocation.city}
+          </Text>
+        ) : null}
       </View>
 
       {/* Results list */}
@@ -289,11 +444,11 @@ export default function SearchScreen() {
         <View className="flex-grow justify-center py-12">
           <ActivityIndicator size="large" color="#0B6B3A" />
         </View>
-      ) : results.length === 0 ? (
+      ) : results.length === 0 && dishes.length === 0 ? (
         <ScrollView showsVerticalScrollIndicator={false} className="flex-grow">
           <View className="py-20 items-center justify-center px-6">
             <ChefHat size={48} color="#7A7A7A" style={{ marginBottom: 16 }} />
-            <Text className="font-poppins font-bold text-base text-dark">No kitchens match your search</Text>
+            <Text className="font-poppins font-bold text-base text-dark">No kitchens or dishes match your search</Text>
             <Text className="font-nunito text-gray text-xs text-center mt-2 leading-relaxed max-w-[260px]">
               Try adjusting your spelling, choosing a different filter, or searching for other items.
             </Text>
@@ -302,13 +457,73 @@ export default function SearchScreen() {
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} className="flex-grow px-4">
           <View className="pb-10 pt-2">
-            {results.map((kitchen) => (
-              <KitchenCard
-                key={kitchen.id}
-                kitchen={kitchen}
-                onPress={() => router.push(`/(customer)/(tabs)/kitchen/${kitchen.id}`)}
-              />
-            ))}
+            {/* If all matching dishes are outside user's city, show prominent notice banner */}
+            {query.trim() && dishes.length > 0 && userLocation?.city && dishes.every((d) => !d.isCityMatch) ? (
+              <View
+                style={{
+                  backgroundColor: "#FEF2F2",
+                  borderColor: "#FECACA",
+                  borderWidth: 1.5,
+                  borderRadius: 16,
+                  padding: 14,
+                  marginBottom: 16,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 10,
+                }}
+              >
+                <AlertTriangle size={22} color="#DC2626" />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontFamily: "Poppins", fontSize: 13.5, fontWeight: "bold", color: "#991B1B" }}>
+                    Not available in your city
+                  </Text>
+                  <Text style={{ fontFamily: "Nunito", fontSize: 12, color: "#B91C1C", marginTop: 2 }}>
+                    "{query.trim()}" is not available in your city ({userLocation.city}). See options available in other cities below:
+                  </Text>
+                </View>
+              </View>
+            ) : null}
+
+            {/* Dish Cards section */}
+            {dishes.length > 0 ? (
+              <View className="mb-4">
+                <View className="flex-row items-center gap-1.5 mb-2.5">
+                  <UtensilsCrossed size={16} color="#0B6B3A" />
+                  <Text className="font-poppins font-bold text-sm text-dark">
+                    Dishes ({dishes.length})
+                  </Text>
+                </View>
+                {dishes.map((dish, idx) => (
+                  <DishCard
+                    key={`${dish.kitchenId}_${dish.id || idx}`}
+                    dish={dish}
+                    userCity={userLocation?.city}
+                    onPress={() =>
+                      router.push({
+                        pathname: `/(customer)/(tabs)/kitchen/${dish.kitchenId}`,
+                        params: {
+                          selectedItemId: dish.id || "",
+                          dishName: dish.dishName,
+                        },
+                      })
+                    }
+                  />
+                ))}
+              </View>
+            ) : null}
+
+            {/* Kitchens section: shown when browsing or when no dishes matched search */}
+            {results.length > 0 && dishes.length === 0 ? (
+              <View>
+                {results.map((kitchen) => (
+                  <KitchenCard
+                    key={kitchen.id}
+                    kitchen={kitchen}
+                    onPress={() => router.push(`/(customer)/(tabs)/kitchen/${kitchen.id}`)}
+                  />
+                ))}
+              </View>
+            ) : null}
           </View>
         </ScrollView>
       )}

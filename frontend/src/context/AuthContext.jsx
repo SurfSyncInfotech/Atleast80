@@ -31,6 +31,14 @@ export function AuthProvider({ children }) {
     setSessions(readSessions())
   }, [])
 
+  useEffect(() => {
+    const handleSessionUpdated = () => {
+      reloadSessions()
+    }
+    window.addEventListener("auth-session-updated", handleSessionUpdated)
+    return () => window.removeEventListener("auth-session-updated", handleSessionUpdated)
+  }, [reloadSessions])
+
   const applyRoleSession = useCallback(
     (role, authData) => {
       if (!role) return

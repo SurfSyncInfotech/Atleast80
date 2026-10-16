@@ -1,5 +1,9 @@
 export function getPublicApiBase() {
-  return (process.env.PUBLIC_API_URL || "https://backend.atleast80.com").replace(/\/$/, "")
+  if (process.env.PUBLIC_API_URL) {
+    return process.env.PUBLIC_API_URL.replace(/\/$/, "")
+  }
+  const port = process.env.PORT || 8080
+  return `http://localhost:${port}`
 }
 
 export function normalizePublicUrl(url) {
@@ -24,6 +28,9 @@ export function normalizePublicUrl(url) {
   try {
     const parsed = new URL(url)
     const api = new URL(base)
+    if (parsed.pathname.startsWith("/uploads/")) {
+      return `${api.origin}${parsed.pathname}${parsed.search}`
+    }
     if (parsed.host === api.host) {
       return `${api.origin}${parsed.pathname}${parsed.search}`
     }

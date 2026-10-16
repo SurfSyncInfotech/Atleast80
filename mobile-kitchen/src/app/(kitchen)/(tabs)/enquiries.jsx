@@ -12,7 +12,9 @@ import {
   Platform,
   KeyboardAvoidingView,
   Pressable,
-  useWindowDimensions
+  Dimensions,
+  Keyboard,
+  BackHandler,
 } from "react-native"
 import { SafeAreaView } from "react-native-safe-area-context"
 import * as DocumentPicker from "expo-document-picker"
@@ -59,8 +61,8 @@ function showAlert(title, message) {
 export default function KitchenEnquiriesScreen() {
   const { user } = useAuth()
   const { setEnquiryUnreadCount } = useBadges()
-  const { height: windowHeight } = useWindowDimensions()
-  const chatSheetHeight = Math.max(450, Math.round((windowHeight || 700) * 0.85))
+  const { height: SCREEN_HEIGHT } = Dimensions.get("screen")
+  const modalSheetHeight = Math.max(480, Math.round((SCREEN_HEIGHT || 700) * 0.85))
   const chatScrollViewRef = useRef(null)
   
   const [enquiries, setEnquiries] = useState([])
@@ -129,25 +131,17 @@ export default function KitchenEnquiriesScreen() {
     setChatModalVisible(true)
   }
 
-  const handleCloseChat = () => {
-    setChatModalVisible(false)
-    loadEnquiries()
-  }
-
   const loadEnquiries = useCallback(async () => {
     setError("")
     try {
       const data = await api("/api/bulk-enquiries/partner", {}, "kitchen")
       const list = data.enquiries || []
       setEnquiries(list)
-      // Update badge count: only actual unread chat messages from customer
-      const unread = list.reduce((sum, e) => {
-        if (e.kitchenUnreadCount > 0 && e.messageCount > 0 && e.lastMessageSenderId === e.customerId) {
-          return sum + e.kitchenUnreadCount
-        }
-        return sum
-      }, 0)
-      setEnquiryUnreadCount(unread)
+      // Update badge count: active enquiries and unread chat messages
+      const activeCount = list.filter((e) => !["completed", "rejected", "cancelled"].includes(e.status)).length
+      const unreadMessages = list.reduce((sum, e) => sum + (e.kitchenUnreadCount || 0), 0)
+      const count = Math.max(activeCount, unreadMessages)
+      setEnquiryUnreadCount(count)
     } catch (err) {
       console.log("Failed to load enquiries:", err)
       setError(err.message || "Failed to load enquiries")
@@ -157,6 +151,66 @@ export default function KitchenEnquiriesScreen() {
       setRefreshing(false)
     }
   }, [setEnquiryUnreadCount])
+
+  const handleCloseChat = useCallback(() => {
+    setChatModalVisible(false)
+    loadEnquiries()
+  }, [loadEnquiries])
+
+  const closeQuotationModal = useCallback(() => {
+    setActiveEnquiry(null)
+    setQuoteFile(null)
+    setQuoteAmount("")
+    setQuoteNotes("")
+  }, [])
+
+  const [keyboardHeight, setKeyboardHeight] = useState(0)
+  const isKeyboardVisible = useRef(false)
+
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow"
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide"
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      isKeyboardVisible.current = true
+      setKeyboardHeight(e.endCoordinates ? e.endCoordinates.height : 0)
+      if (chatModalVisible) {
+        setTimeout(() => {
+          chatScrollViewRef.current?.scrollToEnd({ animated: true })
+        }, 100)
+      }
+    })
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      isKeyboardVisible.current = false
+      setKeyboardHeight(0)
+    })
+    return () => {
+      showSub.remove()
+      hideSub.remove()
+    }
+  }, [chatModalVisible])
+
+  useEffect(() => {
+    if (!activeEnquiry && !chatModalVisible) return
+
+    const onBackPress = () => {
+      if (isKeyboardVisible.current) {
+        Keyboard.dismiss()
+        return true
+      }
+      if (activeEnquiry) {
+        closeQuotationModal()
+        return true
+      }
+      if (chatModalVisible) {
+        handleCloseChat()
+        return true
+      }
+      return false
+    }
+
+    const sub = BackHandler.addEventListener("hardwareBackPress", onBackPress)
+    return () => sub.remove()
+  }, [activeEnquiry, chatModalVisible, closeQuotationModal, handleCloseChat])
 
   useEffect(() => {
     loadEnquiries()
@@ -537,29 +591,33 @@ export default function KitchenEnquiriesScreen() {
           animationType="slide"
           transparent
           statusBarTranslucent={true}
-          onRequestClose={() => setActiveEnquiry(null)}
+          onRequestClose={() => {
+            if (isKeyboardVisible.current) {
+              Keyboard.dismiss()
+            } else {
+              closeQuotationModal()
+            }
+          }}
         >
           <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
             style={{ flex: 1 }}
           >
             <Pressable
               style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}
-              onPress={() => {
-                setActiveEnquiry(null)
-                setQuoteFile(null)
-                setQuoteAmount("")
-                setQuoteNotes("")
-              }}
+              onPress={closeQuotationModal}
             >
               <Pressable
                 style={{
                   backgroundColor: "#FFFFFF",
                   borderTopLeftRadius: 28,
                   borderTopRightRadius: 28,
-                  maxHeight: "88%",
+                  maxHeight: (Platform.OS === "android" && keyboardHeight > 0)
+                    ? Math.max(300, SCREEN_HEIGHT - keyboardHeight - 40)
+                    : Math.round(SCREEN_HEIGHT * 0.88),
                   width: "100%",
-                  overflow: "hidden"
+                  overflow: "hidden",
+                  marginBottom: Platform.OS === "android" ? keyboardHeight : 0,
                 }}
                 onPress={(e) => e.stopPropagation()}
               >
@@ -567,12 +625,7 @@ export default function KitchenEnquiriesScreen() {
                 <View className="flex-row items-center justify-between px-5 py-4 border-b border-gray-light/35">
                   <Text className="font-poppins font-bold text-base text-dark">Send Quotation</Text>
                   <TouchableOpacity
-                    onPress={() => {
-                      setActiveEnquiry(null)
-                      setQuoteFile(null)
-                      setQuoteAmount("")
-                      setQuoteNotes("")
-                    }}
+                    onPress={closeQuotationModal}
                     className="p-1.5 rounded-full bg-cream-dark/50"
                   >
                     <X size={18} color="#1F1F1F" />
@@ -742,10 +795,16 @@ export default function KitchenEnquiriesScreen() {
         transparent
         statusBarTranslucent={true}
         animationType="slide"
-        onRequestClose={handleCloseChat}
+        onRequestClose={() => {
+          if (isKeyboardVisible.current) {
+            Keyboard.dismiss()
+          } else {
+            handleCloseChat()
+          }
+        }}
       >
         <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
           style={{ flex: 1 }}
         >
           <Pressable 
@@ -757,7 +816,7 @@ export default function KitchenEnquiriesScreen() {
                 backgroundColor: "#FFFFFF", 
                 borderTopLeftRadius: 28, 
                 borderTopRightRadius: 28, 
-                height: Math.round(windowHeight * 0.85),
+                height: modalSheetHeight,
                 maxHeight: "88%",
                 width: "100%",
                 display: "flex",
@@ -857,7 +916,8 @@ export default function KitchenEnquiriesScreen() {
                 flexDirection: "row", 
                 alignItems: "center", 
                 paddingHorizontal: 16, 
-                paddingVertical: 12, 
+                paddingTop: 12,
+                paddingBottom: 12 + (Platform.OS === "android" ? keyboardHeight : 0),
                 borderTopWidth: 1, 
                 borderTopColor: "#F1F1EF", 
                 backgroundColor: "#FFFFFF",

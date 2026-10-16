@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from "react"
 import { useNavigate } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import {
-  Package, Clock, Phone, MapPin, RefreshCw, XCircle, Star,
+  Package, Clock, Phone, MapPin, RefreshCw, Star,
   Eye, X, ChevronRight,
 } from "lucide-react"
 import KitchenLayout from "../../components/layout/KitchenLayout"
@@ -208,23 +208,12 @@ function OrderDetailModal({ order, onClose, onStatusUpdate, onAcknowledge, updat
             next && (
               <div className="flex gap-2 pt-1">
                 <Button
-                  className="flex-1"
+                  className="w-full"
                   onClick={() => onStatusUpdate(order.id, next.status)}
                   disabled={updating}
                 >
                   {updating ? "Updating..." : next.label}
                 </Button>
-                {["pending", "confirmed", "preparing"].includes(order.status) && (
-                  <Button
-                    variant="outline"
-                    className="text-red-600 border-red-200 hover:bg-red-50 px-4"
-                    onClick={() => onStatusUpdate(order.id, "cancelled")}
-                    disabled={updating}
-                    title="Cancel order"
-                  >
-                    <XCircle size={16} />
-                  </Button>
-                )}
               </div>
             )
           )}
@@ -528,17 +517,6 @@ export default function KitchenOrdersPage() {
                                 >
                                   {next.label}
                                   <ChevronRight size={12} />
-                                </button>
-                              )}
-                              {["pending", "confirmed", "preparing"].includes(order.status) && (
-                                <button
-                                  type="button"
-                                  disabled={updating}
-                                  onClick={() => handleStatusUpdate(order.id, "cancelled")}
-                                  title="Cancel order"
-                                  className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 cursor-pointer disabled:opacity-50"
-                                >
-                                  <XCircle size={15} />
                                 </button>
                               )}
                             </div>

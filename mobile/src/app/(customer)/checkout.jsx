@@ -146,6 +146,7 @@ export default function CheckoutScreen() {
   const executeOrderPlacement = async (selectedPayment, paymentRef = null) => {
     setLoading(true)
     setError("")
+    const rawPaymentId = paymentRef?.razorpay_payment_id || (typeof paymentRef === "string" ? paymentRef : null)
     try {
       const data = await api("/api/orders", {
         method: "POST",
@@ -162,9 +163,12 @@ export default function CheckoutScreen() {
             gst_rate: item.gst_rate,
             offerPrice: item.isOfferActive !== false ? item.offerPrice : null,
             discountPercent: item.isOfferActive !== false ? item.discountPercent : 0,
+            isBulk: item.isBulk || (typeof item.id === "string" && item.id.startsWith("bulk_")),
           })),
           festivalDiscount,
           paymentMethod: selectedPayment,
+          paymentRef: rawPaymentId,
+          razorpay_payment_id: rawPaymentId,
           packingType,
           deliveryMethod,
           packingFee,

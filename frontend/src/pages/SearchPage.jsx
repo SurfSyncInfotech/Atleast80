@@ -1,14 +1,15 @@
-import { useState, useEffect, useMemo } from "react"
-import { useNavigate } from "react-router-dom"
+import { useState, useEffect, useMemo, useRef } from "react"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import { motion } from "framer-motion"
-import { Search, ChefHat, MapPin, SlidersHorizontal, X, Store } from "lucide-react"
+import { Search, ChefHat, MapPin, SlidersHorizontal, X, Store, UtensilsCrossed, AlertTriangle } from "lucide-react"
 import Navbar from "../components/layout/Navbar"
 import PageWrapper from "../components/layout/PageWrapper"
 import KitchenCard from "../components/common/KitchenCard"
+import DishCard from "../components/common/DishCard"
 import Chip from "../components/common/Chip"
 import { api } from "../lib/api"
 import { toKitchenCard } from "../lib/kitchen"
-import { useAutoDetectLocation } from "../lib/locationPreference"
+import { useAutoDetectLocation, useLocationPreference } from "../lib/locationPreference"
 import { kitchens as mockKitchens } from "../data/mockData"
 import { cn } from "../lib/utils"
 
@@ -75,13 +76,20 @@ function sortKitchens(list, sortId) {
 
 export default function SearchPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   useAutoDetectLocation()
+  const { city: userCity } = useLocationPreference()
+
   const [kitchens, setKitchens] = useState([])
   const [loading, setLoading] = useState(true)
-  const [query, setQuery] = useState("")
+  const [query, setQuery] = useState(() => searchParams.get("q") || searchParams.get("category") || "")
   const [activeFilter, setActiveFilter] = useState("all")
   const [sortBy, setSortBy] = useState("relevance")
   const [showSort, setShowSort] = useState(false)
+
+  const [dishes, setDishes] = useState([])
+  const [searchingDishes, setSearchingDishes] = useState(false)
+  const menuCacheRef = useRef({})
 
   useEffect(() => {
     api("/api/kitchens")
@@ -89,6 +97,133 @@ export default function SearchPage() {
       .catch(() => setKitchens(mockKitchens))
       .finally(() => setLoading(false))
   }, [])
+
+  // Dish search effect (checks backend endpoint and client kitchens / menus)
+  useEffect(() => {
+    const q = query.trim()
+    if (!q) {
+      setDishes([])
+      setSearchingDishes(false)
+      return
+    }
+
+    let cancelled = false
+    setSearchingDishes(true)
+
+    const timer = setTimeout(async () => {
+      try {
+        // 1. Try backend search endpoint
+        const apiRes = await api(
+          `/api/menu/search-dishes?q=${encodeURIComponent(q)}&city=${encodeURIComponent(userCity || "")}`
+        ).catch(() => null)
+
+        if (cancelled) return
+
+        if (apiRes && Array.isArray(apiRes.dishes) && apiRes.dishes.length > 0) {
+          const sorted = [...apiRes.dishes].sort((a, b) => {
+            if (a.isSignatureDish && !b.isSignatureDish) return -1
+            if (!a.isSignatureDish && b.isSignatureDish) return 1
+            return 0
+          })
+          setDishes(sorted)
+          setSearchingDishes(false)
+          return
+        }
+
+        // 2. Client-side fallback matching from kitchens' signature dishes & menus
+        const matched = []
+        const lowerQ = q.toLowerCase()
+
+        for (const k of kitchens) {
+          const sigDish = k.bestItem || k.best_item
+          const isSigMatch = sigDish && sigDish.toLowerCase().includes(lowerQ)
+          const isSpecMatch = k.speciality && k.speciality.toLowerCase().includes(lowerQ)
+
+          const isCityMatch = userCity
+            ? Boolean(
+                k.city &&
+                  (k.city.toLowerCase().trim() === userCity.toLowerCase().trim() ||
+                    k.city.toLowerCase().includes(userCity.toLowerCase().trim()) ||
+                    userCity.toLowerCase().includes(k.city.toLowerCase().trim()))
+              )
+            : true
+
+          let menuItems = menuCacheRef.current[k.id]
+          if (!menuItems) {
+            try {
+              const mRes = await api(`/api/menu/kitchen/${k.id}`).catch(() => null)
+              if (mRes?.items) {
+                menuCacheRef.current[k.id] = mRes.items
+                menuItems = mRes.items
+              }
+            } catch {}
+          }
+
+          let addedFromMenu = false
+          if (menuItems && Array.isArray(menuItems)) {
+            for (const item of menuItems) {
+              const itemNameMatches = Boolean(item.name && item.name.toLowerCase().includes(lowerQ))
+              const itemIsSig = Boolean(sigDish && item.name && (item.name.toLowerCase().trim() === sigDish.toLowerCase().trim() || item.name.toLowerCase().includes(sigDish.toLowerCase()) || sigDish.toLowerCase().includes(item.name.toLowerCase())))
+
+              // Only match if the dish itself matches the search query or is the matching signature dish
+              if (itemNameMatches || (isSigMatch && itemIsSig)) {
+                matched.push({
+                  id: item.id,
+                  dishName: item.name,
+                  price: Number(item.price || 0),
+                  kitchenName: k.name,
+                  shortDescription: item.description || k.speciality || `Special dish by ${k.name}`,
+                  kitchenId: k.id,
+                  city: k.city,
+                  state: k.state,
+                  isCityMatch,
+                  isSignatureDish: itemIsSig,
+                  image: item.image || item.images?.[0] || null,
+                })
+                if (itemIsSig) addedFromMenu = true
+              }
+            }
+          }
+
+          if (!addedFromMenu && isSigMatch) {
+            matched.push({
+              id: null,
+              dishName: sigDish,
+              price: null,
+              kitchenName: k.name,
+              shortDescription: k.speciality || `Signature dish of ${k.name}`,
+              kitchenId: k.id,
+              city: k.city,
+              state: k.state,
+              isCityMatch,
+              isSignatureDish: true,
+              image: k.image || null,
+            })
+          }
+        }
+
+        // Sort: 1st priority = Signature dishes (line-wise), followed by regular food/grocery items
+        matched.sort((a, b) => {
+          if (a.isSignatureDish && !b.isSignatureDish) return -1
+          if (!a.isSignatureDish && b.isSignatureDish) return 1
+          return 0
+        })
+
+        if (!cancelled) {
+          setDishes(matched)
+        }
+      } catch (err) {
+        console.log("Dish search failed", err)
+      } finally {
+        if (!cancelled) setSearchingDishes(false)
+      }
+    }, 200)
+
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [query, kitchens, userCity])
 
   const results = useMemo(() => {
     const filtered = kitchens.filter(
@@ -222,16 +357,78 @@ export default function SearchPage() {
           {/* Results meta */}
           <div className="flex items-center justify-between mb-4 md:mb-6">
             <p className="font-nunito text-gray text-sm">
-              {loading ? "Loading kitchens..." : (
+              {loading || searchingDishes ? (
+                "Searching..."
+              ) : query.trim() ? (
+                dishes.length > 0 ? (
+                  <>
+                    <span className="font-semibold text-dark">{dishes.length}</span>{" "}
+                    dish{dishes.length !== 1 ? "es" : ""} found
+                  </>
+                ) : (
+                  <>
+                    <span className="font-semibold text-dark">{results.length}</span>{" "}
+                    kitchen{results.length !== 1 ? "s" : ""} found
+                  </>
+                )
+              ) : (
                 <>
-                  <span className="font-semibold text-dark">{results.length}</span>
-                  {" "}kitchen{results.length !== 1 ? "s" : ""} found
+                  <span className="font-semibold text-dark">{results.length}</span>{" "}
+                  kitchen{results.length !== 1 ? "s" : ""} found
                 </>
               )}
             </p>
+            {userCity && (
+              <span className="text-xs md:text-sm font-nunito font-semibold text-primary bg-emerald-50 px-3 py-1 rounded-xl border border-emerald-200/60">
+                📍 {userCity}
+              </span>
+            )}
           </div>
 
-          {/* Grid */}
+          {/* If all matching dishes are outside user's city, show prominent notice banner */}
+          {query.trim() && dishes.length > 0 && userCity && dishes.every((d) => !d.isCityMatch) && (
+            <div className="bg-red-50 border border-red-200 rounded-2xl p-4 md:p-5 mb-6 flex items-start gap-3">
+              <AlertTriangle size={24} className="text-red-600 shrink-0 mt-0.5" />
+              <div>
+                <h4 className="font-poppins font-bold text-red-900 text-sm md:text-base">
+                  Not available in your city
+                </h4>
+                <p className="font-nunito text-red-700 text-xs md:text-sm mt-1">
+                  "{query.trim()}" is not available in your city ({userCity}). See options available in other cities below:
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Dish Cards Grid */}
+          {dishes.length > 0 && (
+            <div className="mb-8">
+              <div className="flex items-center gap-2 mb-4">
+                <UtensilsCrossed size={20} className="text-primary" />
+                <h2 className="font-poppins font-bold text-dark text-lg md:text-xl">
+                  Dishes ({dishes.length})
+                </h2>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {dishes.map((dish, i) => (
+                  <DishCard
+                    key={`${dish.kitchenId}_${dish.id || i}`}
+                    dish={dish}
+                    userCity={userCity}
+                    onClick={() =>
+                      navigate(
+                        `/kitchen/${dish.kitchenId}?selectedItemId=${dish.id || ""}&dish=${encodeURIComponent(
+                          dish.dishName
+                        )}`
+                      )
+                    }
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Kitchens Grid */}
           {loading ? (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-5 lg:gap-6">
               {Array.from({ length: 8 }).map((_, i) => (
@@ -244,12 +441,12 @@ export default function SearchPage() {
                 </div>
               ))}
             </div>
-          ) : results.length === 0 ? (
+          ) : results.length === 0 && dishes.length === 0 ? (
             <div className="text-center py-16 md:py-24 px-4">
               <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
                 <ChefHat size={32} className="text-primary" />
               </div>
-              <h3 className="font-poppins font-semibold text-dark text-lg">No kitchens found</h3>
+              <h3 className="font-poppins font-semibold text-dark text-lg">No kitchens or dishes found</h3>
               <p className="font-nunito text-gray text-sm mt-2 max-w-sm mx-auto">
                 {kitchens.length === 0
                   ? "No approved kitchens are live yet. Check back soon!"
@@ -265,27 +462,29 @@ export default function SearchPage() {
                 </button>
               )}
             </div>
-          ) : (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-5 lg:gap-6"
-            >
-              {results.map((kitchen, i) => (
-                <motion.div
-                  key={kitchen.id}
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: Math.min(i * 0.04, 0.3) }}
-                >
-                  <KitchenCard
-                    kitchen={kitchen}
-                    onClick={() => navigate(`/kitchen/${kitchen.id}`)}
-                  />
-                </motion.div>
-              ))}
-            </motion.div>
-          )}
+          ) : results.length > 0 && dishes.length === 0 ? (
+            <div>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-5 lg:gap-6"
+              >
+                {results.map((kitchen, i) => (
+                  <motion.div
+                    key={kitchen.id}
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: Math.min(i * 0.04, 0.3) }}
+                  >
+                    <KitchenCard
+                      kitchen={kitchen}
+                      onClick={() => navigate(`/kitchen/${kitchen.id}`)}
+                    />
+                  </motion.div>
+                ))}
+              </motion.div>
+            </div>
+          ) : null}
         </div>
       </PageWrapper>
     </>

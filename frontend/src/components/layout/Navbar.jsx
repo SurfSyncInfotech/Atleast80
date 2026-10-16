@@ -53,12 +53,14 @@ export default function Navbar({ transparent = false }) {
         <LocationPicker transparent={transparent} className="flex-shrink-0" />
 
         {!transparent && (
-          <div className="flex-1 relative max-w-2xl">
+          <div className="flex-1 relative max-w-2xl cursor-pointer" onClick={() => navigate("/search")}>
             <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray" />
             <input
               type="text"
               placeholder="Search homemade food & groceries..."
-              className="w-full pl-11 pr-4 py-2.5 md:py-3 bg-white rounded-full border border-gray-light text-sm font-nunito placeholder:text-gray focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition-all shadow-sm"
+              onFocus={() => navigate("/search")}
+              readOnly
+              className="w-full pl-11 pr-4 py-2.5 md:py-3 bg-white rounded-full border border-gray-light text-sm font-nunito placeholder:text-gray focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition-all shadow-sm cursor-pointer"
             />
           </div>
         )}

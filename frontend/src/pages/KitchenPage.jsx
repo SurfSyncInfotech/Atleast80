@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 
-import { useParams, useNavigate } from "react-router-dom"
+import { useParams, useNavigate, useSearchParams } from "react-router-dom"
 
 import { motion } from "framer-motion"
 
@@ -119,6 +119,7 @@ function mapApiMenuItem(item, kitchenName, kitchenId, festivalOffer) {
 export default function KitchenPage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [activeTab, setActiveTab] = useState("food")
   const [kitchen, setKitchen] = useState(null)
   const [menu, setMenu] = useState([])
@@ -203,6 +204,24 @@ export default function KitchenPage() {
 
         const mappedMenu = menuRes.items.map((item) => mapApiMenuItem(item, k.name, k.id, k.festivalOffer))
         setMenu(mappedMenu)
+
+        // Auto-open selected dish if coming from search redirect
+        const selectedItemId = searchParams.get("selectedItemId")
+        const dishParam = searchParams.get("dish")
+        if (selectedItemId || dishParam) {
+          const targetId = selectedItemId ? Number(selectedItemId) : null
+          const targetName = dishParam ? String(dishParam).trim().toLowerCase() : null
+          const matchedItem = mappedMenu.find((m) =>
+            (targetId && m.id === targetId) ||
+            (targetName && (m.name?.toLowerCase() === targetName || m.name?.toLowerCase().includes(targetName)))
+          )
+          if (matchedItem) {
+            if (matchedItem.category) {
+              setActiveTab(matchedItem.isCombo ? "combo" : matchedItem.category)
+            }
+            setSelectedItem(matchedItem)
+          }
+        }
 
         setHygieneData(hygieneRes)
 

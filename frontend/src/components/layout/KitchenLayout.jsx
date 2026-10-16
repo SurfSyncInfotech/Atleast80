@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react"
 
-import { NavLink, useNavigate } from "react-router-dom"
+import { NavLink, useNavigate, useLocation } from "react-router-dom"
 
 import {
 
@@ -59,6 +59,17 @@ import { resolveMediaUrl } from "../../lib/media"
 
 import { cn } from "../../lib/utils"
 
+const SEEN_CANCELLED_KEY = "atleast80-kitchen-seen-cancelled"
+
+function readSeenCancelled() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SEEN_CANCELLED_KEY) || "null")
+    return Array.isArray(parsed) ? parsed.map(String) : null
+  } catch {
+    return null
+  }
+}
+
 function HeaderIconButton({ icon: Icon, label, onClick, disabled, active }) {
   return (
     <button
@@ -86,6 +97,8 @@ export default function KitchenLayout({ children, fullBleed = false, fullWidth =
   const { user, kitchen, logoutKitchen, refreshKitchen } = useAuth()
 
   const navigate = useNavigate()
+  const location = useLocation()
+  const onOrdersPage = location.pathname.startsWith("/kitchen/orders")
 
   const coverInputRef = useRef(null)
 
@@ -101,6 +114,7 @@ export default function KitchenLayout({ children, fullBleed = false, fullWidth =
   const [alertCount, setAlertCount] = useState(0)
   const [unreadEnquiryCount, setUnreadEnquiryCount] = useState(0)
   const [newOrdersCount, setNewOrdersCount] = useState(0)
+  const [cancelledOrdersCount, setCancelledOrdersCount] = useState(0)
   const prevNewOrdersRef = useRef(-1)
   
   // Real-time live alert toast popup
@@ -109,6 +123,7 @@ export default function KitchenLayout({ children, fullBleed = false, fullWidth =
   const isFirstAlertFetchRef = useRef(true)
 
   const isApproved = kitchen?.status === "approved"
+  const ordersBadge = newOrdersCount + cancelledOrdersCount
 
   useEffect(() => {
     refreshKitchen().catch(() => {})
@@ -160,10 +175,27 @@ export default function KitchenLayout({ children, fullBleed = false, fullWidth =
 
     const checkNewOrders = async () => {
       try {
-        const stats = await api("/api/orders/kitchen/stats", {}, "kitchen")
-        const pending = Number(stats?.pendingOrders || stats?.pending_count || 0)
-        setNewOrdersCount(pending)
+        const data = await api("/api/orders/kitchen", {}, "kitchen")
+        const orders = data.orders || []
+        const pending = orders.filter((order) => order.status === "pending").length
+        const cancelledIds = orders.filter((order) => order.status === "cancelled").map((order) => String(order.id))
+        let seen = readSeenCancelled()
 
+        if (!seen) {
+          localStorage.setItem(SEEN_CANCELLED_KEY, JSON.stringify(cancelledIds))
+          seen = cancelledIds
+        }
+
+        if (onOrdersPage) {
+          const merged = Array.from(new Set([...seen, ...cancelledIds]))
+          localStorage.setItem(SEEN_CANCELLED_KEY, JSON.stringify(merged))
+          setCancelledOrdersCount(0)
+        } else {
+          const seenSet = new Set(seen)
+          setCancelledOrdersCount(cancelledIds.filter((id) => !seenSet.has(id)).length)
+        }
+
+        setNewOrdersCount(pending)
         if (prevNewOrdersRef.current >= 0 && pending > prevNewOrdersRef.current) {
           playOrderChime()
         }
@@ -174,9 +206,9 @@ export default function KitchenLayout({ children, fullBleed = false, fullWidth =
     }
 
     checkNewOrders()
-    const interval = setInterval(checkNewOrders, 4000)
+    const interval = setInterval(checkNewOrders, 3000)
     return () => clearInterval(interval)
-  }, [isApproved])
+  }, [isApproved, onOrdersPage])
 
   useEffect(() => {
     if (!isApproved) return
@@ -185,12 +217,11 @@ export default function KitchenLayout({ children, fullBleed = false, fullWidth =
       try {
         const data = await api("/api/bulk-enquiries/partner", {}, "kitchen")
         const enquiries = data.enquiries || []
-        let unread = 0
-        enquiries.forEach((e) => {
-          if (e.lastMessage && e.lastMessageSenderId && e.lastMessageSenderId !== user?.id) {
-            unread += 1
-          }
-        })
+        const unread = enquiries.filter((enquiry) => (
+          enquiry.status === "pending"
+          || Number(enquiry.kitchenUnreadCount) > 0
+          || (enquiry.lastMessage && enquiry.lastMessageSenderId && enquiry.lastMessageSenderId !== user?.id)
+        )).length
         setUnreadEnquiryCount(unread)
       } catch (e) {
         // silent
@@ -198,7 +229,7 @@ export default function KitchenLayout({ children, fullBleed = false, fullWidth =
     }
 
     checkEnquiryMessages()
-    const interval = setInterval(checkEnquiryMessages, 4000)
+    const interval = setInterval(checkEnquiryMessages, 3000)
     return () => clearInterval(interval)
   }, [isApproved, user?.id])
 
@@ -408,18 +439,17 @@ export default function KitchenLayout({ children, fullBleed = false, fullWidth =
 
         <Icon size={18} />
 
-        {item.label}
+        <span className="flex-1">{item.label}</span>
 
-        {item.label === "Orders" && newOrdersCount > 0 && (
-          <span className="ml-auto bg-red-500 text-white font-bold text-[10px] px-2 py-0.5 rounded-full animate-pulse shadow-sm flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
-            {newOrdersCount} New
+        {item.label === "Orders" && ordersBadge > 0 && (
+          <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none flex items-center justify-center">
+            {ordersBadge > 99 ? "99+" : ordersBadge}
           </span>
         )}
 
         {item.label === "Enquiries" && unreadEnquiryCount > 0 && (
-          <span className="ml-auto bg-red-500 text-white font-bold text-[10px] px-2 py-0.5 rounded-full animate-pulse shadow-sm">
-            {unreadEnquiryCount} New
+          <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none flex items-center justify-center">
+            {unreadEnquiryCount > 99 ? "99+" : unreadEnquiryCount}
           </span>
         )}
 
@@ -600,10 +630,10 @@ export default function KitchenLayout({ children, fullBleed = false, fullWidth =
               aria-label="Open menu"
             >
               <Menu size={20} className="text-dark" />
-              {(newOrdersCount > 0 || unreadEnquiryCount > 0) && (
+              {(ordersBadge > 0 || unreadEnquiryCount > 0) && (
                 <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-white animate-ping" />
               )}
-              {(newOrdersCount > 0 || unreadEnquiryCount > 0) && (
+              {(ordersBadge > 0 || unreadEnquiryCount > 0) && (
                 <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-white" />
               )}
             </button>
@@ -670,11 +700,11 @@ export default function KitchenLayout({ children, fullBleed = false, fullWidth =
                   icon={ShoppingBag}
                   label="Orders"
                   onClick={() => navigate("/kitchen/orders")}
-                  active={newOrdersCount > 0}
+                  active={ordersBadge > 0}
                 />
-                {newOrdersCount > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-red-500 text-white font-bold text-[9px] px-1.5 py-0.5 rounded-full ring-2 ring-white animate-pulse">
-                    {newOrdersCount}
+                {ordersBadge > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none flex items-center justify-center ring-2 ring-white">
+                    {ordersBadge > 99 ? "99+" : ordersBadge}
                   </span>
                 )}
               </div>

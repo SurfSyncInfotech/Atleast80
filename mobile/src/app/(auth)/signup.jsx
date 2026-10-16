@@ -803,7 +803,9 @@ export default function SignupPage() {
             gap: 12
           }}>
             <TouchableOpacity
+              disabled={pdfViewerLoading}
               onPress={() => {
+                if (pdfViewerLoading) return
                 setAgreementRead(true)
                 setAgreedToTerms(true)
                 setPdfModalVisible(false)
@@ -811,22 +813,27 @@ export default function SignupPage() {
               style={{
                 flex: 1,
                 height: 48,
-                backgroundColor: "#0B6B3A",
+                backgroundColor: pdfViewerLoading ? "#A0A0A0" : "#0B6B3A",
                 borderRadius: 14,
                 alignItems: "center",
                 justifyContent: "center",
                 flexDirection: "row",
                 gap: 8,
+                opacity: pdfViewerLoading ? 0.65 : 1,
                 shadowColor: "#0B6B3A",
                 shadowOffset: { width: 0, height: 3 },
-                shadowOpacity: 0.2,
+                shadowOpacity: pdfViewerLoading ? 0 : 0.2,
                 shadowRadius: 5,
-                elevation: 3
+                elevation: pdfViewerLoading ? 0 : 3
               }}
             >
-              <Check size={18} color="#FFFFFF" strokeWidth={2.5} />
+              {pdfViewerLoading ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Check size={18} color="#FFFFFF" strokeWidth={2.5} />
+              )}
               <Text style={{ color: "#FFFFFF", fontFamily: "Poppins", fontWeight: "bold", fontSize: 14 }}>
-                I Have Read & Accept Terms
+                {pdfViewerLoading ? "Loading Agreement..." : "I Have Read & Accept Terms"}
               </Text>
             </TouchableOpacity>
           </View>

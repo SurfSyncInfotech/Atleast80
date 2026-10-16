@@ -2,7 +2,7 @@
   "expo": {
     "name": "Atleast80",
     "slug": "mobile",
-    "version": "201.0.0",
+    "version": "503.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/logo.png",
     "scheme": "mobile",
@@ -13,7 +13,7 @@
     "android": {
       "package": "com.atleast80.app",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 201
+      "versionCode": 503
     },
     "web": {
       "output": "single",
