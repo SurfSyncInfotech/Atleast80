@@ -160,22 +160,35 @@ export default function KitchenCard({ kitchen, className, onPress, variant = "li
               
               {/* Rating and ETA */}
               <View className="flex-row items-center gap-2 mt-2">
-                <View style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 3,
-                  backgroundColor: "#FFF9E6",
-                  paddingHorizontal: 6,
-                  paddingVertical: 2,
-                  borderRadius: 6,
-                  borderColor: "#F4C400",
-                  borderWidth: 0.5,
-                }}>
-                  <Star size={9} color="#F4C400" fill="#F4C400" />
-                  <Text style={{ fontSize: 10, fontFamily: "Poppins", fontWeight: "bold", color: "#8D7E50", marginTop: 1 }}>
-                    {Number(kitchen.rating || 4.5).toFixed(1)}
-                  </Text>
-                </View>
+                {Number(kitchen.rating) > 0 ? (
+                  <View style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 3,
+                    backgroundColor: "#FFF9E6",
+                    paddingHorizontal: 6,
+                    paddingVertical: 2,
+                    borderRadius: 6,
+                    borderColor: "#F4C400",
+                    borderWidth: 0.5,
+                  }}>
+                    <Star size={9} color="#F4C400" fill="#F4C400" />
+                    <Text style={{ fontSize: 10, fontFamily: "Poppins", fontWeight: "bold", color: "#8D7E50", marginTop: 1 }}>
+                      {Number(kitchen.rating).toFixed(1)}
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={{
+                    backgroundColor: "#F3F4F6",
+                    paddingHorizontal: 5,
+                    paddingVertical: 2,
+                    borderRadius: 5,
+                  }}>
+                    <Text style={{ fontSize: 9, fontFamily: "Poppins", fontWeight: "600", color: "#6B7280" }}>
+                      New
+                    </Text>
+                  </View>
+                )}
                 <View style={{
                   flexDirection: "row",
                   alignItems: "center",
@@ -337,24 +350,39 @@ export default function KitchenCard({ kitchen, className, onPress, variant = "li
             <Text style={{ fontSize: 16, fontFamily: "Poppins", fontWeight: "bold", color: "#1F1F1F", flex: 1, marginRight: 8 }} numberOfLines={1}>
               {kitchen.name}
             </Text>
-            <LinearGradient
-              colors={["#EAD293", "#CBB16B"]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 3,
-                paddingHorizontal: 10,
-                paddingVertical: 4,
-                borderRadius: 12,
-              }}
-            >
-              <Star size={10} color="#5A4515" fill="#5A4515" />
-              <Text style={{ fontSize: 11, fontFamily: "Poppins", fontWeight: "bold", color: "#5A4515", marginTop: 1 }}>
-                {Number(kitchen.rating || 4.5).toFixed(1)}
-              </Text>
-            </LinearGradient>
+            {Number(kitchen.rating) > 0 ? (
+              <LinearGradient
+                colors={["#EAD293", "#CBB16B"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 3,
+                  paddingHorizontal: 10,
+                  paddingVertical: 4,
+                  borderRadius: 12,
+                }}
+              >
+                <Star size={10} color="#5A4515" fill="#5A4515" />
+                <Text style={{ fontSize: 11, fontFamily: "Poppins", fontWeight: "bold", color: "#5A4515", marginTop: 1 }}>
+                  {Number(kitchen.rating).toFixed(1)}
+                </Text>
+              </LinearGradient>
+            ) : (
+              <View
+                style={{
+                  backgroundColor: "#F3F4F6",
+                  paddingHorizontal: 8,
+                  paddingVertical: 3,
+                  borderRadius: 10,
+                }}
+              >
+                <Text style={{ fontSize: 10, fontFamily: "Poppins", fontWeight: "600", color: "#6B7280" }}>
+                  New
+                </Text>
+              </View>
+            )}
           </View>
 
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>

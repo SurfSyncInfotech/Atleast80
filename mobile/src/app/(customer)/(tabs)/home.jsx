@@ -280,18 +280,33 @@ export default function HomeScreen() {
     if (suburb && address && !address.toLowerCase().includes(suburb.toLowerCase())) {
       suburb = ""
     }
-    if (address) {
+    // Keep dynamically detected city. Never overwrite valid detected city with street/landmark parts[0]
+    let finalCity = (city || "").trim()
+    if (!finalCity && address) {
       const parts = address.split(",").map(p => p.trim()).filter(Boolean)
-      if (parts.length > 0 && (!city || !address.toLowerCase().includes(city.toLowerCase()))) {
-        city = parts[0]
+      if (parts.length >= 3) {
+        finalCity = parts[parts.length - 3] || parts[parts.length - 2] || ""
+      } else if (parts.length > 0) {
+        finalCity = parts[parts.length - 1]
       }
     }
 
+    let detectedIso = ""
+    if (state) {
+      const matchedStateObj = FALLBACK_LOCATIONS.states.find(
+        (s) => s.name.toLowerCase() === state.toLowerCase()
+      )
+      detectedIso = matchedStateObj ? matchedStateObj.iso2 : (data.stateIso || data.stateCode || "")
+    }
+
+    const displayState = state ? (state.charAt(0).toUpperCase() + state.slice(1)) : ""
+    const displayCity = finalCity ? (finalCity.charAt(0).toUpperCase() + finalCity.slice(1)) : ""
+
     const nextLoc = await setLocationPreference({
-      state: state || "",
-      city: city || "",
+      state: displayState,
+      city: displayCity,
       suburb: suburb || "",
-      stateIso: state || "",
+      stateIso: detectedIso,
       address: address || "",
       pincode: pincode || "",
       lat: latitude || null,
@@ -299,6 +314,7 @@ export default function HomeScreen() {
     })
     setLocation(nextLoc)
     setTempState(nextLoc.state || "")
+    setTempStateIso(detectedIso)
     setTempCity(nextLoc.city || "")
     setTempAddress(nextLoc.address || "")
     setTempPincode(nextLoc.pincode || "")

@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useState, useRef, useMemo, useCallback } from "react"
 import {
   View,
   Text,
@@ -16,6 +16,16 @@ import {
 } from "react-native"
 
 import * as Location from "expo-location"
+import * as Clipboard from "expo-clipboard"
+
+let WebViewComponent = null
+if (Platform.OS !== "web") {
+  try {
+    WebViewComponent = require("react-native-webview").WebView
+  } catch (e) {
+    console.warn("react-native-webview not loaded", e)
+  }
+}
 
 const FALLBACK_LOCATIONS = {
   states: [
@@ -60,6 +70,47 @@ const FALLBACK_LOCATIONS = {
   }
 }
 
+const KNOWN_CITY_COORDINATES = {
+  roha: { lat: 18.4372, lng: 73.1084 },
+  kolad: { lat: 18.4144, lng: 73.2174 },
+  mangaon: { lat: 18.2520, lng: 73.2878 },
+  goregaon: { lat: 18.1724, lng: 73.2982 },
+  alibag: { lat: 18.6534, lng: 72.8777 },
+  mahad: { lat: 18.0827, lng: 73.4187 },
+  panvel: { lat: 18.9894, lng: 73.1175 },
+  "navi mumbai": { lat: 19.0330, lng: 73.0297 },
+  mumbai: { lat: 19.0760, lng: 72.8777 },
+  thane: { lat: 19.2183, lng: 72.9781 },
+  pune: { lat: 18.5204, lng: 73.8567 },
+  lucknow: { lat: 26.8467, lng: 80.9462 },
+  delhi: { lat: 28.6139, lng: 77.2090 },
+  "new delhi": { lat: 28.6139, lng: 77.2090 },
+  bengaluru: { lat: 12.9716, lng: 77.5946 },
+  ahmedabad: { lat: 23.0225, lng: 72.5714 }
+}
+
+async function resolveCityCoordinates(cityName, stateName = "Maharashtra") {
+  if (!cityName) return null
+  const clean = cityName.trim().toLowerCase()
+  if (KNOWN_CITY_COORDINATES[clean]) {
+    return KNOWN_CITY_COORDINATES[clean]
+  }
+  try {
+    const q = `${cityName}, ${stateName || "India"}`
+    const res = await api(`/api/locations/search?q=${encodeURIComponent(q)}`)
+    const items = res?.data || res?.results || []
+    if (items.length > 0 && items[0].latitude && items[0].longitude) {
+      return {
+        lat: Number(items[0].latitude),
+        lng: Number(items[0].longitude)
+      }
+    }
+  } catch (e) {
+    console.warn("Failed to geocode city:", cityName, e)
+  }
+  return null
+}
+
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { LinearGradient } from "expo-linear-gradient"
 import Animated, {
@@ -84,7 +135,8 @@ import {
   ChevronDown,
   ChevronRight,
   X,
-  KeyRound
+  KeyRound,
+  Copy
 } from "lucide-react-native"
 import { useAuth } from "../../../context/AuthContext"
 import {
@@ -93,7 +145,8 @@ import {
   toggleRiderStatus,
   updateRiderLocation,
   getAvailableRiderDeliveries,
-  performRiderDeliveryAction
+  performRiderDeliveryAction,
+  getRouteDetails
 } from "../../../lib/api"
 
 const DELIVERY_STEPS = [
@@ -247,6 +300,1347 @@ function DeliveryStepper({ currentStatus }) {
   )
 }
 
+// Haversine formula calculation for distance in KM
+function calculateDistanceKm(lat1, lon1, lat2, lon2) {
+  if (!lat1 || !lon1 || !lat2 || !lon2) return null
+  const numLat1 = Number(lat1)
+  const numLon1 = Number(lon1)
+  const numLat2 = Number(lat2)
+  const numLon2 = Number(lon2)
+  if (isNaN(numLat1) || isNaN(numLon1) || isNaN(numLat2) || isNaN(numLon2)) return null
+
+  const R = 6371 // Earth radius in KM
+  const dLat = (numLat2 - numLat1) * (Math.PI / 180)
+  const dLon = (numLon2 - numLon1) * (Math.PI / 180)
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(numLat1 * (Math.PI / 180)) *
+      Math.cos(numLat2 * (Math.PI / 180)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  // Multiplying by 1.25 to approximate realistic Indian road routes
+  const roadKm = (R * c * 1.25).toFixed(1)
+  return Number(roadKm) < 0.1 ? "0.1" : roadKm
+}
+
+// Drop trip delivery charge (Kitchen -> Customer): Base <= 2.0 km = ₹30.00, Above 2.0 km = ₹30.00 + (extra km * ₹10)
+function calculateDeliveryCharge(dropDistanceKm) {
+  const km = Number(dropDistanceKm) || 0;
+  const baseKm = 2.0;
+  const baseRate = 30.0;
+  const perKmRate = 10.0;
+  if (km <= baseKm) return baseRate;
+  const extraKm = km - baseKm;
+  return Number((baseRate + extraKm * perKmRate).toFixed(2));
+}
+
+// Total Rider Payout: Flat ₹20 (Rider -> Kitchen Pickup) + Drop Delivery Pay
+function calculateRiderPayout(dropDistanceKm, baseDeliveryFee = null) {
+  const PICKUP_PAY = 20.0;
+  let dropPay = 30.0;
+  if (baseDeliveryFee && Number(baseDeliveryFee) > 0) {
+    dropPay = Number(baseDeliveryFee);
+  } else if (dropDistanceKm) {
+    dropPay = calculateDeliveryCharge(dropDistanceKm);
+  }
+  return Number((PICKUP_PAY + dropPay).toFixed(2));
+}
+
+// Open Google Maps turn-by-turn navigation or search address directly
+function openInMaps(address, lat, lng, originLat, originLng) {
+  let destQuery = ""
+  if (lat && lng) {
+    destQuery = `${lat},${lng}`
+  } else if (address) {
+    destQuery = encodeURIComponent(address)
+  }
+  if (!destQuery) return
+
+  let originParam = ""
+  if (originLat && originLng) {
+    originParam = `&origin=${originLat},${originLng}`
+  }
+
+  const googleMapsWebUrl = `https://www.google.com/maps/dir/?api=1${originParam}&destination=${destQuery}&travelmode=driving`
+
+  // On Web browser, directly open Google Maps in a new tab to prevent Expo Router /undefined route navigation
+  if (Platform.OS === "web") {
+    if (typeof window !== "undefined" && window.open) {
+      window.open(googleMapsWebUrl, "_blank")
+    } else {
+      Linking.openURL(googleMapsWebUrl)
+    }
+    return
+  }
+
+  // Native Android and iOS
+  const nativeUrl = Platform.select({
+    ios: `maps:0,0?q=${destQuery}`,
+    android: `google.navigation:q=${destQuery}&mode=d`,
+    default: googleMapsWebUrl
+  })
+
+  if (nativeUrl) {
+    Linking.canOpenURL(nativeUrl)
+      .then((supported) => {
+        if (supported) {
+          return Linking.openURL(nativeUrl)
+        } else {
+          return Linking.openURL(googleMapsWebUrl)
+        }
+      })
+      .catch(() => {
+        Linking.openURL(googleMapsWebUrl).catch(() => {
+          Alert.alert("Navigation Error", "Unable to open Google Maps.")
+        })
+      })
+  } else {
+    Linking.openURL(googleMapsWebUrl)
+  }
+}
+
+const GOOGLE_MAPS_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "AIzaSyDdkmLpJjLrOLBkqceMQ63ZZodNgksd1Uc"
+
+// 1. Transparent Split Distance Breakdown Component
+function TripDistanceBreakdown({ pickupKm, dropKm, totalKm, isPickupDone = false }) {
+  return (
+    <View style={{ backgroundColor: "#F7FDF9", borderWidth: 1.5, borderColor: "#D1FAE5", borderRadius: 14, padding: 12, marginVertical: 8 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+          <Navigation size={12} color="#0B6B3A" />
+          <Text style={{ fontSize: 11, fontFamily: "Poppins", fontWeight: "bold", color: "#065F46", letterSpacing: 0.3 }}>
+            TRIP DISTANCE BREAKDOWN
+          </Text>
+        </View>
+        <View style={{ backgroundColor: "#EAF7EE", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+          <Text style={{ fontSize: 9.5, color: "#0B6B3A", fontFamily: "Nunito", fontWeight: "bold" }}>
+            Google Road Kilometers
+          </Text>
+        </View>
+      </View>
+
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
+        {/* Leg 1: Rider -> Kitchen */}
+        <View style={{ flex: 1, alignItems: "center", backgroundColor: isPickupDone ? "#ECFDF5" : "#FFFFFF", paddingVertical: 8, paddingHorizontal: 4, borderRadius: 10, borderWidth: 1, borderColor: isPickupDone ? "#A7F3D0" : "#E5E7EB" }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: isPickupDone ? "#059669" : "#0B6B3A" }} />
+            <Text style={{ fontSize: 10, color: "#4B5563", fontFamily: "Nunito", fontWeight: "600" }}>To Kitchen</Text>
+          </View>
+          <Text style={{ fontSize: 13, fontWeight: "bold", color: "#0B6B3A", fontFamily: "Poppins", marginTop: 2 }}>
+            {pickupKm ? `${pickupKm} km` : "--"}
+          </Text>
+          <Text style={{ fontSize: 9, color: "#059669", fontFamily: "Nunito", fontWeight: "bold" }}>₹20 Pickup</Text>
+        </View>
+
+        <Text style={{ fontSize: 14, color: "#9CA3AF", fontWeight: "bold" }}>+</Text>
+
+        {/* Leg 2: Kitchen -> Customer */}
+        <View style={{ flex: 1, alignItems: "center", backgroundColor: "#FFFFFF", paddingVertical: 8, paddingHorizontal: 4, borderRadius: 10, borderWidth: 1, borderColor: "#E5E7EB" }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#FF6B00" }} />
+            <Text style={{ fontSize: 10, color: "#4B5563", fontFamily: "Nunito", fontWeight: "600" }}>To Customer</Text>
+          </View>
+          <Text style={{ fontSize: 13, fontWeight: "bold", color: "#FF6B00", fontFamily: "Poppins", marginTop: 2 }}>
+            {dropKm ? `${dropKm} km` : "--"}
+          </Text>
+          <Text style={{ fontSize: 9, color: "#FF6B00", fontFamily: "Nunito", fontWeight: "bold" }}>
+            ₹{calculateDeliveryCharge(dropKm).toFixed(0)} Drop
+          </Text>
+        </View>
+
+        <Text style={{ fontSize: 14, color: "#9CA3AF", fontWeight: "bold" }}>=</Text>
+
+        {/* Total Trip */}
+        <View style={{ flex: 1.25, alignItems: "center", backgroundColor: "#0B6B3A", paddingVertical: 8, paddingHorizontal: 4, borderRadius: 10, shadowColor: "#0B6B3A", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 4, elevation: 2 }}>
+          <Text style={{ fontSize: 10, color: "#EAF7EE", fontFamily: "Nunito", fontWeight: "700" }}>Total Trip</Text>
+          <Text style={{ fontSize: 13.5, fontWeight: "bold", color: "#FFFFFF", fontFamily: "Poppins", marginTop: 1 }}>
+            {totalKm ? `${totalKm} km` : "--"}
+          </Text>
+          <Text style={{ fontSize: 9, color: "#A7F3D0", fontFamily: "Nunito", fontWeight: "bold" }}>
+            ₹{calculateRiderPayout(dropKm).toFixed(0)} Payout
+          </Text>
+        </View>
+      </View>
+    </View>
+  )
+}
+
+// 2. Interactive In-App Route Navigation Card (Pickup & Drop-off 2-Step Flow)
+function InAppRouteNavigation({ order, riderCoords, routeInfo, onStartNavigation }) {
+  if (!order) return null
+
+  const isPickupPhase = ["accepted", "arrived_kitchen"].includes(order.delivery_status)
+  const isDropPhase = ["picked_up", "arrived_customer"].includes(order.delivery_status)
+
+  const originLat = riderCoords?.latitude
+  const originLng = riderCoords?.longitude
+
+  const destLat = isPickupPhase ? (order.kitchen_latitude || order.kitchen_lat) : (order.delivery_latitude || order.delivery_lat)
+  const destLng = isPickupPhase ? (order.kitchen_longitude || order.kitchen_lng) : (order.delivery_longitude || order.delivery_lng)
+
+  const destAddress = isPickupPhase
+    ? [order.kitchen_address, order.kitchen_city, order.kitchen_pincode].filter(Boolean).join(", ")
+    : [order.delivery_address, order.customer_city, order.customer_pincode].filter(Boolean).join(", ")
+
+  const destName = isPickupPhase ? order.kitchen_name : (order.customer_name || "Customer")
+
+  const destPinColor = isPickupPhase ? "0xFF6B00" : "0xEF4444"
+  const destPinLabel = isPickupPhase ? "K" : "C"
+
+  // Road distance & ETA
+  const realTimeKm = calculateDistanceKm(originLat, originLng, destLat, destLng)
+  const displayKm = realTimeKm || routeInfo?.distanceKm || "~"
+  const displayDuration = (displayKm && displayKm !== "~") ? `${Math.max(1, Math.round((Number(displayKm) / 25) * 60))} mins` : (routeInfo?.durationText || null)
+
+  // Google Static Map route preview URL with rider & destination markers and road polyline
+  let staticMapUrl = null
+  if (originLat && originLng && destLat && destLng) {
+    const polyline = routeInfo?.encodedPolyline
+    const pathParam = polyline
+      ? `enc:${encodeURIComponent(polyline)}`
+      : `${originLat},${originLng}%7C${destLat},${destLng}`
+    staticMapUrl = `https://maps.googleapis.com/maps/api/staticmap?size=640x300&scale=2&maptype=roadmap&markers=color:0x0B6B3A%7Clabel:R%7C${originLat},${originLng}&markers=color:${destPinColor}%7Clabel:${destPinLabel}%7C${destLat},${destLng}&path=color:0x0B6B3Aff|weight:5|${pathParam}&key=${GOOGLE_MAPS_KEY}`
+  }
+
+  return (
+    <View style={{ borderRadius: 16, overflow: "hidden", borderWidth: 1.5, borderColor: isPickupPhase ? "#FED7AA" : "#FECACA", backgroundColor: "#FFFFFF", marginVertical: 4 }}>
+      {/* Step Header */}
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 10, backgroundColor: isPickupPhase ? "#FFF7ED" : "#FEF2F2", borderBottomWidth: 1, borderBottomColor: isPickupPhase ? "#FED7AA" : "#FECACA" }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 7, flex: 1 }}>
+          <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: isPickupPhase ? "#EA580C" : "#DC2626" }} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 11, fontFamily: "Poppins", fontWeight: "bold", color: isPickupPhase ? "#9A3412" : "#991B1B", textTransform: "uppercase" }}>
+              {isPickupPhase ? "Step 1: Route to Kitchen" : "Step 2: Route to Customer"}
+            </Text>
+            <Text numberOfLines={1} style={{ fontSize: 12, fontFamily: "Poppins", fontWeight: "600", color: "#1F1F1F" }}>
+              {destName}
+            </Text>
+          </View>
+        </View>
+
+        <View style={{ backgroundColor: "#FFFFFF", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, borderWidth: 1, borderColor: isPickupPhase ? "#FDBA74" : "#FCA5A5", flexDirection: "row", alignItems: "center", gap: 4 }}>
+          <Navigation size={11} color="#0B6B3A" />
+          <Text style={{ fontSize: 11, fontFamily: "Poppins", fontWeight: "bold", color: "#0B6B3A" }}>
+            {displayKm} km {displayDuration ? `• ${displayDuration}` : ""}
+          </Text>
+        </View>
+      </View>
+
+      {/* Map visual preview with Live Moving Map */}
+      <View style={{ position: "relative", width: "100%", height: 185, backgroundColor: "#E5E7EB", overflow: "hidden" }}>
+        {originLat && originLng && destLat && destLng ? (
+          <InteractiveGoogleMap
+            originLat={originLat}
+            originLng={originLng}
+            originHeading={riderCoords?.heading}
+            destLat={destLat}
+            destLng={destLng}
+            encodedPolyline={routeInfo?.encodedPolyline}
+            isPickupPhase={isPickupPhase}
+            destName={destName}
+            isAutoFollowing={true}
+            isPreview={true}
+          />
+        ) : staticMapUrl ? (
+          <Image
+            source={{ uri: staticMapUrl }}
+            style={{ width: "100%", height: "100%" }}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: "#F9FAFB" }}>
+            <MapPin size={26} color="#9CA3AF" />
+            <Text style={{ fontSize: 12, color: "#6B7280", fontFamily: "Nunito" }}>Loading live Google route map...</Text>
+          </View>
+        )}
+
+        {/* Floating Google Maps Turn-by-Turn Button */}
+        <TouchableOpacity
+          onPress={onStartNavigation}
+          activeOpacity={0.88}
+          style={{
+            position: "absolute",
+            bottom: 12,
+            right: 12,
+            backgroundColor: "#0B6B3A",
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 7,
+            paddingHorizontal: 15,
+            paddingVertical: 9.5,
+            borderRadius: 22,
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 3 },
+            shadowOpacity: 0.3,
+            shadowRadius: 5,
+            elevation: 5
+          }}
+        >
+          <Navigation size={14} color="#FFFFFF" />
+          <Text style={{ fontSize: 12, fontFamily: "Poppins", fontWeight: "bold", color: "#FFFFFF" }}>
+            Start In-App Navigation
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  )
+}
+
+
+// Polyline decoder utility for Google Routes API
+function decodePolyline(encoded) {
+  if (!encoded) return []
+  const points = []
+  let index = 0, len = encoded.length
+  let lat = 0, lng = 0
+
+  while (index < len) {
+    let b, shift = 0, result = 0
+    do {
+      b = encoded.charCodeAt(index++) - 63
+      result |= (b & 0x1f) << shift
+      shift += 5
+    } while (b >= 0x20)
+    const dlat = ((result & 1) ? ~(result >> 1) : (result >> 1))
+    lat += dlat
+
+    shift = 0
+    result = 0
+    do {
+      b = encoded.charCodeAt(index++) - 63
+      result |= (b & 0x1f) << shift
+      shift += 5
+    } while (b >= 0x20)
+    const dlng = ((result & 1) ? ~(result >> 1) : (result >> 1))
+    lng += dlng
+
+    points.push({ lat: lat / 1e5, lng: lng / 1e5 })
+  }
+  return points
+}
+
+// 100% Real Interactive Navigation Map component (Fast, Draggable, Smooth, No Billing/API Restrictions)
+
+function generateInteractiveMapHtml({ originLat, originLng, originHeading = 0, destLat, destLng, encodedPolyline, isPickupPhase, isPreview = false }) {
+  const centerLat = Number(originLat) || 28.580
+  const centerLng = Number(originLng) || 77.380
+  const dLat = destLat ? Number(destLat) : null
+  const dLng = destLng ? Number(destLng) : null
+  const destColor = isPickupPhase ? "#FF6B00" : "#DC2626"
+  const destLetter = isPickupPhase ? "K" : "C"
+
+  const polylinePoints = encodedPolyline ? decodePolyline(encodedPolyline) : []
+  const polylineJson = JSON.stringify(polylinePoints.map(p => [p.lat, p.lng]))
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    html, body, #map { width: 100%; height: 100%; margin: 0; padding: 0; background: #e5e7eb; overflow: hidden; }
+    .rider-pulse-halo {
+      animation: riderPulse 2s ease-in-out infinite;
+    }
+    @keyframes riderPulse {
+      0% { transform: scale(0.85); opacity: 0.85; }
+      50% { transform: scale(1.6); opacity: 0.2; }
+      100% { transform: scale(0.85); opacity: 0.85; }
+    }
+    .leaflet-control-attribution { display: none !important; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script>
+    var centerLat = ${centerLat};
+    var centerLng = ${centerLng};
+    var map = L.map('map', { zoomControl: false, attributionControl: false }).setView([centerLat, centerLng], 16);
+
+    L.tileLayer('https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+      maxZoom: 20,
+      subdomains: ['0', '1', '2', '3']
+    }).addTo(map);
+
+    // Live Rider Marker with Directional Pointer
+    var riderIcon = L.divIcon({
+      className: 'rider-live-marker',
+      html: '<div style="position: relative; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;">' +
+            '<div class="rider-pulse-halo" style="position: absolute; width: 40px; height: 40px; border-radius: 50%; background: rgba(16, 185, 129, 0.4);"></div>' +
+            '<div id="rider-arrow-wrap" style="width: 28px; height: 28px; border-radius: 50%; background: #0B6B3A; border: 3px solid #FFFFFF; box-shadow: 0 4px 10px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 2; transform: rotate(${originHeading}deg); transition: transform 0.3s ease;">' +
+            '<span style="color: #FFFFFF; font-size: 13px; font-weight: 900; line-height: 1; transform: translateY(-1px);">▲</span>' +
+            '</div></div>',
+      iconSize: [40, 40],
+      iconAnchor: [20, 20]
+    });
+
+    var riderMarker = L.marker([centerLat, centerLng], { icon: riderIcon, zIndexOffset: 1000 }).addTo(map);
+
+    ${dLat && dLng ? `
+    var destIcon = L.divIcon({
+      className: 'dest-marker',
+      html: '<div style="width: 32px; height: 32px; background: ${destColor}; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); display: flex; align-items: center; justify-content: center; border: 2.5px solid #FFFFFF; box-shadow: 0 4px 10px rgba(0,0,0,0.35);">' +
+            '<span style="transform: rotate(45deg); font-weight: 800; font-size: 13px; color: #FFFFFF; font-family: sans-serif;">${destLetter}</span>' +
+            '</div>',
+      iconSize: [32, 32],
+      iconAnchor: [16, 32]
+    });
+    var destMarker = L.marker([${dLat}, ${dLng}], { icon: destIcon, zIndexOffset: 900 }).addTo(map);
+    ` : ''}
+
+    var polylinePoints = ${polylineJson};
+    var polyline = null;
+    var padTL = ${isPreview ? "[15, 15]" : "[30, 80]"};
+    var padBR = ${isPreview ? "[15, 15]" : "[30, 150]"};
+
+    if (polylinePoints && polylinePoints.length > 0) {
+      polyline = L.polyline(polylinePoints, { color: '#0B6B3A', weight: ${isPreview ? 5 : 6}, opacity: 0.9, lineJoin: 'round' }).addTo(map);
+      try {
+        map.fitBounds(polyline.getBounds(), { paddingTopLeft: padTL, paddingBottomRight: padBR, maxZoom: 17 });
+      } catch (e) {
+        map.setView([centerLat, centerLng], 15);
+      }
+    } else if (${dLat && dLng ? 'true' : 'false'}) {
+      try {
+        var bounds = L.latLngBounds([[centerLat, centerLng], [${dLat || centerLat}, ${dLng || centerLng}]]);
+        map.fitBounds(bounds, { paddingTopLeft: padTL, paddingBottomRight: padBR, maxZoom: 17 });
+      } catch (e) {
+        map.setView([centerLat, centerLng], 15);
+      }
+    }
+
+    setTimeout(function() {
+      try { map.invalidateSize(); } catch(e) {}
+    }, 250);
+
+    var autoFollowEnabled = true;
+    map.on('dragstart', function() {
+      autoFollowEnabled = false;
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'dragstart' }));
+      }
+    });
+
+    window.updateRoutePolyline = function(newPoints) {
+      if (!newPoints || !newPoints.length) return;
+      if (polyline) {
+        polyline.setLatLngs(newPoints);
+      } else {
+        polyline = L.polyline(newPoints, { color: '#0B6B3A', weight: ${isPreview ? 5 : 6}, opacity: 0.9, lineJoin: 'round' }).addTo(map);
+      }
+    };
+
+    window.updateRiderPosition = function(lat, lng, heading, autoFollow) {
+      if (!lat || !lng) return;
+      var newPos = L.latLng(lat, lng);
+      riderMarker.setLatLng(newPos);
+      var arrow = document.getElementById('rider-arrow-wrap');
+      if (arrow && heading !== undefined) {
+        arrow.style.transform = 'rotate(' + (heading || 0) + 'deg)';
+      }
+      if (autoFollow && autoFollowEnabled) {
+        map.panTo(newPos, { animate: true, duration: 0.8 });
+      }
+    };
+
+    window.recenterMap = function(lat, lng) {
+      autoFollowEnabled = true;
+      map.setView([lat, lng], 17, { animate: true });
+    };
+  </script>
+</body>
+</html>`
+}
+
+function InteractiveGoogleMap({
+  originLat,
+  originLng,
+  originHeading = 0,
+  destLat,
+  destLng,
+  encodedPolyline,
+  isPickupPhase,
+  destName,
+  isAutoFollowing = true,
+  setIsAutoFollowing,
+  recenterTrigger,
+  mapRef,
+  isPreview = false,
+}) {
+  const containerRef = useRef(null)
+  const webViewRef = useRef(null)
+  const riderMarkerRef = useRef(null)
+  const destMarkerRef = useRef(null)
+  const polylineRef = useRef(null)
+  const internalMapRef = useRef(null)
+  const activeMapRef = mapRef || internalMapRef
+  const [mapLoaded, setMapLoaded] = useState(false)
+
+  const initialOriginRef = useRef({
+    lat: originLat || 28.580,
+    lng: originLng || 77.380,
+    heading: originHeading || 0,
+  })
+
+  if ((!initialOriginRef.current.lat || initialOriginRef.current.lat === 28.580) && originLat) {
+    initialOriginRef.current.lat = originLat
+    initialOriginRef.current.lng = originLng
+    initialOriginRef.current.heading = originHeading || 0
+  }
+
+  // Stable HTML string that does NOT reload the WebView when rider moves
+  const mapHtml = useMemo(() => {
+    return generateInteractiveMapHtml({
+      originLat: initialOriginRef.current.lat,
+      originLng: initialOriginRef.current.lng,
+      originHeading: initialOriginRef.current.heading,
+      destLat,
+      destLng,
+      encodedPolyline,
+      isPickupPhase,
+      isPreview,
+    })
+  }, [destLat, destLng, isPickupPhase, isPreview])
+
+  const mapSource = useMemo(() => ({ html: mapHtml }), [mapHtml])
+
+  // Web Leaflet initialization
+  useEffect(() => {
+    if (Platform.OS !== "web") return
+    let isMounted = true
+
+    if (typeof document !== "undefined" && !document.getElementById("nav-map-styles")) {
+      const styleEl = document.createElement("style")
+      styleEl.id = "nav-map-styles"
+      styleEl.innerHTML = `
+        @keyframes riderPulse {
+          0% { transform: scale(0.85); opacity: 0.85; }
+          50% { transform: scale(1.6); opacity: 0.2; }
+          100% { transform: scale(0.85); opacity: 0.85; }
+        }
+        .rider-pulse-halo {
+          animation: riderPulse 2s ease-in-out infinite;
+        }
+        .leaflet-container {
+          width: 100% !important;
+          height: 100% !important;
+          background: #E5E7EB !important;
+        }
+        .leaflet-control-attribution {
+          display: none !important;
+        }
+      `
+      document.head.appendChild(styleEl)
+    }
+
+    const loadLeafletAndInit = async () => {
+      try {
+        if (!window.L) {
+          if (!document.getElementById("leaflet-css")) {
+            const link = document.createElement("link")
+            link.id = "leaflet-css"
+            link.rel = "stylesheet"
+            link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+            document.head.appendChild(link)
+          }
+
+          await new Promise((resolve, reject) => {
+            const existing = document.getElementById("leaflet-js")
+            if (existing) {
+              if (window.L) return resolve()
+              existing.addEventListener("load", resolve)
+              existing.addEventListener("error", reject)
+              return
+            }
+            const script = document.createElement("script")
+            script.id = "leaflet-js"
+            script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            script.async = true
+            script.onload = () => resolve()
+            script.onerror = reject
+            document.head.appendChild(script)
+          })
+        }
+
+        if (!isMounted || !containerRef.current || !window.L) return
+
+        if (activeMapRef.current) {
+          try {
+            activeMapRef.current.remove()
+          } catch (e) {}
+          activeMapRef.current = null
+        }
+        if (containerRef.current) {
+          try {
+            if (containerRef.current._leaflet_id) {
+              containerRef.current._leaflet_id = null
+            }
+            containerRef.current.innerHTML = ""
+          } catch (e) {}
+        }
+
+        const centerLat = Number(originLat) || 28.580
+        const centerLng = Number(originLng) || 77.380
+
+        let map = null
+        try {
+          map = window.L.map(containerRef.current, {
+            center: [centerLat, centerLng],
+            zoom: 16,
+            zoomControl: false,
+            attributionControl: false,
+          })
+        } catch (initErr) {
+          if (containerRef.current) {
+            containerRef.current._leaflet_id = null
+            containerRef.current.innerHTML = ""
+            map = window.L.map(containerRef.current, {
+              center: [centerLat, centerLng],
+              zoom: 16,
+              zoomControl: false,
+              attributionControl: false,
+            })
+          }
+        }
+
+        activeMapRef.current = map
+
+        window.L.tileLayer("https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}", {
+          maxZoom: 20,
+          subdomains: ["0", "1", "2", "3"],
+        }).addTo(map)
+
+        // Live Rider Marker with Directional Pointer
+        const riderIcon = window.L.divIcon({
+          className: "rider-live-marker",
+          html: `
+            <div style="position: relative; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;">
+              <div class="rider-pulse-halo" style="position: absolute; width: 40px; height: 40px; border-radius: 50%; background: rgba(16, 185, 129, 0.4);"></div>
+              <div id="rider-arrow-wrap-web" style="width: 28px; height: 28px; border-radius: 50%; background: #0B6B3A; border: 3px solid #FFFFFF; box-shadow: 0 4px 10px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 2; transform: rotate(${originHeading || 0}deg); transition: transform 0.3s ease;">
+                <span style="color: #FFFFFF; font-size: 13px; font-weight: 900; line-height: 1; transform: translateY(-1px);">▲</span>
+              </div>
+            </div>
+          `,
+          iconSize: [40, 40],
+          iconAnchor: [20, 20],
+        })
+
+        const riderMarker = window.L.marker([centerLat, centerLng], {
+          icon: riderIcon,
+          zIndexOffset: 1000,
+        }).addTo(map)
+        riderMarkerRef.current = riderMarker
+
+        // Destination Marker
+        if (destLat && destLng) {
+          const destColor = isPickupPhase ? "#FF6B00" : "#DC2626"
+          const destLetter = isPickupPhase ? "K" : "C"
+          const destIcon = window.L.divIcon({
+            className: "dest-live-marker",
+            html: `
+              <div style="width: 32px; height: 32px; background: ${destColor}; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); display: flex; align-items: center; justify-content: center; border: 2.5px solid #FFFFFF; box-shadow: 0 4px 10px rgba(0,0,0,0.35);">
+                <span style="transform: rotate(45deg); font-weight: 800; font-size: 13px; color: #FFFFFF; font-family: sans-serif;">
+                  ${destLetter}
+                </span>
+              </div>
+            `,
+            iconSize: [32, 32],
+            iconAnchor: [16, 32],
+          })
+
+          const destMarker = window.L.marker([Number(destLat), Number(destLng)], {
+            icon: destIcon,
+            zIndexOffset: 900,
+          }).addTo(map)
+          destMarkerRef.current = destMarker
+        }
+
+        // Draw Route Polyline
+        let polyline = null
+        if (encodedPolyline) {
+          const points = decodePolyline(encodedPolyline)
+          if (points.length > 0) {
+            const latLngs = points.map((p) => [p.lat, p.lng])
+            polyline = window.L.polyline(latLngs, {
+              color: "#0B6B3A",
+              weight: 6,
+              opacity: 0.9,
+              lineJoin: "round",
+            }).addTo(map)
+            polylineRef.current = polyline
+          }
+        }
+
+        const padTL = isPreview ? [15, 15] : [30, 80]
+        const padBR = isPreview ? [15, 15] : [30, 150]
+        if (polyline) {
+          try {
+            map.fitBounds(polyline.getBounds(), {
+              paddingTopLeft: padTL,
+              paddingBottomRight: padBR,
+              maxZoom: 17,
+            })
+          } catch (e) {
+            map.setView([centerLat, centerLng], 15)
+          }
+        } else if (originLat && originLng && destLat && destLng) {
+          try {
+            const group = window.L.latLngBounds([
+              [Number(originLat), Number(originLng)],
+              [Number(destLat), Number(destLng)],
+            ])
+            map.fitBounds(group, {
+              paddingTopLeft: padTL,
+              paddingBottomRight: padBR,
+              maxZoom: 17,
+            })
+          } catch (e) {
+            map.setView([centerLat, centerLng], 15)
+          }
+        }
+
+        setTimeout(() => {
+          try { map.invalidateSize() } catch (e) {}
+        }, 250)
+
+        map.on("dragstart", () => {
+          if (setIsAutoFollowing) setIsAutoFollowing(false)
+        })
+
+        if (isMounted) setMapLoaded(true)
+      } catch (err) {
+        console.error("Interactive Navigation Map Init Error:", err)
+      }
+    }
+
+    loadLeafletAndInit()
+
+    return () => {
+      isMounted = false
+      if (activeMapRef?.current) {
+        try {
+          activeMapRef.current.remove()
+        } catch (e) {}
+        activeMapRef.current = null
+      }
+      riderMarkerRef.current = null
+      destMarkerRef.current = null
+      polylineRef.current = null
+      if (containerRef.current) {
+        try {
+          containerRef.current._leaflet_id = null
+          containerRef.current.innerHTML = ""
+        } catch (e) {}
+      }
+    }
+  }, [destLat, destLng, encodedPolyline, isPickupPhase])
+
+  // Real-time rider location updates on Web
+  useEffect(() => {
+    if (
+      Platform.OS === "web" &&
+      riderMarkerRef.current &&
+      riderMarkerRef.current._map &&
+      riderMarkerRef.current._icon &&
+      originLat &&
+      originLng
+    ) {
+      try {
+        const pos = [Number(originLat), Number(originLng)]
+        riderMarkerRef.current.setLatLng(pos)
+        const arrowEl = document.getElementById("rider-arrow-wrap-web")
+        if (arrowEl && originHeading !== undefined) {
+          arrowEl.style.transform = `rotate(${originHeading || 0}deg)`
+        }
+        if (isAutoFollowing && activeMapRef?.current && activeMapRef.current._loaded) {
+          activeMapRef.current.panTo(pos, { animate: false })
+        }
+      } catch (err) {
+        // Silently guard against detached DOM node or animation frame race
+      }
+    }
+  }, [originLat, originLng, originHeading, isAutoFollowing])
+
+  // Real-time rider location updates on Native (WebView injection)
+  useEffect(() => {
+    if (Platform.OS !== "web" && webViewRef.current && originLat && originLng) {
+      const js = `if (window.updateRiderPosition) { window.updateRiderPosition(${originLat}, ${originLng}, ${originHeading || 0}, ${isAutoFollowing ? "true" : "false"}); }; true;`
+      webViewRef.current.injectJavaScript(js)
+    }
+  }, [originLat, originLng, originHeading, isAutoFollowing])
+
+  // Real-time polyline route update without page reload
+  useEffect(() => {
+    if (Platform.OS !== "web" && webViewRef.current && encodedPolyline) {
+      try {
+        const points = decodePolyline(encodedPolyline)
+        if (points && points.length > 0) {
+          const latLngs = points.map((p) => [p.lat, p.lng])
+          const js = `if (window.updateRoutePolyline) { window.updateRoutePolyline(${JSON.stringify(latLngs)}); }; true;`
+          webViewRef.current.injectJavaScript(js)
+        }
+      } catch (_) {}
+    }
+  }, [encodedPolyline])
+
+  // Recenter trigger
+  useEffect(() => {
+    if (recenterTrigger && originLat && originLng) {
+      try {
+        if (Platform.OS === "web" && activeMapRef?.current && activeMapRef.current._loaded) {
+          activeMapRef.current.setView([Number(originLat), Number(originLng)], 17, { animate: true })
+        } else if (Platform.OS !== "web" && webViewRef.current) {
+          webViewRef.current.injectJavaScript(`if (window.recenterMap) { window.recenterMap(${originLat}, ${originLng}); }; true;`)
+        }
+      } catch (err) {}
+      if (setIsAutoFollowing) setIsAutoFollowing(true)
+    }
+  }, [recenterTrigger])
+
+  return (
+    <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "#E5E7EB" }}>
+      {Platform.OS === "web" ? (
+        <div
+          ref={containerRef}
+          style={{
+            width: "100%",
+            height: "100%",
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+          }}
+        />
+      ) : WebViewComponent ? (
+        <WebViewComponent
+          ref={webViewRef}
+          originWhitelist={["*"]}
+          source={mapSource}
+          style={{ width: "100%", height: "100%", backgroundColor: "#E5E7EB" }}
+          javaScriptEnabled={true}
+          domStorageEnabled={true}
+          scalesPageToFit={true}
+          scrollEnabled={false}
+          onMessage={(e) => {
+            try {
+              const data = JSON.parse(e.nativeEvent.data)
+              if (data?.type === "dragstart" && setIsAutoFollowing) {
+                setIsAutoFollowing(false)
+              }
+            } catch (_) {}
+          }}
+          onLoadEnd={() => {
+            setMapLoaded(true)
+            if (webViewRef.current && originLat && originLng) {
+              const js = `if (window.updateRiderPosition) { window.updateRiderPosition(${originLat}, ${originLng}, ${originHeading || 0}, ${isAutoFollowing ? "true" : "false"}); }; true;`
+              webViewRef.current.injectJavaScript(js)
+            }
+          }}
+        />
+      ) : (
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+          <ActivityIndicator size="large" color="#0B6B3A" />
+        </View>
+      )}
+
+      {!mapLoaded && (
+        <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", backgroundColor: "#F3F4F6", zIndex: 5 }}>
+          <ActivityIndicator size="large" color="#0B6B3A" />
+          <Text style={{ marginTop: 10, fontSize: 13, color: "#4B5563", fontFamily: "Poppins" }}>
+            Loading Interactive Navigation Map...
+          </Text>
+        </View>
+      )}
+    </View>
+  )
+}
+
+// 3. 100% Full-Screen Edge-to-Edge Map Navigation (Floating Turn HUD & Floating Action Sheet)
+function InAppNavigationScreen({
+  order,
+  riderCoords,
+  setRiderCoords,
+  routeInfo,
+  onClose,
+  handleOrderAction,
+  onCompleteDeliveryPress,
+  onCancelDoorstepPress,
+  actionLoading,
+  otpInput,
+  setOtpInput,
+  handleCall,
+  updateRiderLocationOnServer
+}) {
+  const mapRef = useRef(null)
+  const [isAutoFollowing, setIsAutoFollowing] = useState(true)
+  const [recenterTrigger, setRecenterTrigger] = useState(0)
+  const [showAllSteps, setShowAllSteps] = useState(false)
+  const [activeStepIndex, setActiveStepIndex] = useState(0)
+
+  // Live GPS tracking watcher (Continuous 2.5s / 5m high-accuracy updates)
+  useEffect(() => {
+    let isMounted = true
+    let sub = null
+
+    Location.watchPositionAsync(
+      {
+        accuracy: Location.Accuracy.High,
+        timeInterval: 2000,
+        distanceInterval: 5,
+      },
+      (pos) => {
+        if (isMounted && pos?.coords) {
+          let lat = pos.coords.latitude
+          let lng = pos.coords.longitude
+          let heading = pos.coords.heading || 0
+          let speed = pos.coords.speed || 0
+
+          const refLat = order?.kitchen_latitude || order?.kitchen_lat
+          const refLng = order?.kitchen_longitude || order?.kitchen_lng
+          if (refLat && refLng) {
+            const distFromRef = calculateDistanceKm(lat, lng, refLat, refLng)
+            if (distFromRef && Number(distFromRef) > 35) {
+              lat = Number(refLat)
+              lng = Number(refLng)
+            }
+          }
+
+          const coords = {
+            latitude: lat,
+            longitude: lng,
+            heading,
+            speed,
+          }
+          if (setRiderCoords) setRiderCoords(coords)
+          if (updateRiderLocationOnServer) {
+            updateRiderLocationOnServer(lat, lng).catch(() => {})
+          }
+        }
+      }
+    ).then((s) => {
+      if (isMounted) sub = s
+      else s.remove()
+    }).catch((err) => {
+      console.warn("In-app nav GPS watch error:", err?.message)
+    })
+
+    return () => {
+      isMounted = false
+      if (sub) sub.remove()
+    }
+  }, [])
+
+  if (!order) return null
+
+  const isPickupPhase = ["accepted", "arrived_kitchen"].includes(order.delivery_status)
+  const originLat = riderCoords?.latitude
+  const originLng = riderCoords?.longitude
+
+  const destLat = isPickupPhase ? (order.kitchen_latitude || order.kitchen_lat) : (order.delivery_latitude || order.delivery_lat)
+  const destLng = isPickupPhase ? (order.kitchen_longitude || order.kitchen_lng) : (order.delivery_longitude || order.delivery_lng)
+
+  const destAddress = isPickupPhase
+    ? [order.kitchen_address, order.kitchen_city, order.kitchen_pincode].filter(Boolean).join(", ")
+    : [order.delivery_address, order.customer_city, order.customer_pincode].filter(Boolean).join(", ")
+
+  const destName = isPickupPhase ? order.kitchen_name : (order.customer_name || "Customer")
+  const destPhone = isPickupPhase ? order.kitchen_phone : order.customer_phone
+
+  const realTimeKm = calculateDistanceKm(originLat, originLng, destLat, destLng)
+  const displayKm = realTimeKm || routeInfo?.distanceKm || "~"
+  const displayDuration = (displayKm && displayKm !== "~") ? `${Math.max(1, Math.round((Number(displayKm) / 25) * 60))} mins` : (routeInfo?.durationText || null)
+
+  const steps = (routeInfo?.steps && routeInfo.steps.length > 0) ? routeInfo.steps : [
+    { id: 1, distanceText: `${displayKm} km`, maneuver: "STRAIGHT", instruction: `Proceed toward ${destName}` }
+  ]
+
+  const currentStep = steps[activeStepIndex] || steps[0]
+
+  const getManeuverArrow = (maneuver) => {
+    const m = String(maneuver || "").toUpperCase()
+    if (m.includes("LEFT")) return "↰"
+    if (m.includes("RIGHT")) return "↱"
+    if (m.includes("U_TURN")) return "⮌"
+    return "⬆"
+  }
+
+  return (
+    <View style={{
+      position: "absolute",
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: "#E5E7EB",
+      zIndex: 50,
+      overflow: "hidden"
+    }}>
+        {/* 1. 100% REAL INTERACTIVE GOOGLE MAP BACKGROUND (Draggable, Zoomable, Pannable) */}
+        <InteractiveGoogleMap
+          originLat={originLat}
+          originLng={originLng}
+          originHeading={riderCoords?.heading}
+          destLat={destLat}
+          destLng={destLng}
+          encodedPolyline={routeInfo?.encodedPolyline}
+          isPickupPhase={isPickupPhase}
+          destName={destName}
+          isAutoFollowing={isAutoFollowing}
+          setIsAutoFollowing={setIsAutoFollowing}
+          recenterTrigger={recenterTrigger}
+          mapRef={mapRef}
+        />
+
+        {/* 2. MINIMALIST SLIM FLOATING TOP TURN HUD */}
+        <View style={{ position: "absolute", top: Platform.OS === "ios" ? 50 : 16, left: 14, right: 14, zIndex: 10 }}>
+          <View style={{
+            backgroundColor: "#064E3B",
+            borderRadius: 18,
+            paddingHorizontal: 14,
+            paddingVertical: 12,
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 6 },
+            shadowOpacity: 0.35,
+            shadowRadius: 10,
+            elevation: 8,
+            borderWidth: 1,
+            borderColor: "rgba(52, 211, 153, 0.3)"
+          }}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              {/* Turn Icon */}
+              <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "#10B981", alignItems: "center", justifyContent: "center" }}>
+                <Text style={{ fontSize: 22, fontWeight: "bold", color: "#064E3B", lineHeight: 26 }}>
+                  {getManeuverArrow(currentStep?.maneuver)}
+                </Text>
+              </View>
+
+              {/* Turn Text & ETA */}
+              <View style={{ flex: 1 }}>
+                <Text numberOfLines={1} style={{ fontSize: 13.5, fontFamily: "Poppins", fontWeight: "bold", color: "#FFFFFF" }}>
+                  {currentStep?.distanceText ? `${currentStep.distanceText} • ` : ""}{currentStep?.instruction || `Head to ${destName}`}
+                </Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 }}>
+                  <Text style={{ fontSize: 11.5, color: "#A7F3D0", fontFamily: "Nunito", fontWeight: "bold" }}>
+                    {displayKm} km • {displayDuration || "Calculating..."}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => setShowAllSteps(!showAllSteps)}
+                    style={{ backgroundColor: "rgba(255,255,255,0.15)", paddingHorizontal: 7, paddingVertical: 1.5, borderRadius: 10 }}
+                  >
+                    <Text style={{ fontSize: 10, color: "#6EE7B7", fontFamily: "Poppins", fontWeight: "600" }}>
+                      {showAllSteps ? "Hide" : `${steps.length} Turns ▾`}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Exit Button */}
+              <TouchableOpacity
+                onPress={onClose}
+                activeOpacity={0.8}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 4,
+                  backgroundColor: "rgba(255,255,255,0.2)",
+                  paddingHorizontal: 11,
+                  paddingVertical: 6,
+                  borderRadius: 14
+                }}
+              >
+                <X size={14} color="#FFFFFF" />
+                <Text style={{ fontSize: 11.5, fontFamily: "Poppins", fontWeight: "bold", color: "#FFFFFF" }}>Exit</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Collapsible Turns Dropdown */}
+          {showAllSteps && (
+            <View style={{ maxHeight: 180, backgroundColor: "#022C22", borderRadius: 16, marginTop: 8, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(255,255,255,0.15)", shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 6, elevation: 6 }}>
+              <ScrollView showsVerticalScrollIndicator={true}>
+                {steps.map((st, idx) => (
+                  <TouchableOpacity
+                    key={st.id || idx}
+                    onPress={() => {
+                      setActiveStepIndex(idx)
+                      setShowAllSteps(false)
+                    }}
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                      paddingVertical: 6,
+                      borderBottomWidth: idx === steps.length - 1 ? 0 : 1,
+                      borderBottomColor: "rgba(255,255,255,0.06)",
+                      opacity: idx === activeStepIndex ? 1 : 0.7
+                    }}
+                  >
+                    <Text style={{ fontSize: 15, color: idx === activeStepIndex ? "#34D399" : "#9CA3AF" }}>
+                      {getManeuverArrow(st.maneuver)}
+                    </Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 11.5, fontFamily: "Poppins", fontWeight: idx === activeStepIndex ? "bold" : "500", color: idx === activeStepIndex ? "#34D399" : "#E5E7EB" }}>
+                        {st.instruction}
+                      </Text>
+                      <Text style={{ fontSize: 9.5, color: "#9CA3AF", fontFamily: "Nunito" }}>
+                        {st.distanceText}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+        </View>
+
+        {/* 3. FLOATING RECENTER BUTTON (Appears when rider drags away from live position) */}
+        {!isAutoFollowing && (
+          <TouchableOpacity
+            onPress={() => {
+              setRecenterTrigger((t) => t + 1)
+              setIsAutoFollowing(true)
+            }}
+            activeOpacity={0.85}
+            style={{
+              position: "absolute",
+              right: 14,
+              bottom: 175,
+              backgroundColor: "#FFFFFF",
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 6,
+              paddingHorizontal: 14,
+              paddingVertical: 9,
+              borderRadius: 22,
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 3 },
+              shadowOpacity: 0.28,
+              shadowRadius: 6,
+              elevation: 7,
+              borderWidth: 1.5,
+              borderColor: "#0B6B3A",
+              zIndex: 20
+            }}
+          >
+            <Navigation size={15} color="#0B6B3A" />
+            <Text style={{ fontSize: 12.5, fontFamily: "Poppins", fontWeight: "bold", color: "#0B6B3A" }}>
+              Recenter
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        {/* 4. FLOATING ZOOM BUTTONS */}
+        <View style={{
+          position: "absolute",
+          right: 14,
+          bottom: !isAutoFollowing ? 225 : 175,
+          backgroundColor: "#FFFFFF",
+          borderRadius: 16,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 3 },
+          shadowOpacity: 0.25,
+          shadowRadius: 5,
+          elevation: 7,
+          overflow: "hidden",
+          zIndex: 20
+        }}>
+          <TouchableOpacity
+            onPress={() => {
+              if (mapRef.current) {
+                if (mapRef.current.zoomIn) mapRef.current.zoomIn()
+                else if (mapRef.current.setZoom) mapRef.current.setZoom(mapRef.current.getZoom() + 1)
+              }
+            }}
+            style={{ width: 38, height: 38, alignItems: "center", justifyContent: "center" }}
+          >
+            <Text style={{ fontSize: 20, fontWeight: "bold", color: "#1F2937", lineHeight: 22 }}>+</Text>
+          </TouchableOpacity>
+          <View style={{ height: 1, backgroundColor: "#E5E7EB" }} />
+          <TouchableOpacity
+            onPress={() => {
+              if (mapRef.current) {
+                if (mapRef.current.zoomOut) mapRef.current.zoomOut()
+                else if (mapRef.current.setZoom) mapRef.current.setZoom(mapRef.current.getZoom() - 1)
+              }
+            }}
+            style={{ width: 38, height: 38, alignItems: "center", justifyContent: "center" }}
+          >
+            <Text style={{ fontSize: 22, fontWeight: "bold", color: "#1F2937", lineHeight: 22 }}>−</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* 5. SLIM FLOATING BOTTOM ACTION SHEET */}
+        <View style={{
+          position: "absolute",
+          left: 14,
+          right: 14,
+          bottom: Platform.OS === "ios" ? 30 : 14,
+          backgroundColor: "#FFFFFF",
+          borderRadius: 20,
+          paddingHorizontal: 16,
+          paddingTop: 12,
+          paddingBottom: 14,
+          gap: 10,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 6 },
+          shadowOpacity: 0.25,
+          shadowRadius: 10,
+          elevation: 10,
+          zIndex: 20
+        }}>
+          {/* Destination info & Call button */}
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: isPickupPhase ? "#EA580C" : "#DC2626" }} />
+                <Text style={{ fontSize: 10.5, fontFamily: "Nunito", color: "#6B7280", fontWeight: "700", textTransform: "uppercase" }}>
+                  {isPickupPhase ? "Step 1: Pickup Restaurant" : "Step 2: Customer Drop-off"}
+                </Text>
+              </View>
+              <Text numberOfLines={1} style={{ fontSize: 15, fontFamily: "Poppins", fontWeight: "bold", color: "#1F1F1F", marginTop: 1 }}>
+                {destName}
+              </Text>
+              <Text numberOfLines={1} style={{ fontSize: 11, color: "#6B7280", fontFamily: "Nunito" }}>
+                {destAddress}
+              </Text>
+            </View>
+
+            {destPhone ? (
+              <TouchableOpacity
+                onPress={() => handleCall(destPhone)}
+                style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: "#EAF7EE", borderWidth: 1, borderColor: "#A7F3D0", alignItems: "center", justifyContent: "center" }}
+              >
+                <Phone size={16} color="#0B6B3A" />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          {/* Action Button: Arrived at Kitchen / Confirm Pickup / Arrived at Customer / Deliver */}
+          {order.delivery_status === "accepted" && (
+            <TouchableOpacity
+              onPress={() => handleOrderAction(order.id, "arrive_kitchen")}
+              disabled={actionLoading}
+              style={{ backgroundColor: "#0B6B3A", height: 46, borderRadius: 12, alignItems: "center", justifyContent: "center", shadowColor: "#0B6B3A", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.25, shadowRadius: 5, elevation: 4 }}
+            >
+              {actionLoading ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins", fontSize: 14 }}>
+                  Mark: Arrived at Kitchen
+                </Text>
+              )}
+            </TouchableOpacity>
+          )}
+
+          {order.delivery_status === "arrived_kitchen" && (
+            <View style={{ gap: 8 }}>
+              <TextInput
+                value={otpInput}
+                onChangeText={setOtpInput}
+                placeholder="Enter 4-digit Kitchen Code"
+                keyboardType="numeric"
+                maxLength={4}
+                style={{ borderWidth: 1.5, borderColor: "#E5E7EB", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, fontSize: 13.5, fontFamily: "Nunito" }}
+              />
+              <TouchableOpacity
+                onPress={() => handleOrderAction(order.id, "pickup", { pickupCode: otpInput })}
+                disabled={actionLoading}
+                style={{ backgroundColor: "#FF6B00", height: 46, borderRadius: 12, alignItems: "center", justifyContent: "center" }}
+              >
+                {actionLoading ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins", fontSize: 14 }}>
+                    Confirm Pickup & Switch to Customer Route
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {order.delivery_status === "picked_up" && (
+            <TouchableOpacity
+              onPress={() => handleOrderAction(order.id, "arrive_customer")}
+              disabled={actionLoading}
+              style={{ backgroundColor: "#0B6B3A", height: 46, borderRadius: 12, alignItems: "center", justifyContent: "center" }}
+            >
+              {actionLoading ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins", fontSize: 14 }}>
+                  Mark: Arrived at Customer Doorstep
+                </Text>
+              )}
+            </TouchableOpacity>
+          )}
+
+          {order.delivery_status === "arrived_customer" && (
+            <View style={{ gap: 8 }}>
+              <TextInput
+                value={otpInput}
+                onChangeText={setOtpInput}
+                placeholder="Enter 4-digit Customer Delivery OTP"
+                keyboardType="numeric"
+                maxLength={4}
+                style={{ borderWidth: 1.5, borderColor: "#E5E7EB", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, fontSize: 13.5, fontFamily: "Nunito" }}
+              />
+              <TouchableOpacity
+                onPress={onCompleteDeliveryPress || (() => handleOrderAction(order.id, "deliver", { deliveryOtp: otpInput }))}
+                disabled={actionLoading}
+                style={{ backgroundColor: "#0B6B3A", height: 46, borderRadius: 12, alignItems: "center", justifyContent: "center" }}
+              >
+                {actionLoading ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins", fontSize: 14 }}>
+                    Verify OTP & Complete Delivery
+                  </Text>
+                )}
+              </TouchableOpacity>
+              {onCancelDoorstepPress && !Boolean(
+                order.is_rescue === 1 ||
+                (order.original_order_id && Number(order.original_order_id) > 0) ||
+                order.delivery_status === "rescue_claimed"
+              ) && (
+                <TouchableOpacity
+                  onPress={onCancelDoorstepPress}
+                  disabled={actionLoading}
+                  style={{ borderWidth: 1.5, borderColor: "#EF4444", height: 38, borderRadius: 10, alignItems: "center", justifyContent: "center" }}
+                >
+                  <Text style={{ color: "#EF4444", fontWeight: "bold", fontFamily: "Poppins", fontSize: 12 }}>
+                    Cancel at Doorstep (Customer Paid)
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
+          {/* Optional: Open in External Google Maps App */}
+          {originLat && originLng && destLat && destLng && (
+            <TouchableOpacity
+              onPress={() => {
+                const url = `https://www.google.com/maps/dir/?api=1&origin=${originLat},${originLng}&destination=${destLat},${destLng}&travelmode=driving`
+                Linking.openURL(url).catch(console.warn)
+              }}
+              style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingTop: 2 }}
+            >
+              <Navigation size={12} color="#0B6B3A" />
+              <Text style={{ fontSize: 11, color: "#0B6B3A", fontFamily: "Nunito", fontWeight: "700" }}>
+                Open Turn-by-Turn in Google Maps App ↗
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+  )
+}
+
+
 export default function RiderDashboardScreen() {
   const { user } = useAuth()
   const insets = useSafeAreaInsets()
@@ -258,6 +1652,86 @@ export default function RiderDashboardScreen() {
   const [alertConfig, setAlertConfig] = useState(null)
   const [qrModalConfig, setQrModalConfig] = useState(null)
   const [depositUtrInput, setDepositUtrInput] = useState("")
+  const [riderCoords, setRiderCoords] = useState(() => {
+    const activeCity = user?.city || "Roha"
+    const match = KNOWN_CITY_COORDINATES[activeCity.toLowerCase()]
+    if (match) return { latitude: match.lat, longitude: match.lng, heading: 0, speed: 0, isManual: true }
+    return null
+  })
+  const [activeRouteInfo, setActiveRouteInfo] = useState(null)
+  const [isNavigatingInApp, setIsNavigatingInApp] = useState(false)
+  const lastRouteFetchRef = useRef({ lat: null, lng: null, time: 0, orderId: null, phase: null })
+
+  // Fetch live route details with Google Routes API for active delivery
+  useEffect(() => {
+    const activeOrder = metrics?.activeOrder
+    if (!activeOrder || !riderCoords?.latitude || !riderCoords?.longitude) {
+      setActiveRouteInfo(null)
+      return
+    }
+
+    const isPickupPhase = ["accepted", "arrived_kitchen"].includes(activeOrder.delivery_status)
+    const targetLat = isPickupPhase ? (activeOrder.kitchen_latitude || activeOrder.kitchen_lat) : (activeOrder.delivery_latitude || activeOrder.delivery_lat)
+    const targetLng = isPickupPhase ? (activeOrder.kitchen_longitude || activeOrder.kitchen_lng) : (activeOrder.delivery_longitude || activeOrder.delivery_lng)
+
+    if (!targetLat || !targetLng) return
+
+    const currentPhase = isPickupPhase ? "pickup" : "drop"
+    const now = Date.now()
+    const last = lastRouteFetchRef.current
+
+    // Don't refetch full route on every 2-second GPS jitter!
+    // Refetch ONLY if:
+    // 1. Order changed or delivery status phase changed (pickup vs drop)
+    // 2. OR Rider moved significantly (> 350 meters) from where route was last calculated AND at least 30s passed
+    const isNewOrderOrPhase = last.orderId !== activeOrder.id || last.phase !== currentPhase
+    const distFromLastFetch = (last.lat && last.lng)
+      ? calculateDistanceKm(riderCoords.latitude, riderCoords.longitude, last.lat, last.lng)
+      : 999
+    const isSignificantMove = distFromLastFetch && Number(distFromLastFetch) >= 0.35 && (now - last.time) >= 30000
+
+    if (!isNewOrderOrPhase && !isSignificantMove && activeRouteInfo) {
+      return
+    }
+
+    lastRouteFetchRef.current = {
+      lat: riderCoords.latitude,
+      lng: riderCoords.longitude,
+      time: now,
+      orderId: activeOrder.id,
+      phase: currentPhase,
+    }
+
+    let isSubscribed = true
+    getRouteDetails(riderCoords.latitude, riderCoords.longitude, targetLat, targetLng)
+      .then((res) => {
+        if (isSubscribed && res) {
+          setActiveRouteInfo({
+            phase: currentPhase,
+            distanceKm: res.distanceKm,
+            durationText: res.durationText,
+            encodedPolyline: res.encodedPolyline,
+            steps: res.steps || []
+          })
+        }
+      })
+      .catch((err) => {
+        console.warn("Could not fetch Google Route details:", err?.message)
+      })
+
+    return () => {
+      isSubscribed = false
+    }
+  }, [
+    metrics?.activeOrder?.id,
+    metrics?.activeOrder?.delivery_status,
+    metrics?.activeOrder?.kitchen_latitude,
+    metrics?.activeOrder?.kitchen_longitude,
+    metrics?.activeOrder?.delivery_latitude,
+    metrics?.activeOrder?.delivery_longitude,
+    riderCoords?.latitude,
+    riderCoords?.longitude
+  ])
 
   const scrollViewRef = useRef(null)
 
@@ -275,6 +1749,46 @@ export default function RiderDashboardScreen() {
   // Customer Unreachable Modal States
   const [unreachableModalVisible, setUnreachableModalVisible] = useState(false)
   const [unreachableNote, setUnreachableNote] = useState("")
+  const [unreachableSecondsLeft, setUnreachableSecondsLeft] = useState(600)
+
+  useEffect(() => {
+    const activeOrder = metrics?.activeOrder
+    if (!activeOrder || activeOrder.delivery_status !== "arrived_customer") {
+      setUnreachableSecondsLeft(600)
+      return
+    }
+
+    let arrivedTime = Date.now()
+    const arrivedAtRaw = activeOrder.arrived_at_customer_at || activeOrder.updated_at
+    if (arrivedAtRaw) {
+      let str = String(arrivedAtRaw).replace(" ", "T")
+      if (!str.includes("Z") && !str.includes("+")) str += "Z"
+      const parsed = new Date(str).getTime()
+      if (!isNaN(parsed)) arrivedTime = parsed
+    }
+
+    const computeRemaining = () => {
+      const elapsed = Math.floor((Date.now() - arrivedTime) / 1000)
+      return Math.max(0, 600 - Math.max(0, elapsed))
+    }
+
+    setUnreachableSecondsLeft(computeRemaining())
+
+    const interval = setInterval(() => {
+      const rem = computeRemaining()
+      setUnreachableSecondsLeft(rem)
+      if (rem <= 0) {
+        clearInterval(interval)
+      }
+    }, 1000)
+
+    return () => clearInterval(interval)
+  }, [
+    metrics?.activeOrder?.id,
+    metrics?.activeOrder?.delivery_status,
+    metrics?.activeOrder?.arrived_at_customer_at,
+    metrics?.activeOrder?.updated_at,
+  ])
 
   // Rider Payouts Modal States
   const [riderPayoutsModalVisible, setRiderPayoutsModalVisible] = useState(false)
@@ -297,7 +1811,7 @@ export default function RiderDashboardScreen() {
   const handleCancelUnreachable = async () => {
     if (!metrics?.activeOrder?.id) return
     setUnreachableModalVisible(false)
-    await handleOrderAction(metrics.activeOrder.id, "cancel_doorstep", { note: unreachableNote })
+    await handleOrderAction(metrics.activeOrder.id, "cancel_doorstep", { note: unreachableNote, isUnreachable: true })
   }
 
   const handleDismissReturnedOrder = async (orderId) => {
@@ -345,6 +1859,17 @@ export default function RiderDashboardScreen() {
       setTempCity(user.city)
     }
   }, [user?.state, user?.city])
+
+  // Ensure riderCoords immediately anchors to active city when city becomes available
+  useEffect(() => {
+    const activeCity = user?.city || tempCity
+    if (activeCity) {
+      const match = KNOWN_CITY_COORDINATES[activeCity.toLowerCase()]
+      if (match && (!riderCoords || calculateDistanceKm(riderCoords.latitude, riderCoords.longitude, match.lat, match.lng) > 35)) {
+        setRiderCoords({ latitude: match.lat, longitude: match.lng, heading: 0, speed: 0, isManual: true })
+      }
+    }
+  }, [user?.city, tempCity])
 
   const filteredStates = (statesList || []).filter(
     (s) => s && s.name && s.name.toLowerCase().includes(stateSearchText.trim().toLowerCase())
@@ -481,18 +2006,38 @@ export default function RiderDashboardScreen() {
 
   const handleSaveLocation = async () => {
     try {
+      const cityCoords = await resolveCityCoordinates(tempCity, tempState)
+      const lat = cityCoords?.lat || (tempCity && tempCity.toLowerCase() === "roha" ? 18.4372 : null)
+      const lng = cityCoords?.lng || (tempCity && tempCity.toLowerCase() === "roha" ? 73.1084 : null)
+
       await api("/api/auth/location", {
         method: "PATCH",
         body: JSON.stringify({
           state: tempState,
           city: tempCity,
           stateIso: tempStateIso,
+          latitude: lat,
+          longitude: lng,
         }),
       })
       if (user) {
         user.city = tempCity
         user.state = tempState
       }
+
+      if (lat && lng) {
+        const manualCoords = {
+          latitude: lat,
+          longitude: lng,
+          heading: 0,
+          speed: 0,
+          isManual: true,
+          cityName: tempCity,
+        }
+        setRiderCoords(manualCoords)
+        await updateRiderLocation(lat, lng).catch(() => {})
+      }
+
       setLocationModalVisible(false)
       const data = await getRiderDashboard()
       setMetrics(data)
@@ -547,32 +2092,81 @@ export default function RiderDashboardScreen() {
     let isMounted = true
     let intervalId = null
 
+    let locationSubscription = null
+
     const trackRiderLocation = async () => {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync()
         if (status !== "granted") {
-          console.warn("Rider location permission denied. Falling back to default.")
-          if (isMounted) {
-            updateRiderLocation(26.8467, 80.9462).catch(console.warn)
-          }
+          console.warn("Rider location permission denied.")
           return
         }
 
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
-        if (isMounted) {
-          updateRiderLocation(loc.coords.latitude, loc.coords.longitude).catch(console.warn)
+        // Immediate initial high-accuracy lock
+        try {
+          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High })
+          if (isMounted && loc?.coords) {
+            let lat = loc.coords.latitude
+            let lng = loc.coords.longitude
+            let heading = loc.coords.heading || 0
+            let speed = loc.coords.speed || 0
+
+            const activeCity = user?.city || tempCity
+            const activeOrder = metrics?.activeOrder
+            const cityMatch = activeCity ? KNOWN_CITY_COORDINATES[activeCity.toLowerCase()] : null
+            const refLat = cityMatch?.lat || activeOrder?.kitchen_latitude
+            const refLng = cityMatch?.lng || activeOrder?.kitchen_longitude
+
+            if (refLat && refLng) {
+              const distFromRef = calculateDistanceKm(lat, lng, refLat, refLng)
+              if (distFromRef && Number(distFromRef) > 35) {
+                lat = Number(refLat)
+                lng = Number(refLng)
+              }
+            }
+
+            const coords = { latitude: lat, longitude: lng, heading, speed }
+            setRiderCoords(coords)
+            updateRiderLocation(lat, lng).catch(() => {})
+          }
+        } catch (initErr) {
+          console.warn("Initial GPS lock fallback:", initErr.message)
         }
 
-        intervalId = setInterval(async () => {
-          try {
-            const currentLoc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
-            if (isMounted) {
-              updateRiderLocation(currentLoc.coords.latitude, currentLoc.coords.longitude).catch(console.warn)
+        // Real-time continuous GPS tracking (2.5s / 5m intervals)
+        locationSubscription = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.High,
+            timeInterval: 2500,
+            distanceInterval: 5,
+          },
+          (currentLoc) => {
+            if (isMounted && currentLoc?.coords) {
+              let lat = currentLoc.coords.latitude
+              let lng = currentLoc.coords.longitude
+              let heading = currentLoc.coords.heading || 0
+              let speed = currentLoc.coords.speed || 0
+
+              const activeCity = user?.city || tempCity
+              const activeOrder = metrics?.activeOrder
+              const cityMatch = activeCity ? KNOWN_CITY_COORDINATES[activeCity.toLowerCase()] : null
+              const refLat = cityMatch?.lat || activeOrder?.kitchen_latitude
+              const refLng = cityMatch?.lng || activeOrder?.kitchen_longitude
+
+              if (refLat && refLng) {
+                const distFromRef = calculateDistanceKm(lat, lng, refLat, refLng)
+                if (distFromRef && Number(distFromRef) > 35) {
+                  lat = Number(refLat)
+                  lng = Number(refLng)
+                }
+              }
+
+              const newCoords = { latitude: lat, longitude: lng, heading, speed }
+              setRiderCoords(newCoords)
+              updateRiderLocation(lat, lng).catch(() => {})
             }
-          } catch (err) {
-            console.warn("Rider periodic location update failed:", err.message)
           }
-        }, 30000)
+        )
 
       } catch (err) {
         console.warn("Rider location tracking initialization error:", err.message)
@@ -583,7 +2177,7 @@ export default function RiderDashboardScreen() {
 
     return () => {
       isMounted = false
-      if (intervalId) clearInterval(intervalId)
+      if (locationSubscription) locationSubscription.remove()
     }
   }, [metrics?.isOnline, metrics?.status])
 
@@ -651,7 +2245,11 @@ export default function RiderDashboardScreen() {
       if (action === "pickup") {
         Alert.alert("Order Picked Up! 📦", "You have successfully picked up the food. Drive safely to the customer's drop location!")
       } else if (action === "deliver") {
+        setIsNavigatingInApp(false)
         Alert.alert("Delivery Completed! 🎉", "Success! The order has been delivered successfully. Your delivery fee earnings have been credited to your wallet.")
+      } else if (action === "cancel_doorstep") {
+        setIsNavigatingInApp(false)
+        Alert.alert("Success", res.message || "Order cancelled at doorstep successfully.")
       } else {
         Alert.alert("Success", res.message || `Action ${action} completed successfully`)
       }
@@ -752,6 +2350,16 @@ export default function RiderDashboardScreen() {
     }
   }
 
+  const handleCopyAddress = async (label, addressText) => {
+    if (!addressText) return
+    try {
+      await Clipboard.setStringAsync(addressText)
+      Alert.alert("Address Copied! 📋", `${label} address copied to clipboard.`)
+    } catch (_) {
+      Alert.alert("Notice", "Unable to copy address to clipboard.")
+    }
+  }
+
   if (loading && !metrics) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#F7F7F5" }}>
@@ -763,6 +2371,8 @@ export default function RiderDashboardScreen() {
   const status = metrics?.status || "pending"
   const isOnline = metrics?.isOnline || false
   const cashCollected = metrics?.cashCollected || 0
+
+  // Note: InAppNavigationScreen is rendered as full-screen overlay in the main JSX tree so modals overlay properly
 
   const initial = (user?.name || "R").trim().charAt(0).toUpperCase()
 
@@ -1008,76 +2618,190 @@ export default function RiderDashboardScreen() {
                 </View>
                 <Text style={{ fontSize: 15, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F" }}>Active Delivery</Text>
               </View>
-              <Text style={{ fontSize: 11, color: "#7A7A7A", fontFamily: "Poppins", fontWeight: "600" }}>
-                #{metrics.activeOrder.order_number}
-              </Text>
+              <View style={{ alignItems: "flex-end" }}>
+                <Text style={{ fontSize: 11, color: "#7A7A7A", fontFamily: "Poppins", fontWeight: "600" }}>
+                  #{metrics.activeOrder.order_number}
+                </Text>
+                <Text style={{ fontSize: 12.5, fontWeight: "bold", color: "#0B6B3A", fontFamily: "Poppins" }}>
+                  Payout: ₹{calculateRiderPayout(calculateDistanceKm(metrics.activeOrder.kitchen_latitude, metrics.activeOrder.kitchen_longitude, metrics.activeOrder.delivery_latitude, metrics.activeOrder.delivery_longitude), metrics.activeOrder.delivery_fee).toFixed(2)}
+                </Text>
+              </View>
             </View>
 
             {/* Progress stepper */}
             <DeliveryStepper currentStatus={metrics.activeOrder.delivery_status} />
 
             {/* Addresses info */}
-            <View style={{ gap: 10 }}>
-              <View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
-                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#0B6B3A", marginTop: 4 }} />
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 11, color: "#7A7A7A", fontFamily: "Nunito" }}>Pickup Kitchen</Text>
-                  <Text style={{ fontSize: 13, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>{metrics.activeOrder.kitchen_name}</Text>
-                  <Text style={{ fontSize: 12, color: "#4A4A4A", fontFamily: "Nunito", marginTop: 2 }}>{metrics.activeOrder.kitchen_address}</Text>
-                </View>
-                {metrics.activeOrder.kitchen_phone ? (
-                  <TouchableOpacity
-                    onPress={() => handleCall(metrics.activeOrder.kitchen_phone)}
-                    style={{
-                      width: 36,
-                      height: 36,
-                      borderRadius: 18,
-                      backgroundColor: "#FAF6F0",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      borderWidth: 1,
-                      borderColor: "#EADEC9"
-                    }}
-                  >
-                    <Phone size={14} color="#0B6B3A" />
-                  </TouchableOpacity>
-                ) : null}
-              </View>
+            {(() => {
+              const activeOrder = metrics.activeOrder
+              const kitchenFullAddr = [activeOrder.kitchen_address, activeOrder.kitchen_city, activeOrder.kitchen_state, activeOrder.kitchen_pincode]
+                .filter(Boolean)
+                .join(", ")
+              const customerFullAddr = [activeOrder.delivery_address, activeOrder.customer_city, activeOrder.customer_state, activeOrder.customer_pincode]
+                .filter(Boolean)
+                .join(", ")
 
-              <View style={{ height: 1, backgroundColor: "#E8E8E8", marginVertical: 4 }} />
+              const isPickupDone = ["picked_up", "arrived_customer", "handover_pending"].includes(activeOrder.delivery_status)
+              const effectiveRiderLat = riderCoords?.latitude || activeOrder.kitchen_latitude
+              const effectiveRiderLng = riderCoords?.longitude || activeOrder.kitchen_longitude
 
-              <View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
-                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#FF6B00", marginTop: 4 }} />
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 11, color: "#7A7A7A", fontFamily: "Nunito" }}>Drop Address</Text>
-                  <Text style={{ fontSize: 13, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>{metrics.activeOrder.customer_name}</Text>
-                  <Text style={{ fontSize: 12, color: "#4A4A4A", fontFamily: "Nunito", marginTop: 2 }}>{metrics.activeOrder.delivery_address}</Text>
+              const pickupKm = (!isPickupDone && activeRouteInfo?.phase === "pickup" && activeRouteInfo?.distanceKm)
+                ? String(activeRouteInfo.distanceKm)
+                : calculateDistanceKm(
+                    effectiveRiderLat,
+                    effectiveRiderLng,
+                    activeOrder.kitchen_latitude,
+                    activeOrder.kitchen_longitude
+                  )
+              const dropKm = (isPickupDone && activeRouteInfo?.phase === "drop" && activeRouteInfo?.distanceKm)
+                ? String(activeRouteInfo.distanceKm)
+                : calculateDistanceKm(
+                    isPickupDone ? effectiveRiderLat : activeOrder.kitchen_latitude,
+                    isPickupDone ? effectiveRiderLng : activeOrder.kitchen_longitude,
+                    activeOrder.delivery_latitude,
+                    activeOrder.delivery_longitude
+                  )
+              const totalKm = pickupKm && dropKm
+                ? (Number(pickupKm) + Number(dropKm)).toFixed(1)
+                : (pickupKm || dropKm || null)
+
+              return (
+                <View style={{ gap: 12 }}>
+                  {/* Transparent Split Distance Breakdown */}
+                  <TripDistanceBreakdown
+                    pickupKm={pickupKm}
+                    dropKm={dropKm}
+                    totalKm={totalKm}
+                    isPickupDone={isPickupDone}
+                  />
+
+                  {/* 2-Step In-App Route & Google Navigation */}
+                  <InAppRouteNavigation
+                    order={activeOrder}
+                    riderCoords={riderCoords}
+                    routeInfo={activeRouteInfo}
+                    onStartNavigation={() => setIsNavigatingInApp(true)}
+                  />
+                  {/* Pickup Kitchen */}
+                  <View style={{ flexDirection: "row", gap: 10, alignItems: "flex-start" }}>
+                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#0B6B3A", marginTop: 6 }} />
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 4 }}>
+                        <Text style={{ fontSize: 11, color: "#7A7A7A", fontFamily: "Nunito" }}>Pickup Kitchen</Text>
+                        {pickupKm && (
+                          <Text style={{ fontSize: 10.5, color: "#0B6B3A", fontFamily: "Nunito", fontWeight: "bold" }}>
+                            ~{pickupKm} km away
+                          </Text>
+                        )}
+                      </View>
+                      <Text style={{ fontSize: 13, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>
+                        {activeOrder.kitchen_name}
+                      </Text>
+                      <Text style={{ fontSize: 12, color: "#4A4A4A", fontFamily: "Nunito", marginTop: 2, lineHeight: 17 }}>
+                        {kitchenFullAddr || activeOrder.kitchen_address || "Address not provided"}
+                      </Text>
+                    </View>
+                    <View style={{ flexDirection: "row", gap: 6 }}>
+                      <TouchableOpacity
+                        onPress={() => handleCopyAddress("Kitchen", kitchenFullAddr || activeOrder.kitchen_address)}
+                        style={{
+                          width: 36,
+                          height: 36,
+                          borderRadius: 18,
+                          backgroundColor: "#EAF7EE",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          borderWidth: 1,
+                          borderColor: "#B7E4C7"
+                        }}
+                      >
+                        <Copy size={15} color="#0B6B3A" />
+                      </TouchableOpacity>
+                      {activeOrder.kitchen_phone ? (
+                        <TouchableOpacity
+                          onPress={() => handleCall(activeOrder.kitchen_phone)}
+                          style={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: 18,
+                            backgroundColor: "#FAF6F0",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            borderWidth: 1,
+                            borderColor: "#EADEC9"
+                          }}
+                        >
+                          <Phone size={14} color="#0B6B3A" />
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  </View>
+
+                  <View style={{ height: 1, backgroundColor: "#E8E8E8", marginVertical: 2 }} />
+
+                  {/* Drop Customer */}
+                  <View style={{ flexDirection: "row", gap: 10, alignItems: "flex-start" }}>
+                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#FF6B00", marginTop: 6 }} />
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 4 }}>
+                        <Text style={{ fontSize: 11, color: "#7A7A7A", fontFamily: "Nunito" }}>Drop Address</Text>
+                        {dropKm && (
+                          <Text style={{ fontSize: 10.5, color: "#FF6B00", fontFamily: "Nunito", fontWeight: "bold" }}>
+                            ~{dropKm} km away
+                          </Text>
+                        )}
+                      </View>
+                      <Text style={{ fontSize: 13, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>
+                        {activeOrder.customer_name || "Customer"}
+                      </Text>
+                      <Text style={{ fontSize: 12, color: "#4A4A4A", fontFamily: "Nunito", marginTop: 2, lineHeight: 17 }}>
+                        {customerFullAddr || activeOrder.delivery_address || "Address not provided"}
+                      </Text>
+                    </View>
+                    <View style={{ flexDirection: "row", gap: 6 }}>
+                      <TouchableOpacity
+                        onPress={() => handleCopyAddress("Customer", customerFullAddr || activeOrder.delivery_address)}
+                        style={{
+                          width: 36,
+                          height: 36,
+                          borderRadius: 18,
+                          backgroundColor: "#FFF1E6",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          borderWidth: 1,
+                          borderColor: "#FFD8BF"
+                        }}
+                      >
+                        <Copy size={15} color="#FF6B00" />
+                      </TouchableOpacity>
+                      {activeOrder.customer_phone ? (
+                        <TouchableOpacity
+                          onPress={() => handleCall(activeOrder.customer_phone)}
+                          style={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: 18,
+                            backgroundColor: "#FAF6F0",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            borderWidth: 1,
+                            borderColor: "#EADEC9"
+                          }}
+                        >
+                          <Phone size={14} color="#0B6B3A" />
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  </View>
                 </View>
-                {metrics.activeOrder.customer_phone ? (
-                  <TouchableOpacity
-                    onPress={() => handleCall(metrics.activeOrder.customer_phone)}
-                    style={{
-                      width: 36,
-                      height: 36,
-                      borderRadius: 18,
-                      backgroundColor: "#FAF6F0",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      borderWidth: 1,
-                      borderColor: "#EADEC9"
-                    }}
-                  >
-                    <Phone size={14} color="#0B6B3A" />
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-            </View>
+              )
+            })()}
 
             {/* Cash details */}
             <View style={{ backgroundColor: "#F8F8F5", borderRadius: 12, padding: 12, flexDirection: "row", justifyContent: "space-between" }}>
               <Text style={{ fontSize: 12, color: "#4A4A4A", fontFamily: "Nunito" }}>Payment Method:</Text>
               <Text style={{ fontSize: 12, fontWeight: "bold", color: metrics.activeOrder.payment_method === "cod" ? "#EF4444" : "#0B6B3A", fontFamily: "Poppins" }}>
-                {metrics.activeOrder.payment_method === "cod" ? `COLLECT CASH: ₹${metrics.activeOrder.grand_total}` : "PREPAID - DO NOT COLLECT CASH"}
+                {metrics.activeOrder.payment_method === "cod" ? `COLLECT CASH: ₹${metrics.activeOrder.remaining_amount !== undefined ? metrics.activeOrder.remaining_amount : metrics.activeOrder.grand_total}` : "PREPAID - DO NOT COLLECT CASH"}
               </Text>
             </View>
 
@@ -1136,35 +2860,18 @@ export default function RiderDashboardScreen() {
                       <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins" }}>Arrived at Customer</Text>
                     )}
                   </TouchableOpacity>
-                  {Boolean(
+                  {!Boolean(
                     metrics.activeOrder.is_rescue === 1 ||
                     (metrics.activeOrder.original_order_id && Number(metrics.activeOrder.original_order_id) > 0) ||
                     metrics.activeOrder.delivery_status === "rescue_claimed"
-                  ) ? (
+                  ) && (
                     <TouchableOpacity
-                      onPress={() => setUnreachableModalVisible(true)}
+                      onPress={handleCancelDoorstepPress}
                       disabled={actionLoading}
-                      style={{ borderWidth: 1.5, borderColor: "#F59E0B", backgroundColor: "#FEF3C7", paddingVertical: 12, borderRadius: 12, alignItems: "center", opacity: actionLoading ? 0.7 : 1 }}
+                      style={{ borderWidth: 1.5, borderColor: "#EF4444", paddingVertical: 12, borderRadius: 12, alignItems: "center", opacity: actionLoading ? 0.7 : 1 }}
                     >
-                      <Text style={{ color: "#B45309", fontWeight: "bold", fontFamily: "Poppins" }}>Customer Unreachable? (Cancel Order)</Text>
+                      <Text style={{ color: "#EF4444", fontWeight: "bold", fontFamily: "Poppins" }}>Cancel at Doorstep (Customer Paid)</Text>
                     </TouchableOpacity>
-                  ) : (
-                    <>
-                      <TouchableOpacity
-                        onPress={handleCancelDoorstepPress}
-                        disabled={actionLoading}
-                        style={{ borderWidth: 1.5, borderColor: "#EF4444", paddingVertical: 12, borderRadius: 12, alignItems: "center", opacity: actionLoading ? 0.7 : 1 }}
-                      >
-                        <Text style={{ color: "#EF4444", fontWeight: "bold", fontFamily: "Poppins" }}>Cancel at Doorstep (Customer Paid)</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={() => setUnreachableModalVisible(true)}
-                        disabled={actionLoading}
-                        style={{ borderWidth: 1.5, borderColor: "#F59E0B", backgroundColor: "#FEF3C7", paddingVertical: 12, borderRadius: 12, alignItems: "center", opacity: actionLoading ? 0.7 : 1 }}
-                      >
-                        <Text style={{ color: "#B45309", fontWeight: "bold", fontFamily: "Poppins" }}>Customer Unreachable? (Cancel Order)</Text>
-                      </TouchableOpacity>
-                    </>
                   )}
                 </View>
               )}
@@ -1192,35 +2899,54 @@ export default function RiderDashboardScreen() {
                       <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins" }}>Verify & Complete Delivery</Text>
                     )}
                   </TouchableOpacity>
-                  {Boolean(
+                  {!Boolean(
                     metrics.activeOrder.is_rescue === 1 ||
                     (metrics.activeOrder.original_order_id && Number(metrics.activeOrder.original_order_id) > 0) ||
                     metrics.activeOrder.delivery_status === "rescue_claimed"
-                  ) ? (
+                  ) && (
+                    <TouchableOpacity
+                      onPress={handleCancelDoorstepPress}
+                      disabled={actionLoading}
+                      style={{ borderWidth: 1.5, borderColor: "#EF4444", paddingVertical: 12, borderRadius: 12, alignItems: "center", opacity: actionLoading ? 0.7 : 1 }}
+                    >
+                      <Text style={{ color: "#EF4444", fontWeight: "bold", fontFamily: "Poppins" }}>Cancel at Doorstep (Customer Paid)</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {/* Customer Unreachable button with 10-minute countdown */}
+                  {unreachableSecondsLeft > 0 ? (
+                    <View
+                      style={{
+                        borderWidth: 1.5,
+                        borderColor: "#D1D5DB",
+                        backgroundColor: "#F3F4F6",
+                        paddingVertical: 12,
+                        borderRadius: 12,
+                        alignItems: "center",
+                      }}
+                    >
+                      <Text style={{ color: "#6B7280", fontWeight: "bold", fontFamily: "Poppins", fontSize: 13 }}>
+                        Customer Unreachable? (Wait {Math.floor(unreachableSecondsLeft / 60).toString().padStart(2, "0")}:{(unreachableSecondsLeft % 60).toString().padStart(2, "0")})
+                      </Text>
+                    </View>
+                  ) : (
                     <TouchableOpacity
                       onPress={() => setUnreachableModalVisible(true)}
                       disabled={actionLoading}
-                      style={{ borderWidth: 1.5, borderColor: "#F59E0B", backgroundColor: "#FEF3C7", paddingVertical: 12, borderRadius: 12, alignItems: "center", opacity: actionLoading ? 0.7 : 1 }}
+                      style={{
+                        borderWidth: 1.5,
+                        borderColor: "#F59E0B",
+                        backgroundColor: "#FEF3C7",
+                        paddingVertical: 12,
+                        borderRadius: 12,
+                        alignItems: "center",
+                        opacity: actionLoading ? 0.7 : 1,
+                      }}
                     >
-                      <Text style={{ color: "#B45309", fontWeight: "bold", fontFamily: "Poppins" }}>Customer Unreachable? (Cancel Order)</Text>
+                      <Text style={{ color: "#B45309", fontWeight: "bold", fontFamily: "Poppins", fontSize: 13 }}>
+                        Customer Unreachable? (Cancel Order)
+                      </Text>
                     </TouchableOpacity>
-                  ) : (
-                    <>
-                      <TouchableOpacity
-                        onPress={handleCancelDoorstepPress}
-                        disabled={actionLoading}
-                        style={{ borderWidth: 1.5, borderColor: "#EF4444", paddingVertical: 12, borderRadius: 12, alignItems: "center", opacity: actionLoading ? 0.7 : 1 }}
-                      >
-                        <Text style={{ color: "#EF4444", fontWeight: "bold", fontFamily: "Poppins" }}>Cancel at Doorstep (Customer Paid)</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={() => setUnreachableModalVisible(true)}
-                        disabled={actionLoading}
-                        style={{ borderWidth: 1.5, borderColor: "#F59E0B", backgroundColor: "#FEF3C7", paddingVertical: 12, borderRadius: 12, alignItems: "center", opacity: actionLoading ? 0.7 : 1 }}
-                      >
-                        <Text style={{ color: "#B45309", fontWeight: "bold", fontFamily: "Poppins" }}>Customer Unreachable? (Cancel Order)</Text>
-                      </TouchableOpacity>
-                    </>
                   )}
                 </View>
               )}
@@ -1319,7 +3045,7 @@ export default function RiderDashboardScreen() {
                     Pending Cash Handover 💵
                   </Text>
                   <Text style={{ fontFamily: "Nunito", fontSize: 12, color: "#856404", lineHeight: 18 }}>
-                    Please hand over the collected cash of ₹{metrics.activeOrder.grand_total} to the kitchen owner ({metrics.activeOrder.kitchen_name || "Kitchen"}).
+                    Please hand over the collected cash of ₹{metrics.activeOrder.remaining_amount !== undefined ? metrics.activeOrder.remaining_amount : metrics.activeOrder.grand_total} to the kitchen owner ({metrics.activeOrder.kitchen_name || "Kitchen"}).
                   </Text>
                   <Text style={{ fontFamily: "Nunito", fontSize: 11, color: "#9E8130", fontStyle: "italic", marginTop: 4 }}>
                     Once they confirm receiving the cash on their dashboard, this order will be fully completed and cleared.
@@ -1371,36 +3097,113 @@ export default function RiderDashboardScreen() {
               <View style={{ gap: 14 }}>
                 {broadcasts.map((order) => (
                   <View key={order.id} style={{ backgroundColor: "#FFFFFF", borderRadius: 20, padding: 18, gap: 12, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 }}>
-                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: "#FFF1E6", paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6 }}>
-                          <Zap size={9} color="#FF6B00" />
-                          <Text style={{ fontSize: 9, color: "#FF6B00", fontFamily: "Poppins", fontWeight: "bold" }}>NEW</Text>
-                        </View>
-                        <Text style={{ fontSize: 12, color: "#7A7A7A", fontFamily: "Poppins" }}>#{order.order_number}</Text>
-                      </View>
-                      <View style={{ alignItems: "flex-end" }}>
-                        <Text style={{ fontSize: 9.5, color: "#9E9E9E", fontFamily: "Nunito" }}>Estimated payout</Text>
-                        <Text style={{ fontSize: 15, fontWeight: "bold", color: "#0B6B3A", fontFamily: "Poppins" }}>₹30.00</Text>
-                      </View>
-                    </View>
+                    {(() => {
+                      const pickupDistance = calculateDistanceKm(
+                        riderCoords?.latitude,
+                        riderCoords?.longitude,
+                        order.kitchen_latitude,
+                        order.kitchen_longitude
+                      )
+                      const dropDistance = calculateDistanceKm(
+                        order.kitchen_latitude,
+                        order.kitchen_longitude,
+                        order.delivery_latitude,
+                        order.delivery_longitude
+                      )
+                      const totalDistance = pickupDistance && dropDistance
+                        ? (Number(pickupDistance) + Number(dropDistance)).toFixed(1)
+                        : (pickupDistance || dropDistance || null)
 
-                    <View style={{ height: 1, backgroundColor: "#F1F1EF" }} />
+                      const kitchenFullAddr = [order.kitchen_address, order.kitchen_city, order.kitchen_state, order.kitchen_pincode]
+                        .filter(Boolean)
+                        .join(", ")
+                      const customerFullAddr = [order.delivery_address, order.customer_city, order.customer_state, order.customer_pincode]
+                        .filter(Boolean)
+                        .join(", ")
 
-                    <View style={{ gap: 6 }}>
-                      <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-                        <MapPin size={14} color="#0B6B3A" />
-                        <Text style={{ fontSize: 12, color: "#1F1F1F", fontFamily: "Nunito", flex: 1 }} numberOfLines={1}>
-                          From: {order.kitchen_name} · {order.kitchen_address}
-                        </Text>
-                      </View>
-                      <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-                        <MapPin size={14} color="#FF6B00" />
-                        <Text style={{ fontSize: 12, color: "#1F1F1F", fontFamily: "Nunito", flex: 1 }} numberOfLines={1}>
-                          To: {order.delivery_address}
-                        </Text>
-                      </View>
-                    </View>
+                      return (
+                        <>
+                          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                              <View style={{ flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: "#FFF1E6", paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6 }}>
+                                <Zap size={9} color="#FF6B00" />
+                                <Text style={{ fontSize: 9, color: "#FF6B00", fontFamily: "Poppins", fontWeight: "bold" }}>NEW</Text>
+                              </View>
+                              <Text style={{ fontSize: 12, color: "#7A7A7A", fontFamily: "Poppins" }}>#{order.order_number}</Text>
+                              {totalDistance && (
+                                <View style={{ backgroundColor: "#F3F4F6", paddingHorizontal: 8, paddingVertical: 2.5, borderRadius: 6, flexDirection: "row", alignItems: "center", gap: 3 }}>
+                                  <Navigation size={9} color="#0B6B3A" />
+                                  <Text style={{ fontSize: 10, color: "#0B6B3A", fontFamily: "Poppins", fontWeight: "bold" }}>~{totalDistance} km</Text>
+                                </View>
+                              )}
+                            </View>
+                            <View style={{ alignItems: "flex-end" }}>
+                              <Text style={{ fontSize: 9.5, color: "#9E9E9E", fontFamily: "Nunito" }}>Estimated payout</Text>
+                              <Text style={{ fontSize: 16, fontWeight: "bold", color: "#0B6B3A", fontFamily: "Poppins" }}>
+                                ₹{calculateRiderPayout(dropDistance, order.delivery_fee).toFixed(2)}
+                              </Text>
+                              <Text style={{ fontSize: 8.5, color: "#7A7A7A", fontFamily: "Nunito", marginTop: 1 }}>
+                                ₹20 pickup + ₹{(order.delivery_fee && Number(order.delivery_fee) > 0 ? Number(order.delivery_fee) : calculateDeliveryCharge(dropDistance)).toFixed(0)} drop
+                              </Text>
+                            </View>
+                          </View>
+
+                          <View style={{ height: 1, backgroundColor: "#F1F1EF" }} />
+
+                          {/* Split Distance Breakdown */}
+                          <TripDistanceBreakdown
+                            pickupKm={pickupDistance}
+                            dropKm={dropDistance}
+                            totalKm={totalDistance}
+                          />
+
+                          {/* Full Addresses with Distance */}
+                          <View style={{ gap: 10 }}>
+                            <View style={{ flexDirection: "row", gap: 10, alignItems: "flex-start" }}>
+                              <View style={{ marginTop: 2 }}>
+                                <MapPin size={15} color="#0B6B3A" />
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 4 }}>
+                                  <Text style={{ fontSize: 12.5, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>
+                                    Pickup: {order.kitchen_name}
+                                  </Text>
+                                  {pickupDistance && (
+                                    <Text style={{ fontSize: 10.5, color: "#0B6B3A", fontFamily: "Nunito", fontWeight: "bold" }}>
+                                      {pickupDistance} km away
+                                    </Text>
+                                  )}
+                                </View>
+                                <Text style={{ fontSize: 11.5, color: "#555555", fontFamily: "Nunito", marginTop: 2, lineHeight: 16 }}>
+                                  {kitchenFullAddr || order.kitchen_address || "Address not provided"}
+                                </Text>
+                              </View>
+                            </View>
+
+                            <View style={{ flexDirection: "row", gap: 10, alignItems: "flex-start" }}>
+                              <View style={{ marginTop: 2 }}>
+                                <MapPin size={15} color="#FF6B00" />
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 4 }}>
+                                  <Text style={{ fontSize: 12.5, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>
+                                    Drop: {order.customer_name || "Customer"}
+                                  </Text>
+                                  {dropDistance && (
+                                    <Text style={{ fontSize: 10.5, color: "#FF6B00", fontFamily: "Nunito", fontWeight: "bold" }}>
+                                      {dropDistance} km delivery
+                                    </Text>
+                                  )}
+                                </View>
+                                <Text style={{ fontSize: 11.5, color: "#555555", fontFamily: "Nunito", marginTop: 2, lineHeight: 16 }}>
+                                  {customerFullAddr || order.delivery_address || "Address not provided"}
+                                </Text>
+                              </View>
+                            </View>
+                          </View>
+                        </>
+                      )
+                    })()}
 
                     <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
                       <TouchableOpacity
@@ -1419,6 +3222,25 @@ export default function RiderDashboardScreen() {
         )}
       </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Full-Screen Edge-to-Edge In-App Navigation Overlay */}
+      {isNavigatingInApp && metrics?.activeOrder && (
+        <InAppNavigationScreen
+          order={metrics.activeOrder}
+          riderCoords={riderCoords}
+          setRiderCoords={setRiderCoords}
+          routeInfo={activeRouteInfo}
+          onClose={() => setIsNavigatingInApp(false)}
+          handleOrderAction={handleOrderAction}
+          onCompleteDeliveryPress={handleCompleteDeliveryPress}
+          onCancelDoorstepPress={handleCancelDoorstepPress}
+          actionLoading={actionLoading}
+          otpInput={otpInput}
+          setOtpInput={setOtpInput}
+          handleCall={handleCall}
+          updateRiderLocationOnServer={updateRiderLocation}
+        />
+      )}
 
       {/* Custom Premium Alert Modal */}
       <Modal
@@ -1526,13 +3348,14 @@ export default function RiderDashboardScreen() {
         animationType="slide"
         onRequestClose={() => setQrModalConfig(null)}
       >
-        <View style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.6)", justifyContent: "center", alignItems: "center", padding: 24 }}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.6)", justifyContent: "center", alignItems: "center", padding: 20 }}>
           <View style={{
             backgroundColor: "#FFFFFF",
             borderRadius: 24,
-            padding: 24,
+            padding: 20,
             width: "100%",
-            maxWidth: 340,
+            maxWidth: 350,
+            maxHeight: "92%",
             alignItems: "center",
             shadowColor: "#000",
             shadowOffset: { width: 0, height: 10 },
@@ -1540,95 +3363,136 @@ export default function RiderDashboardScreen() {
             shadowRadius: 20,
             elevation: 10
           }}>
-            <Text style={{ fontSize: 16, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins", textAlign: "center", marginBottom: 4 }}>
-              {qrModalConfig?.title || "Scan & Pay"}
-            </Text>
-            <Text style={{ fontSize: 11, color: "#7A7A7A", fontFamily: "Nunito", textAlign: "center", marginBottom: 16 }}>
-              Show this QR code to the customer to scan
-            </Text>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ alignItems: "center", width: "100%" }}
+              style={{ width: "100%" }}
+            >
+              <Text style={{ fontSize: 16, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins", textAlign: "center", marginBottom: 2 }}>
+                {qrModalConfig?.title || "Scan & Pay"}
+              </Text>
+              <Text style={{ fontSize: 11, color: "#7A7A7A", fontFamily: "Nunito", textAlign: "center", marginBottom: 12 }}>
+                Show this QR code to the customer to scan
+              </Text>
 
-            {qrModalConfig && (
-              <View style={{ borderWidth: 1.5, borderColor: "#E8E8E8", borderRadius: 16, padding: 12, backgroundColor: "#FFFFFF", marginBottom: 16 }}>
-                <Image
-                  source={{
-                    uri: `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(
-                      `upi://pay?pa=admin@atleast80&pn=Atleast80&am=${qrModalConfig.amount}&cu=INR&tn=Atleast80_Order_${metrics?.activeOrder?.order_number || ""}`
-                    )}`
-                  }}
-                  style={{ width: 200, height: 200, borderRadius: 8 }}
-                  resizeMode="contain"
-                />
-              </View>
-            )}
-
-            <Text style={{ fontSize: 13, color: "#8A8A8A", fontFamily: "Nunito" }}>Total Amount to Collect</Text>
-            <Text style={{ fontSize: 32, fontWeight: "bold", fontFamily: "Poppins", color: "#0B6B3A", marginTop: 2, marginBottom: 24 }}>
-              ₹{qrModalConfig?.amount || 0}
-            </Text>
-
-            {qrModalConfig?.requireUtr && (
-              <View style={{ width: "100%", marginBottom: 16 }}>
-                <Text style={{ fontSize: 11, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F", marginBottom: 4 }}>
-                  Enter Payment UTR / Reference No.
-                </Text>
-                <TextInput
-                  value={depositUtrInput}
-                  onChangeText={setDepositUtrInput}
-                  placeholder="e.g. 981273918237"
-                  placeholderTextColor="#9CA3AF"
-                  style={{
-                    width: "100%",
-                    backgroundColor: "#F9FAFB",
-                    borderWidth: 1,
-                    borderColor: "#D1D5DB",
-                    borderRadius: 12,
-                    paddingHorizontal: 12,
-                    paddingVertical: 10,
-                    fontSize: 13,
-                    fontFamily: "monospace",
-                    color: "#111827",
-                  }}
-                />
-              </View>
-            )}
-
-            <View style={{ flexDirection: "row", gap: 10, width: "100%" }}>
-              <TouchableOpacity
-                onPress={() => setQrModalConfig(null)}
-                style={{
-                  flex: 1,
-                  backgroundColor: "#F5F5F5",
-                  paddingVertical: 12,
-                  borderRadius: 14,
+              {qrModalConfig && (
+                <View style={{
+                  backgroundColor: "#FFFFFF",
+                  borderRadius: 20,
+                  padding: 16,
+                  borderWidth: 1.5,
+                  borderColor: "#E5E7EB",
                   alignItems: "center",
-                  borderWidth: 1,
-                  borderColor: "#E8E8E8"
-                }}
-              >
-                <Text style={{ color: "#4A4A4A", fontWeight: "bold", fontSize: 13, fontFamily: "Poppins" }}>
-                  Cancel
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => {
-                  const onConfirm = qrModalConfig?.onConfirm
-                  const utrVal = depositUtrInput
-                  setQrModalConfig(null)
-                  if (onConfirm) onConfirm(utrVal)
-                }}
-                style={{
-                  flex: 1,
-                  backgroundColor: "#0B6B3A",
-                  paddingVertical: 12,
-                  borderRadius: 14,
-                  alignItems: "center"
-                }}
-              >
-                <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontSize: 13, fontFamily: "Poppins" }}>
-                  Paid & Confirm
-                </Text>
-              </TouchableOpacity>
-            </View>
+                  marginBottom: 16,
+                  shadowColor: "#000",
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.08,
+                  shadowRadius: 10,
+                  elevation: 3,
+                  width: 250,
+                }}>
+                  {/* Standee Header */}
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", width: "100%", marginBottom: 12 }}>
+                    <Text style={{ fontSize: 11, fontWeight: "bold", color: "#0C2340", fontFamily: "Poppins" }}>
+                      Powered by <Text style={{ color: "#0B72E7" }}>Razorpay</Text>
+                    </Text>
+                    <View style={{ backgroundColor: "#F3F4F6", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
+                      <Text style={{ fontSize: 10, fontWeight: "bold", color: "#374151", fontFamily: "Poppins" }}>BHIM UPI</Text>
+                    </View>
+                  </View>
+
+                  {/* Real Razorpay Dynamic UPI QR with Order Amount */}
+                  <View style={{ padding: 8, backgroundColor: "#FFFFFF", borderRadius: 12, borderWidth: 1.5, borderColor: "#E5E7EB" }}>
+                    <Image
+                      source={{
+                        uri: `https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=8&data=${encodeURIComponent(
+                          `upi://pay?cu=INR&mc=5817&mode=19&pa=elifeloprivatel145363.rzp@rxairtel&pn=ELIFELO%20PRIVATE%20LIMITED&am=${qrModalConfig.amount || 0}&tn=Payment%20To%20ELIFELO%20PRIVATE%20LIMITED&tr=Tr1YqpqixdypvTqrv2`
+                        )}`
+                      }}
+                      style={{ width: 200, height: 200, borderRadius: 8 }}
+                      resizeMode="contain"
+                    />
+                  </View>
+
+                  {/* Standee Footer */}
+                  <Text style={{ fontSize: 12, fontWeight: "bold", color: "#111827", fontFamily: "Poppins", textAlign: "center", marginTop: 12 }}>
+                    ELIFELO PRIVATE LIMITED
+                  </Text>
+                  <Text style={{ fontSize: 10, color: "#6B7280", fontFamily: "Nunito", textAlign: "center", marginTop: 2 }}>
+                    Scan & Pay with GPay / PhonePe / Paytm
+                  </Text>
+                </View>
+              )}
+
+              <Text style={{ fontSize: 12, color: "#8A8A8A", fontFamily: "Nunito" }}>Total Amount to Collect</Text>
+              <Text style={{ fontSize: 30, fontWeight: "bold", fontFamily: "Poppins", color: "#0B6B3A", marginTop: 2, marginBottom: 16 }}>
+                ₹{qrModalConfig?.amount || 0}
+              </Text>
+
+              {qrModalConfig?.requireUtr && (
+                <View style={{ width: "100%", marginBottom: 16 }}>
+                  <Text style={{ fontSize: 11, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F", marginBottom: 4 }}>
+                    Enter Payment UTR / Reference No.
+                  </Text>
+                  <TextInput
+                    value={depositUtrInput}
+                    onChangeText={setDepositUtrInput}
+                    placeholder="e.g. 981273918237"
+                    placeholderTextColor="#9CA3AF"
+                    style={{
+                      width: "100%",
+                      backgroundColor: "#F9FAFB",
+                      borderWidth: 1,
+                      borderColor: "#D1D5DB",
+                      borderRadius: 12,
+                      paddingHorizontal: 12,
+                      paddingVertical: 10,
+                      fontSize: 13,
+                      fontFamily: "monospace",
+                      color: "#111827",
+                    }}
+                  />
+                </View>
+              )}
+
+              <View style={{ flexDirection: "row", gap: 10, width: "100%", marginTop: 4 }}>
+                <TouchableOpacity
+                  onPress={() => setQrModalConfig(null)}
+                  style={{
+                    flex: 1,
+                    backgroundColor: "#F5F5F5",
+                    paddingVertical: 12,
+                    borderRadius: 14,
+                    alignItems: "center",
+                    borderWidth: 1,
+                    borderColor: "#E8E8E8"
+                  }}
+                >
+                  <Text style={{ color: "#4A4A4A", fontWeight: "bold", fontSize: 13, fontFamily: "Poppins" }}>
+                    Cancel
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => {
+                    const onConfirm = qrModalConfig?.onConfirm
+                    const utrVal = depositUtrInput
+                    setQrModalConfig(null)
+                    if (onConfirm) onConfirm(utrVal)
+                  }}
+                  style={{
+                    flex: 1,
+                    backgroundColor: "#0B6B3A",
+                    paddingVertical: 12,
+                    borderRadius: 14,
+                    alignItems: "center"
+                  }}
+                >
+                  <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontSize: 13, fontFamily: "Poppins" }}>
+                    Paid & Confirm
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -2071,33 +3935,77 @@ export default function RiderDashboardScreen() {
                   </Text>
                 </View>
               ) : (
-                riderPayoutsList.map((p) => (
-                  <View key={p.id} style={{ backgroundColor: "#F9FAFB", borderRadius: 16, padding: 14, borderWidth: 1, borderColor: "#E5E7EB" }}>
-                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                      <Text style={{ fontSize: 18, fontWeight: "bold", fontFamily: "Poppins", color: "#059669" }}>
-                        ₹{p.netPayout}
-                      </Text>
-                      <View style={{ backgroundColor: "#D1FAE5", paddingHorizontal: 10, paddingVertical: 2, borderRadius: 12 }}>
-                        <Text style={{ fontSize: 10, fontWeight: "bold", fontFamily: "Poppins", color: "#065F46" }}>
-                          PAID ✅
-                        </Text>
+                riderPayoutsList.map((p) => {
+                  const gross = Number(p.grossAmount) || Number(p.netPayout)
+                  const deductions = Number(p.commissionDeduction) || 0
+                  return (
+                    <View key={p.id} style={{ backgroundColor: "#FFFFFF", borderRadius: 16, padding: 14, borderWidth: 1, borderColor: "#E5E7EB", gap: 10 }}>
+                      {/* Header: Net Paid Amount & Status */}
+                      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderBottomWidth: 1, borderBottomColor: "#F3F4F6", paddingBottom: 8 }}>
+                        <View>
+                          <Text style={{ fontSize: 10, fontFamily: "Nunito", color: "#6B7280", textTransform: "uppercase", fontWeight: "600" }}>
+                            Net Bank Settlement
+                          </Text>
+                          <Text style={{ fontSize: 18, fontWeight: "bold", fontFamily: "Poppins", color: "#059669" }}>
+                            ₹{p.netPayout}
+                          </Text>
+                        </View>
+                        <View style={{ backgroundColor: "#D1FAE5", paddingHorizontal: 10, paddingVertical: 3, borderRadius: 12 }}>
+                          <Text style={{ fontSize: 10, fontWeight: "bold", fontFamily: "Poppins", color: "#065F46" }}>
+                            PAID ✅
+                          </Text>
+                        </View>
                       </View>
-                    </View>
-                    <View style={{ gap: 4 }}>
-                      <Text style={{ fontSize: 12, fontWeight: "bold", fontFamily: "monospace", color: "#1F2937" }}>
-                        UTR Ref: {p.utrNumber || "—"}
-                      </Text>
-                      <Text style={{ fontSize: 10, fontFamily: "Nunito", color: "#9CA3AF", marginTop: 2 }}>
-                        Paid on: {p.paidAt ? new Date(p.paidAt).toLocaleString("en-IN") : "—"}
-                      </Text>
+
+                      {/* Transparent Breakdown */}
+                      <View style={{ backgroundColor: "#F9FAFB", borderRadius: 10, padding: 10, gap: 4 }}>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                          <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#4B5563" }}>Delivery Fees Earned:</Text>
+                          <Text style={{ fontSize: 11, fontFamily: "Poppins", fontWeight: "600", color: "#111827" }}>₹{gross}</Text>
+                        </View>
+                        {deductions > 0 ? (
+                          <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                            <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#4B5563" }}>Cash / Deductions Adjusted:</Text>
+                            <Text style={{ fontSize: 11, fontFamily: "Poppins", fontWeight: "600", color: "#DC2626" }}>-₹{deductions}</Text>
+                          </View>
+                        ) : (
+                          <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                            <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#4B5563" }}>Platform Commission:</Text>
+                            <Text style={{ fontSize: 11, fontFamily: "Poppins", fontWeight: "600", color: "#059669" }}>₹0 (Free)</Text>
+                          </View>
+                        )}
+                      </View>
+
+                      {/* Bank & UTR Reference */}
+                      <View style={{ gap: 2 }}>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                          <Text style={{ fontSize: 10, fontFamily: "Nunito", color: "#6B7280" }}>UTR Reference:</Text>
+                          <Text style={{ fontSize: 11, fontWeight: "bold", fontFamily: "monospace", color: "#1F2937" }}>
+                            {p.utrNumber || "—"}
+                          </Text>
+                        </View>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                          <Text style={{ fontSize: 10, fontFamily: "Nunito", color: "#6B7280" }}>Paid on:</Text>
+                          <Text style={{ fontSize: 10, fontFamily: "Nunito", color: "#4B5563" }}>
+                            {p.paidAt ? new Date(p.paidAt).toLocaleString("en-IN") : "—"}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* Admin Note / Remarks */}
                       {p.notes ? (
-                        <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#4B5563", fontStyle: "italic" }}>
-                          Notes: {p.notes}
-                        </Text>
+                        <View style={{ backgroundColor: "#FEF3C7", borderColor: "#FDE68A", borderWidth: 1, borderRadius: 8, padding: 8 }}>
+                          <Text style={{ fontSize: 9, fontFamily: "Poppins", fontWeight: "bold", color: "#92400E", textTransform: "uppercase" }}>
+                            💬 ADMIN NOTE:
+                          </Text>
+                          <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#78350F", marginTop: 2 }}>
+                            {p.notes}
+                          </Text>
+                        </View>
                       ) : null}
                     </View>
-                  </View>
-                ))
+                  )
+                })
               )}
             </ScrollView>
           </Pressable>

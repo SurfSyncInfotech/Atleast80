@@ -1,4 +1,4 @@
-export const MIN_RATINGS_TO_SHOW = 10
+export const MIN_RATINGS_TO_SHOW = 1
 
 /** Subquery — works even before migrate:v19 adds rating_count column */
 export const SQL_RATING_COUNT = `(SELECT COUNT(*) FROM order_reviews r WHERE r.kitchen_id = k.id) AS rating_count`

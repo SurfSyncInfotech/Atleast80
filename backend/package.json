@@ -34,6 +34,7 @@
     "migrate:v23": "node scripts/migrateV23.js",
     "migrate:v24": "node scripts/migrateV24.js",
     "cleanup:kitchens": "node scripts/cleanupKitchens.js",
+    "recalc:ratings": "node scripts/recalcRatings.js",
     "fix:http-urls": "node scripts/fixHttpMediaUrls.js"
   },
   "keywords": [],

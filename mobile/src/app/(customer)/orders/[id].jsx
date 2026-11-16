@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react"
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Linking, Image, Platform, ImageBackground, Modal } from "react-native"
+import { useCallback, useEffect, useState, useRef } from "react"
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Linking, Image, Platform, ImageBackground, Modal, TextInput, KeyboardAvoidingView, Keyboard } from "react-native"
 
 // Custom Alert wrapper to support React Native Web / Browser environment
 const Alert = {
@@ -22,7 +22,7 @@ const Alert = {
 };
 import { useLocalSearchParams, useRouter } from "expo-router"
 import { SafeAreaView } from "react-native-safe-area-context"
-import { ArrowLeft, CheckCircle2, ChefHat, Bike, Home, Phone, Truck, Check, AlertTriangle } from "lucide-react-native"
+import { ArrowLeft, CheckCircle2, ChefHat, Bike, Home, Phone, Truck, Check, AlertTriangle, Star } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import Button from "../../../components/ui/Button"
 import { api } from "../../../lib/api"
@@ -52,6 +52,214 @@ function stepState(orderStatus, stepId) {
   return { done: false, active: false }
 }
 
+function StarRating({ value = 0, onChange, readonly = false }) {
+  return (
+    <View style={{ flexDirection: "row", gap: 8, marginVertical: 6, alignItems: "center" }}>
+      {[1, 2, 3, 4, 5].map((star) => {
+        const isFilled = star <= value
+        return (
+          <TouchableOpacity
+            key={star}
+            disabled={readonly}
+            onPress={() => onChange && onChange(star)}
+            activeOpacity={0.7}
+            style={{ padding: 4 }}
+          >
+            <Star
+              size={readonly ? 22 : 32}
+              color={isFilled ? "#F59E0B" : "#D1D5DB"}
+              fill={isFilled ? "#F59E0B" : "transparent"}
+            />
+          </TouchableOpacity>
+        )
+      })}
+    </View>
+  )
+}
+
+function ReviewSection({ order, onReviewSubmitted, scrollViewRef }) {
+  const [rating, setRating] = useState(0)
+  const [review, setReview] = useState("")
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState("")
+
+  const scrollToBottom = () => {
+    setTimeout(() => {
+      scrollViewRef?.current?.scrollToEnd({ animated: true })
+    }, 120)
+  }
+
+  if (order.review) {
+    return (
+      <View
+        style={{
+          backgroundColor: "#FFFFFF",
+          borderRadius: 24,
+          padding: 18,
+          borderWidth: 1,
+          borderColor: "#F3F4F6",
+          marginBottom: 20,
+          ...Platform.select({
+            default: {
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.03,
+              shadowRadius: 8,
+              elevation: 1,
+            },
+          }),
+        }}
+      >
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+          <Text style={{ fontSize: 15, fontFamily: "Poppins", fontWeight: "bold", color: "#1F2937" }}>
+            Your Rating & Review
+          </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: "#FEF3C7", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 }}>
+            <Star size={13} color="#D97706" fill="#D97706" />
+            <Text style={{ fontSize: 12, fontFamily: "Poppins", fontWeight: "bold", color: "#B45309", marginLeft: 4 }}>
+              {Number(order.review.rating).toFixed(1)}
+            </Text>
+          </View>
+        </View>
+        <StarRating value={order.review.rating} readonly />
+        {order.review.review ? (
+          <Text style={{ fontSize: 13, fontFamily: "Nunito", color: "#4B5563", marginTop: 8, lineHeight: 19 }}>
+            "{order.review.review}"
+          </Text>
+        ) : null}
+        <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#9CA3AF", marginTop: 8 }}>
+          Submitted on {new Date(order.review.createdAt || Date.now()).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+        </Text>
+      </View>
+    )
+  }
+
+  if (order.status !== "delivered") return null
+
+  const handleSubmit = async () => {
+    if (rating < 1) {
+      setError("Please tap a star to give a rating (1 to 5 stars)")
+      return
+    }
+    setSubmitting(true)
+    setError("")
+    try {
+      const data = await api(`/api/orders/${order.id}/review`, {
+        method: "POST",
+        body: JSON.stringify({ rating, review: review.trim() || null }),
+      })
+      if (onReviewSubmitted) {
+        onReviewSubmitted(data.review)
+      }
+      Alert.alert("Thank you! ⭐", "Your review has been submitted successfully.")
+    } catch (err) {
+      setError(err.message || "Failed to submit review")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const sentimentLabel =
+    rating === 5 ? "Loved it! Excellent food 😍" :
+    rating === 4 ? "Very good food & taste 👍" :
+    rating === 3 ? "Average experience 🙂" :
+    rating === 2 ? "Below expectations 😕" :
+    rating === 1 ? "Disappointed 😞" : "Tap a star to rate your food"
+
+  return (
+    <View
+      style={{
+        backgroundColor: "#FFFFFF",
+        borderRadius: 24,
+        padding: 18,
+        borderWidth: 1.5,
+        borderColor: "#FEF3C7",
+        marginBottom: 20,
+        ...Platform.select({
+          default: {
+            shadowColor: "#D97706",
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.06,
+            shadowRadius: 10,
+            elevation: 2,
+          },
+        }),
+      }}
+    >
+      <Text style={{ fontSize: 16, fontFamily: "Poppins", fontWeight: "bold", color: "#1F2937" }}>
+        Rate your experience
+      </Text>
+      <Text style={{ fontSize: 12, fontFamily: "Nunito", color: "#6B7280", marginTop: 2, marginBottom: 10 }}>
+        How was your meal from {order.kitchenName || "the kitchen"}?
+      </Text>
+
+      {error ? (
+        <View style={{ backgroundColor: "#FEE2E2", borderRadius: 10, padding: 8, marginBottom: 10 }}>
+          <Text style={{ fontSize: 12, fontFamily: "Nunito", color: "#DC2626" }}>{error}</Text>
+        </View>
+      ) : null}
+
+      <View style={{ alignItems: "center", marginVertical: 6, backgroundColor: "#FFFBEB", borderRadius: 16, paddingVertical: 12, borderWidth: 1, borderColor: "#FEF3C7" }}>
+        <StarRating
+          value={rating}
+          onChange={(val) => {
+            setRating(val)
+            scrollToBottom()
+          }}
+        />
+        <Text style={{ fontSize: 12, fontFamily: "Nunito", fontWeight: "600", color: rating > 0 ? "#B45309" : "#9CA3AF", marginTop: 4 }}>
+          {sentimentLabel}
+        </Text>
+      </View>
+
+      <TextInput
+        value={review}
+        onChangeText={setReview}
+        onFocus={scrollToBottom}
+        placeholder="Share details about the taste, packaging or portion (optional)..."
+        placeholderTextColor="#9CA3AF"
+        multiline
+        numberOfLines={3}
+        style={{
+          borderWidth: 1,
+          borderColor: "#E5E7EB",
+          borderRadius: 14,
+          padding: 12,
+          fontSize: 13,
+          fontFamily: "Nunito",
+          color: "#1F2937",
+          backgroundColor: "#F9FAFB",
+          marginTop: 12,
+          minHeight: 70,
+          textAlignVertical: "top",
+        }}
+      />
+
+      <TouchableOpacity
+        onPress={handleSubmit}
+        disabled={submitting || rating < 1}
+        activeOpacity={0.8}
+        style={{
+          marginTop: 14,
+          backgroundColor: rating >= 1 ? "#0B6B3A" : "#D1D5DB",
+          borderRadius: 22,
+          height: 46,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {submitting ? (
+          <ActivityIndicator size="small" color="#FFFFFF" />
+        ) : (
+          <Text style={{ color: "#FFFFFF", fontFamily: "Poppins", fontWeight: "bold", fontSize: 14 }}>
+            Submit Review
+          </Text>
+        )}
+      </TouchableOpacity>
+    </View>
+  )
+}
+
 export default function OrderTrackingScreen() {
   const router = useRouter()
   const { id } = useLocalSearchParams()
@@ -59,6 +267,18 @@ export default function OrderTrackingScreen() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [cancelling, setCancelling] = useState(false)
+  const scrollViewRef = useRef(null)
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener("keyboardDidShow", () => {
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true })
+      }, 100)
+    })
+    return () => {
+      showSub.remove()
+    }
+  }, [])
 
   const loadOrder = useCallback(async (showLoader = false) => {
     if (!id) {
@@ -170,6 +390,8 @@ export default function OrderTrackingScreen() {
     )
   }
 
+  const isSelfPickup = order?.deliveryMethod === "self" || order?.delivery_method === "self"
+
   const progress =
     order.status === "delivered"
       ? 100
@@ -197,7 +419,19 @@ export default function OrderTrackingScreen() {
         </Text>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 60 }}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={{ flex: 1 }}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 64 : 0}
+      >
+        <ScrollView
+          ref={scrollViewRef}
+          showsVerticalScrollIndicator={false}
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 260 }}
+          keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+        >
         {order.status === "cancelled" && (
           <View style={{
             backgroundColor: "#FEF2F2",
@@ -258,14 +492,101 @@ export default function OrderTrackingScreen() {
             })
           }}>
             <Text style={{ fontSize: 11, fontFamily: "Poppins", fontWeight: "bold", color: "#9CA3AF", textTransform: "uppercase", letterSpacing: 1 }}>
-              {order.status === "delivered" ? "Order Delivered" : order.status === "out_for_delivery" ? "Out for Delivery" : "Estimated Arrival"}
+              {isSelfPickup
+                ? (order.status === "delivered" ? "Order Picked Up" : order.status === "out_for_delivery" ? "Ready for Pickup" : "Self Pickup Order")
+                : (order.status === "delivered" ? "Order Delivered" : order.status === "out_for_delivery" ? "Out for Delivery" : "Estimated Arrival")}
             </Text>
             <Text style={{ fontSize: 28, fontFamily: "Poppins", fontWeight: "extrabold", color: "#1F2937", marginTop: 4 }}>
-              {order.status === "delivered" ? "Enjoy Your Meal! 🍕" : order.status === "out_for_delivery" ? "Rider On The Way! 🚲" : "25-30 min"}
+              {isSelfPickup
+                ? (order.status === "delivered" ? "Order Collected! 🎉" : order.status === "out_for_delivery" ? "Ready at Kitchen! 🛍️" : "Being Prepared 🍲")
+                : (order.status === "delivered" ? "Enjoy Your Meal! 🍕" : order.status === "out_for_delivery" ? "Rider On The Way! 🚲" : "25-30 min")}
             </Text>
             <View style={{ width: "100%", height: 6, backgroundColor: "#E5E7EB", borderRadius: 3, marginTop: 16, overflow: "hidden" }}>
               <View style={{ width: `${progress}%`, height: "100%", backgroundColor: "#0B6B3A", borderRadius: 3 }} />
             </View>
+            {isSelfPickup && order.status === "out_for_delivery" && (
+              <View style={{ backgroundColor: "#ECFDF5", borderRadius: 14, padding: 12, borderWidth: 1, borderColor: "#A7F3D0", marginTop: 14, width: "100%", alignItems: "center" }}>
+                <Text style={{ fontFamily: "Poppins", fontWeight: "bold", color: "#065F46", fontSize: 13, textAlign: "center" }}>
+                  📍 Please visit the kitchen to pick up your order
+                </Text>
+                <Text style={{ fontFamily: "Nunito", color: "#047857", fontSize: 11.5, marginTop: 2, textAlign: "center" }}>
+                  Share the 4-digit Pickup Verification OTP below at the kitchen counter.
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Assigned Rider Contact Card */}
+        {!isSelfPickup && order.riderPhone && order.status !== "cancelled" && (
+          <View style={{
+            backgroundColor: "#FFFFFF",
+            borderRadius: 24,
+            padding: 16,
+            borderWidth: 1,
+            borderColor: "#D1FAE5",
+            marginBottom: 16,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            paddingHorizontal: 18,
+            ...Platform.select({
+              default: {
+                shadowColor: "#059669",
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.06,
+                shadowRadius: 10,
+                elevation: 2,
+              }
+            })
+          }}>
+            <View style={{ flexDirection: "row", alignItems: "center", flex: 1, marginRight: 10 }}>
+              <View style={{
+                width: 44,
+                height: 44,
+                borderRadius: 14,
+                backgroundColor: "#ECFDF5",
+                borderWidth: 1,
+                borderColor: "#A7F3D0",
+                alignItems: "center",
+                justifyContent: "center",
+                marginRight: 12
+              }}>
+                <Bike size={22} color="#059669" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#10B981" }} />
+                  <Text style={{ fontSize: 10, fontFamily: "Poppins", fontWeight: "bold", color: "#059669", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                    Delivery Partner
+                  </Text>
+                </View>
+                <Text style={{ fontSize: 14, fontFamily: "Poppins", fontWeight: "bold", color: "#1F2937", marginTop: 2 }} numberOfLines={1}>
+                  {order.riderName || "Assigned Rider"}
+                </Text>
+                <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#6B7280", marginTop: 1 }}>
+                  {order.riderPhone}
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => Linking.openURL(`tel:${order.riderPhone}`)}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                backgroundColor: "#0B6B3A",
+                paddingHorizontal: 14,
+                paddingVertical: 10,
+                borderRadius: 14,
+              }}
+            >
+              <Phone size={14} color="#FFFFFF" />
+              <Text style={{ color: "#FFFFFF", fontSize: 12, fontFamily: "Poppins", fontWeight: "bold" }}>
+                Call
+              </Text>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -284,8 +605,12 @@ export default function OrderTrackingScreen() {
             paddingHorizontal: 20
           }}>
             <View style={{ flex: 1, marginRight: 12 }}>
-              <Text style={{ fontSize: 13, fontFamily: "Poppins", fontWeight: "bold", color: "#0B6B3A" }}>Delivery Verification OTP</Text>
-              <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#4B5563", marginTop: 2 }}>Share this code with the rider at your door</Text>
+              <Text style={{ fontSize: 13, fontFamily: "Poppins", fontWeight: "bold", color: "#0B6B3A" }}>
+                {isSelfPickup ? "Pickup Verification OTP" : "Delivery Verification OTP"}
+              </Text>
+              <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#4B5563", marginTop: 2 }}>
+                {isSelfPickup ? "Share this code with the kitchen when you pick up your order" : "Share this code with the rider at your door"}
+              </Text>
             </View>
             <View style={{ backgroundColor: "#FFFFFF", borderWidth: 1.5, borderColor: "#0B6B3A", borderRadius: 12, paddingHorizontal: 16, paddingVertical: 6 }}>
               <Text style={{ fontSize: 16, fontFamily: "Poppins", fontWeight: "extrabold", color: "#0B6B3A", letterSpacing: 2 }}>
@@ -315,7 +640,13 @@ export default function OrderTrackingScreen() {
         }}>
           <Text style={{ fontSize: 16, fontFamily: "Poppins", fontWeight: "bold", color: "#1F2937", marginBottom: 20 }}>Order Status</Text>
           <View>
-            {STEPS.map((step, i) => {
+            {(isSelfPickup ? [
+              { id: "pending", label: "Order Placed", desc: "Your order has been placed successfully", icon: CheckCircle2 },
+              { id: "confirmed", label: "Order Confirmed", desc: "Your order has been accepted by the kitchen", icon: ChefHat },
+              { id: "preparing", label: "Being Prepared", desc: "Kitchen is cooking your delicious food", icon: Truck },
+              { id: "out_for_delivery", label: "Ready for Pickup", desc: "Your order is ready at the kitchen for pickup", icon: CheckCircle2 },
+              { id: "delivered", label: "Picked Up", desc: "Order collected successfully!", icon: Home },
+            ] : STEPS).map((step, i) => {
               const Icon = step.icon
               const { done, active } = stepState(order.status, step.id)
 
@@ -536,6 +867,17 @@ export default function OrderTrackingScreen() {
           ) : null}
         </View>
 
+        {/* Rating & Review Section (Delivered Orders) */}
+        {order.status === "delivered" && (
+          <ReviewSection
+            order={order}
+            scrollViewRef={scrollViewRef}
+            onReviewSubmitted={(review) => {
+              setOrder((prev) => (prev ? { ...prev, review } : prev))
+            }}
+          />
+        )}
+
         {["pending", "confirmed", "preparing", "out_for_delivery"].includes(order.status) && (
           <TouchableOpacity
             onPress={openCancelModal}
@@ -577,6 +919,7 @@ export default function OrderTrackingScreen() {
           <Text style={{ color: "#0B6B3A", fontFamily: "Poppins", fontWeight: "bold", fontSize: 15 }}>Back to Home</Text>
         </TouchableOpacity>
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Custom Refund & Cancellation Modal */}
       <Modal visible={cancelModalOpen} transparent animationType="fade" onRequestClose={() => setCancelModalOpen(false)}>

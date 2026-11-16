@@ -34,6 +34,12 @@ export async function purgeExpiredHygieneVideos(pool, kitchenId) {
     removeHygieneFile(row.mediaUrl)
   }
 
+  if (rows.length > 0) {
+    try {
+      await pool.query("UPDATE kitchens SET hygiene_score = 0 WHERE id = ?", [kitchenId])
+    } catch (_) {}
+  }
+
   return rows.length
 }
 

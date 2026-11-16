@@ -225,6 +225,8 @@ export default function OrderTrackingPage() {
   const isCancelled = order.status === "cancelled"
   const isActive = !isCancelled && order.status !== "delivered"
 
+  const isSelfPickup = order?.deliveryMethod === "self" || order?.delivery_method === "self"
+
   const progress = isCancelled
     ? 0
     : order.status === "delivered"
@@ -262,10 +264,14 @@ export default function OrderTrackingPage() {
             className="bg-white rounded-[24px] p-6 shadow-sm border border-gray-100 text-center"
           >
             <p className="font-poppins font-black text-[11px] text-gray-400 uppercase tracking-widest">
-              {isActive ? "Estimated Arrival" : "Order Status"}
+              {isSelfPickup
+                ? (order.status === "delivered" ? "Order Picked Up" : order.status === "out_for_delivery" ? "Ready for Pickup" : "Self Pickup Order")
+                : (isActive ? "Estimated Arrival" : "Order Status")}
             </p>
             <p className="font-poppins font-extrabold text-3xl text-dark mt-1">
-              {isActive ? "25-30 min" : "Delivered!"}
+              {isSelfPickup
+                ? (order.status === "delivered" ? "Order Collected! 🎉" : order.status === "out_for_delivery" ? "Ready at Kitchen! 🛍️" : "Being Prepared 🍲")
+                : (isActive ? "25-30 min" : "Delivered!")}
             </p>
             <div className="w-full bg-gray-200 rounded-full h-1.5 mt-4 overflow-hidden">
               <motion.div
@@ -275,6 +281,16 @@ export default function OrderTrackingPage() {
                 transition={{ duration: 1.5, ease: "easeOut" }}
               />
             </div>
+            {isSelfPickup && order.status === "out_for_delivery" && (
+              <div className="bg-emerald-50 rounded-2xl p-4 border border-emerald-200 mt-4 text-center">
+                <p className="font-poppins font-bold text-emerald-800 text-sm">
+                  📍 Please visit the kitchen to pick up your order
+                </p>
+                <p className="font-nunito text-xs text-emerald-700 mt-1">
+                  Share the 4-digit Pickup Verification OTP below at the kitchen counter.
+                </p>
+              </div>
+            )}
           </motion.div>
         )}
 
@@ -295,12 +311,48 @@ export default function OrderTrackingPage() {
           </div>
         )}
 
+                {/* Assigned Rider Contact Card */}
+        {!isSelfPickup && order.riderPhone && order.status !== "cancelled" && (
+          <div className="bg-white border border-emerald-100 rounded-[24px] p-4.5 px-5 shadow-xs flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3.5 min-w-0">
+              <div className="w-11 h-11 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-center flex-shrink-0 text-emerald-700">
+                <Bike size={22} />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span className="font-nunito text-[11px] font-bold text-emerald-700 uppercase tracking-wider">
+                    Delivery Partner
+                  </span>
+                </div>
+                <h4 className="font-poppins font-bold text-sm text-dark truncate mt-0.5">
+                  {order.riderName || "Assigned Rider"}
+                </h4>
+                <p className="font-nunito text-xs text-gray-500 truncate">
+                  {order.riderPhone}
+                </p>
+              </div>
+            </div>
+            <a
+              href={`tel:${order.riderPhone}`}
+              className="flex items-center gap-2 bg-[#0B6B3A] hover:bg-[#09572e] text-white px-4 py-2.5 rounded-xl font-poppins font-bold text-xs shadow-xs transition-colors flex-shrink-0 cursor-pointer"
+            >
+              <Phone size={14} />
+              <span>Call Rider</span>
+            </a>
+          </div>
+        )}
+
         {/* Delivery Verification OTP Card */}
         {order.deliveryOtp && order.status !== "delivered" && order.status !== "cancelled" && (
           <div className="bg-[#EAF7EE] border border-[#D6EAE7] rounded-[24px] p-4 px-5 flex items-center justify-between shadow-xs">
             <div>
-              <h4 className="font-poppins font-bold text-xs text-[#0B6B3A]">Delivery Verification OTP</h4>
-              <p className="font-nunito text-[11px] text-gray-600 mt-0.5">Share this code with the rider at your door</p>
+              <h4 className="font-poppins font-bold text-xs text-[#0B6B3A]">
+                {isSelfPickup ? "Pickup Verification OTP" : "Delivery Verification OTP"}
+              </h4>
+              <p className="font-nunito text-[11px] text-gray-600 mt-0.5">
+                {isSelfPickup ? "Share this code with the kitchen when you pick up your order" : "Share this code with the rider at your door"}
+              </p>
             </div>
             <div className="bg-white border-2 border-[#0B6B3A] rounded-xl px-4 py-1.5 shadow-xs">
               <span className="font-poppins font-extrabold text-lg text-[#0B6B3A] tracking-wider">
@@ -314,7 +366,13 @@ export default function OrderTrackingPage() {
           <div className="bg-white rounded-[24px] p-5 shadow-sm border border-gray-100">
             <h3 className="font-poppins font-bold text-dark text-base mb-6">Order Status</h3>
             <div className="space-y-3">
-              {STEPS.map((step, i) => {
+              {(isSelfPickup ? [
+                { id: "pending", label: "Order Placed", desc: "Your order has been placed successfully", icon: CheckCircle },
+                { id: "confirmed", label: "Order Confirmed", desc: "Your order has been accepted by the kitchen", icon: ChefHat },
+                { id: "preparing", label: "Being Prepared", desc: "Kitchen is cooking your delicious food", icon: Clock },
+                { id: "out_for_delivery", label: "Ready for Pickup", desc: "Your order is ready at the kitchen", icon: CheckCircle },
+                { id: "delivered", label: "Picked Up", desc: "Order collected successfully!", icon: Home },
+              ] : STEPS).map((step, i) => {
                 const Icon = step.icon
                 const { done, active } = stepState(order.status, step.id)
                 const isCompleted = done && !active

@@ -705,7 +705,7 @@ export default function AdminPaymentsPage() {
                   <h2 className="font-poppins font-bold text-lg text-dark flex items-center gap-2">
                     <Building2 size={20} className="text-primary" /> Kitchen Payout Settlements ({kitchenFreq.toUpperCase()})
                   </h2>
-                  <p className="font-nunito text-xs text-gray">Net payout after deducting GST (18%), platform commission (0% 6-Mo Promo), and Rider delivery fee.</p>
+                  <p className="font-nunito text-xs text-gray">Net payout after platform commission (0% 6-Mo Promo) and flat ₹20 Rider pickup fee per delivery.</p>
                 </div>
               </div>
 
@@ -804,7 +804,7 @@ export default function AdminPaymentsPage() {
                   <h2 className="font-poppins font-bold text-lg text-dark flex items-center gap-2">
                     <Bike size={20} className="text-blue-600" /> Rider Delivery Fee Settlements ({riderFreq.toUpperCase()})
                   </h2>
-                  <p className="font-nunito text-xs text-gray">Accumulated delivery fee earnings to be transferred to riders.</p>
+                  <p className="font-nunito text-xs text-gray">Accumulated delivery fee earnings (Customer drop delivery fee + Flat ₹20 Seller pickup fee per order) to be transferred to riders.</p>
                 </div>
               </div>
 

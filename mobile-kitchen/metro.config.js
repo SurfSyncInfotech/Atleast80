@@ -3,6 +3,8 @@ const { withNativeWind } = require("nativewind/metro");
 
 const config = getDefaultConfig(__dirname);
 
+config.maxWorkers = 2;
+
 config.resolver.blockList = [
   /node_modules\/.*\/android\/.*\/build\/.*/,
   /node_modules\/.*\/android\/.*\/bin\/.*/,

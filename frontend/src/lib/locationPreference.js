@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { api } from "./api"
-import { patchSessionForRole } from "./authStorage"
+import { patchSessionForRole, readSessionForRole } from "./authStorage"
 
 const STORAGE_KEY = "atleast80_location"
 const EVENT_NAME = "location-preference-change"
@@ -119,7 +119,23 @@ export function setLocationPreference(
   localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
   window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: next }))
 
-  // Update database if user is logged in
+  // 1. Instantly update active customer session in localStorage and dispatch auth-session-updated
+  try {
+    const storedCustomer = readSessionForRole("customer")
+    if (storedCustomer?.user) {
+      const updatedUser = {
+        ...storedCustomer.user,
+        city: next.city || storedCustomer.user.city || "",
+        address: next.address || storedCustomer.user.address || "",
+        pincode: next.pincode || storedCustomer.user.pincode || ""
+      }
+      patchSessionForRole("customer", { user: updatedUser })
+    }
+  } catch (e) {
+    // Non-blocking
+  }
+
+  // 2. Persist to database if user is logged in
   try {
     api("/api/auth/location", {
       method: "PATCH",
@@ -130,7 +146,7 @@ export function setLocationPreference(
         address: next.address,
         pincode: next.pincode
       })
-    })
+    }, "customer")
       .then((res) => {
         if (res?.user) {
           patchSessionForRole("customer", { user: res.user })
@@ -208,7 +224,32 @@ export async function autoDetectLocation({ force = false } = {}) {
             console.trace("[REVERSE GEOCODE CALLED]")
 
             // Valid accuracy (<= 10km): proceed with SurfSync reverse geocoding API
-            const data = await api(`/api/locations/reverse?lat=${pos.coords.latitude}&lng=${pos.coords.longitude}`)
+            let data = null
+            try {
+              data = await api(`/api/locations/reverse?lat=${pos.coords.latitude}&lng=${pos.coords.longitude}`)
+            } catch (apiErr) {
+              console.warn("[LOCATION] Backend reverse geocode failed, falling back to OSM Nominatim:", apiErr?.message)
+              try {
+                const osmRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${pos.coords.latitude}&lon=${pos.coords.longitude}&addressdetails=1`, {
+                  headers: { "Accept-Language": "en" }
+                })
+                if (osmRes.ok) {
+                  const osmJson = await osmRes.json()
+                  if (osmJson?.address) {
+                    const a = osmJson.address
+                    data = {
+                      city: a.city || a.town || a.village || a.suburb || a.state_district || "",
+                      state: a.state || "",
+                      suburb: a.suburb || a.neighbourhood || a.residential || "",
+                      postcode: a.postcode || "",
+                      formattedAddress: osmJson.display_name || ""
+                    }
+                  }
+                }
+              } catch (osmClientErr) {
+                console.warn("[LOCATION] OSM client fallback failed:", osmClientErr?.message)
+              }
+            }
             sessionStorage.setItem(DETECTED_KEY, "1")
 
             console.log("[LOCATION TRACE] Reverse geocoding API response received", {

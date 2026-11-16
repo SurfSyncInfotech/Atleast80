@@ -60,6 +60,24 @@ async function checkDbStatus() {
           return cols.some(c => c.Field === "status")
         },
         script: "node scripts/migrateV28.js"
+      },
+      V30: {
+        description: "Kitchen coordinates in kitchens table",
+        check: async () => {
+          if (!tableNames.includes("kitchens")) return false
+          const [cols] = await pool.query("DESCRIBE kitchens")
+          return cols.some(c => c.Field === "latitude") && cols.some(c => c.Field === "longitude")
+        },
+        script: "node scripts/fix_all_migrations.js"
+      },
+      V31: {
+        description: "Delivery and Rider coordinates in orders table",
+        check: async () => {
+          if (!tableNames.includes("orders")) return false
+          const [cols] = await pool.query("DESCRIBE orders")
+          return cols.some(c => c.Field === "delivery_latitude") && cols.some(c => c.Field === "delivery_longitude") && cols.some(c => c.Field === "rider_longitude")
+        },
+        script: "node scripts/fix_all_migrations.js"
       }
     }
 

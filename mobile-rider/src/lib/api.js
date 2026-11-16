@@ -165,6 +165,11 @@ export async function getRiderDashboard() {
   return api("/api/rider/dashboard")
 }
 
+
+export async function getRouteDetails(originLat, originLng, destLat, destLng) {
+  return api(`/api/rider/route-details?originLat=${originLat}&originLng=${originLng}&destLat=${destLat}&destLng=${destLng}`)
+}
+
 export async function getAvailableRiderDeliveries() {
   return api("/api/rider/deliveries/available")
 }

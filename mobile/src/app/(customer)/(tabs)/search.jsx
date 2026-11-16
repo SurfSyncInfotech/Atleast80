@@ -48,7 +48,7 @@ function matchesFilter(kitchen, filterId) {
     case "hygiene":
       return kitchen.hygieneVerified
     case "rating":
-      return kitchen.rating >= 4.5
+      return (Number(kitchen.rating) || 0) >= 3.0
     case "veg":
       return kitchen.kitchenType === "veg"
     case "ration":
@@ -238,6 +238,8 @@ export default function SearchScreen() {
                   isCityMatch,
                   isSignatureDish: itemIsSig,
                   image: item.image || item.images?.[0] || null,
+                  rating: Number(k.rating || 0),
+                  ratingCount: Number(k.rating_count || k.ratingCount || 0),
                 })
                 if (itemIsSig) addedFromMenu = true
               }
@@ -257,6 +259,8 @@ export default function SearchScreen() {
               isCityMatch,
               isSignatureDish: true,
               image: k.image || null,
+              rating: Number(k.rating || 0),
+              ratingCount: Number(k.rating_count || k.ratingCount || 0),
             })
           }
         }
@@ -286,8 +290,33 @@ export default function SearchScreen() {
 
   const results = useMemo(() => {
     const filtered = kitchens.filter((k) => matchesQuery(k, query) && matchesFilter(k, activeFilter))
-    return sortKitchens(filtered, sortBy)
+    const effectiveSort = (activeFilter === "rating" && sortBy === "relevance") ? "rating" : sortBy
+    return sortKitchens(filtered, effectiveSort)
   }, [kitchens, query, activeFilter, sortBy])
+
+  const displayedDishes = useMemo(() => {
+    if (!dishes || dishes.length === 0) return []
+    let list = [...dishes]
+
+    if (activeFilter === "rating") {
+      // Top rated: strictly only dishes with rating >= 3.0, and rank highest first
+      list = list.filter((d) => (Number(d.rating) || 0) >= 3.0)
+      list.sort((a, b) => {
+        const rA = Number(a.rating || 0)
+        const rB = Number(b.rating || 0)
+        if (rB !== rA) return rB - rA
+        if (a.isCityMatch && !b.isCityMatch) return -1
+        if (!a.isCityMatch && b.isCityMatch) return 1
+        if (a.isSignatureDish && !b.isSignatureDish) return -1
+        if (!a.isSignatureDish && b.isSignatureDish) return 1
+        return 0
+      })
+    } else if (activeFilter === "veg") {
+      list = list.filter((d) => d.item_type === "veg" || /veg|paneer|dal|thali/i.test(d.dishName))
+    }
+
+    return list
+  }, [dishes, activeFilter])
 
   const clearSearch = () => setQuery("")
 
@@ -417,9 +446,9 @@ export default function SearchScreen() {
           {loading || searchingDishes ? (
             "Searching..."
           ) : query.trim() ? (
-            dishes.length > 0 ? (
+            displayedDishes.length > 0 ? (
               <Text>
-                <Text className="font-bold text-dark">{dishes.length}</Text> dish{dishes.length !== 1 ? "es" : ""} found
+                <Text className="font-bold text-dark">{displayedDishes.length}</Text> dish{displayedDishes.length !== 1 ? "es" : ""} found
               </Text>
             ) : (
               <Text>
@@ -444,7 +473,7 @@ export default function SearchScreen() {
         <View className="flex-grow justify-center py-12">
           <ActivityIndicator size="large" color="#0B6B3A" />
         </View>
-      ) : results.length === 0 && dishes.length === 0 ? (
+      ) : results.length === 0 && displayedDishes.length === 0 ? (
         <ScrollView showsVerticalScrollIndicator={false} className="flex-grow">
           <View className="py-20 items-center justify-center px-6">
             <ChefHat size={48} color="#7A7A7A" style={{ marginBottom: 16 }} />
@@ -458,7 +487,7 @@ export default function SearchScreen() {
         <ScrollView showsVerticalScrollIndicator={false} className="flex-grow px-4">
           <View className="pb-10 pt-2">
             {/* If all matching dishes are outside user's city, show prominent notice banner */}
-            {query.trim() && dishes.length > 0 && userLocation?.city && dishes.every((d) => !d.isCityMatch) ? (
+            {query.trim() && displayedDishes.length > 0 && userLocation?.city && displayedDishes.every((d) => !d.isCityMatch) ? (
               <View
                 style={{
                   backgroundColor: "#FEF2F2",
@@ -485,15 +514,15 @@ export default function SearchScreen() {
             ) : null}
 
             {/* Dish Cards section */}
-            {dishes.length > 0 ? (
+            {displayedDishes.length > 0 ? (
               <View className="mb-4">
                 <View className="flex-row items-center gap-1.5 mb-2.5">
                   <UtensilsCrossed size={16} color="#0B6B3A" />
                   <Text className="font-poppins font-bold text-sm text-dark">
-                    Dishes ({dishes.length})
+                    Dishes ({displayedDishes.length})
                   </Text>
                 </View>
-                {dishes.map((dish, idx) => (
+                {displayedDishes.map((dish, idx) => (
                   <DishCard
                     key={`${dish.kitchenId}_${dish.id || idx}`}
                     dish={dish}
@@ -513,7 +542,7 @@ export default function SearchScreen() {
             ) : null}
 
             {/* Kitchens section: shown when browsing or when no dishes matched search */}
-            {results.length > 0 && dishes.length === 0 ? (
+            {results.length > 0 && displayedDishes.length === 0 ? (
               <View>
                 {results.map((kitchen) => (
                   <KitchenCard

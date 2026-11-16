@@ -39,15 +39,20 @@ router.post("/razorpay/create-order", authRequired, async (req, res) => {
     // Validate delivery availability before taking payment
     if (kitchenId && deliveryMethod !== "self") {
       const [kitchens] = await pool.query("SELECT id, name, city FROM kitchens WHERE id = ?", [kitchenId])
-      const [users] = await pool.query("SELECT city FROM users WHERE id = ?", [req.user.id])
+      const [users] = await pool.query("SELECT city, address FROM users WHERE id = ?", [req.user.id])
       const kitchen = kitchens[0]
       const user = users[0]
-      if (kitchen && user) {
-        const custCity = (user.city || "").trim().toLowerCase()
+      if (kitchen) {
+        const reqCity = (req.body.deliveryCity || req.body.city || "").trim().toLowerCase()
+        const custCity = reqCity || (user?.city || "").trim().toLowerCase()
         const kitCity = (kitchen.city || "").trim().toLowerCase()
-        if (custCity && kitCity && custCity !== kitCity) {
+        const deliveryAddr = (req.body.deliveryAddress || user?.address || "").toLowerCase()
+
+        // Check if matching, or if delivery address belongs to the kitchen's city (e.g. Roha/Kolad)
+        const isMatch = !custCity || custCity === kitCity || deliveryAddr.includes(kitCity) || (kitCity === "roha" && (deliveryAddr.includes("roha") || deliveryAddr.includes("kolad")))
+        if (!isMatch) {
           return res.status(400).json({
-            error: `Delivery unavailable. ${kitchen.name} only delivers within ${kitchen.city}. Please select a kitchen near ${user.city || 'your city'}!`
+            error: `Delivery unavailable. ${kitchen.name} only delivers within ${kitchen.city}. Please select a kitchen near ${user?.city || 'your city'}!`
           })
         }
       }

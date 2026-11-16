@@ -1,3 +1,8 @@
+
+function stripPlusCode(addr) {
+  if (!addr || typeof addr !== "string") return addr || ""
+  return addr.replace(/^[A-Z0-9]{4,8}\+[A-Z0-9]{2,5},?\s*/i, "").trim()
+}
 import { useEffect, useRef, useState } from "react"
 import { X, Search, MapPin, Navigation, Check, Loader2, Edit3 } from "lucide-react"
 import L from "leaflet"
@@ -123,8 +128,9 @@ export default function LocationMapModal({ isOpen, onClose, onConfirmLocation, i
         attributionControl: false
       }).setView(initialCenter, initialZoom)
 
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
+      L.tileLayer("https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}", {
+        maxZoom: 20,
+        subdomains: ["0", "1", "2", "3"]
       }).addTo(map)
 
       if (currentCoords) {

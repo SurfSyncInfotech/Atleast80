@@ -1,3 +1,32 @@
+
+function calculateDistanceKm(lat1, lon1, lat2, lon2) {
+  const numLat1 = Number(lat1)
+  const numLon1 = Number(lon1)
+  const numLat2 = Number(lat2)
+  const numLon2 = Number(lon2)
+  if (isNaN(numLat1) || isNaN(numLon1) || isNaN(numLat2) || isNaN(numLon2) || !lat1 || !lon1 || !lat2 || !lon2) return null
+  const R = 6371
+  const dLat = (numLat2 - numLat1) * (Math.PI / 180)
+  const dLon = (numLon2 - numLon1) * (Math.PI / 180)
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(numLat1 * (Math.PI / 180)) *
+      Math.cos(numLat2 * (Math.PI / 180)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return Number((R * c * 1.25).toFixed(1))
+}
+
+function calculateDeliveryCharge(distanceKm) {
+  const km = Number(distanceKm) || 0
+  const baseKm = 2.0
+  const baseRate = 30.0
+  const perKmRate = 10.0
+  if (km <= baseKm) return baseRate
+  const extraKm = km - baseKm
+  return Number((baseRate + extraKm * perKmRate).toFixed(2))
+}
 import { useState, useEffect, useMemo } from "react"
 import { useNavigate } from "react-router-dom"
 import { ArrowLeft, Minus, Plus, Trash2, Package, Truck, MapPin, ShoppingCart, AlertCircle } from "lucide-react"
@@ -6,6 +35,8 @@ import Button from "../components/ui/Button"
 import { useCart } from "../context/CartContext"
 import { api } from "../lib/api"
 import { resolveMediaUrl } from "../lib/media"
+import { useAuth } from "../context/AuthContext"
+import { getLocationPreference } from "../lib/locationPreference"
 
 const packingOptions = [
   { id: "standard", label: "Standard", desc: "Basic packaging", price: 0 },
@@ -14,9 +45,8 @@ const packingOptions = [
 ]
 
 const deliveryOptions = [
-  { id: "free", label: "Seller Free Delivery", desc: "30-45 min", price: 0, icon: Truck },
+  { id: "free", label: "Doorstep Delivery", desc: "30-45 min (Base 2km)", price: 30, icon: Truck },
   { id: "self", label: "Self Pickup", desc: "Ready in 20 min", price: 0, icon: MapPin },
-  { id: "express", label: "Express Delivery", desc: "15-20 min", price: 40, icon: Package },
 ]
 
 export default function CartPage() {
@@ -25,8 +55,56 @@ export default function CartPage() {
   const [packing, setPacking] = useState("standard")
   const [delivery, setDelivery] = useState("free")
 
+  const { user } = useAuth()
+  const [locationPref, setLocationPref] = useState(getLocationPreference)
+  const [kitchenCoordsMap, setKitchenCoordsMap] = useState({})
+
+  useEffect(() => {
+    const handleLocChange = (e) => {
+      setLocationPref(e.detail || getLocationPreference())
+    }
+    window.addEventListener("location-preference-change", handleLocChange)
+    return () => window.removeEventListener("location-preference-change", handleLocChange)
+  }, [])
+
+  useEffect(() => {
+    const kitchenIds = [...new Set(cart.map((i) => i.kitchenId || i.kitchen_id).filter(Boolean))]
+    kitchenIds.forEach((kId) => {
+      if (!kitchenCoordsMap[String(kId)]) {
+        api(`/api/kitchens/${kId}`)
+          .then((res) => {
+            if (res?.kitchen?.latitude && res.kitchen.longitude) {
+              setKitchenCoordsMap((prev) => ({
+                ...prev,
+                [String(kId)]: {
+                  latitude: Number(res.kitchen.latitude),
+                  longitude: Number(res.kitchen.longitude),
+                },
+              }))
+            }
+          })
+          .catch(() => {})
+      }
+    })
+  }, [cart])
+
+  const getKitchenDeliveryFee = (kId) => {
+    if (delivery === "self") return 0
+    const headerPrefLoc = locationPref || getLocationPreference()
+    const userLat = headerPrefLoc?.lat || headerPrefLoc?.latitude || user?.latitude
+    const userLng = headerPrefLoc?.lng || headerPrefLoc?.longitude || user?.longitude
+    const kCoords = kitchenCoordsMap[String(kId)]
+    if (kCoords && userLat && userLng) {
+      const dist = calculateDistanceKm(kCoords.latitude, kCoords.longitude, userLat, userLng)
+      if (dist !== null) return calculateDeliveryCharge(dist)
+    }
+    return 30.0
+  }
+
+  const primaryKitchenId = cart[0]?.kitchenId || cart[0]?.kitchen_id
+  const calculatedDoorstepFee = getKitchenDeliveryFee(primaryKitchenId)
   const packingCost = packingOptions.find((p) => p.id === packing)?.price || 0
-  const deliveryCost = deliveryOptions.find((d) => d.id === delivery)?.price || 0
+  const deliveryCost = delivery === "self" ? 0 : calculatedDoorstepFee
 
   // Group cart items by kitchen
   const kitchenGroups = useMemo(() => {
@@ -104,8 +182,9 @@ export default function CartPage() {
         return sum + (effectivePrice * Number(item.qty) * (rate / 100))
       }, 0).toFixed(2)
     )
-    const grand = Number((discountedSubtotal + gst + packingCost + deliveryCost).toFixed(2))
-    return { subtotal, festivalDiscount, discountedSubtotal, gst, grand }
+    const groupDeliveryFee = delivery === "self" ? 0 : getKitchenDeliveryFee(groupItems[0]?.kitchenId || groupItems[0]?.kitchen_id)
+    const grand = Number((discountedSubtotal + gst + packingCost + groupDeliveryFee).toFixed(2))
+    return { subtotal, festivalDiscount, discountedSubtotal, gst, grand, groupDeliveryFee }
   }
 
   // Global total
@@ -157,7 +236,7 @@ export default function CartPage() {
         packing,
         delivery,
         packingCost,
-        deliveryCost,
+        deliveryCost: calcGroupTotals(group.items).groupDeliveryFee,
         gstAmount: gst,
         itemTotal: subtotal,
         festivalDiscount,
@@ -232,7 +311,7 @@ export default function CartPage() {
           {/* Left column: Kitchen Groups */}
           <div className="space-y-6">
             {kitchenGroups.map((group, groupIdx) => {
-              const { subtotal, gst, grand } = calcGroupTotals(group.items)
+              const { subtotal, festivalDiscount, gst, grand } = calcGroupTotals(group.items)
               const groupHasUnavailable = group.items.some(
                 (item) => item.is_available === 0 || item.is_available === false || item.isAvailable === false
               )
@@ -406,7 +485,7 @@ export default function CartPage() {
                         <p className="text-xs text-gray mt-0.5">{opt.desc}</p>
                       </div>
                       <span className="font-poppins font-semibold text-sm text-dark">
-                        {opt.price === 0 ? "Free" : `+₹${opt.price}`}
+                        {opt.id === "self" ? "Free" : `+₹${calculatedDoorstepFee}`}
                       </span>
                     </button>
                   ))}

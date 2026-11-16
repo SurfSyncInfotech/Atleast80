@@ -1,5 +1,35 @@
+
+function calculateDistanceKm(lat1, lon1, lat2, lon2) {
+  const numLat1 = Number(lat1)
+  const numLon1 = Number(lon1)
+  const numLat2 = Number(lat2)
+  const numLon2 = Number(lon2)
+  if (isNaN(numLat1) || isNaN(numLon1) || isNaN(numLat2) || isNaN(numLon2) || !lat1 || !lon1 || !lat2 || !lon2) return null
+  const R = 6371
+  const dLat = (numLat2 - numLat1) * (Math.PI / 180)
+  const dLon = (numLon2 - numLon1) * (Math.PI / 180)
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(numLat1 * (Math.PI / 180)) *
+      Math.cos(numLat2 * (Math.PI / 180)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return Number((R * c * 1.25).toFixed(1))
+}
+
+function calculateDeliveryCharge(distanceKm) {
+  const km = Number(distanceKm) || 0
+  const baseKm = 2.0
+  const baseRate = 30.0
+  const perKmRate = 10.0
+  if (km <= baseKm) return baseRate
+  const extraKm = km - baseKm
+  return Number((baseRate + extraKm * perKmRate).toFixed(2))
+}
 import { useState, useEffect } from "react"
 import { useNavigate, useLocation } from "react-router-dom"
+import LocationMapModal from "../components/common/LocationMapModal"
 import { ArrowLeft, MapPin, Clock, CreditCard, Wallet, CheckCircle } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import Button from "../components/ui/Button"
@@ -7,7 +37,7 @@ import { useCart } from "../context/CartContext"
 import { useAuth } from "../context/AuthContext"
 import { api } from "../lib/api"
 import { resolveMediaUrl } from "../lib/media"
-import { getLocationPreference } from "../lib/locationPreference"
+import { getLocationPreference, setLocationPreference } from "../lib/locationPreference"
 
 function loadRazorpayScript() {
   return new Promise((resolve) => {
@@ -32,9 +62,20 @@ export default function CheckoutPage() {
   const [orderPlaced, setOrderPlaced] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  const [locationPref, setLocationPref] = useState(getLocationPreference)
+  const [isMapModalOpen, setIsMapModalOpen] = useState(false)
+
+  useEffect(() => {
+    const handleLocChange = (e) => {
+      setLocationPref(e.detail || getLocationPreference())
+    }
+    window.addEventListener("location-preference-change", handleLocChange)
+    return () => window.removeEventListener("location-preference-change", handleLocChange)
+  }, [])
 
   const [kitchenCity, setKitchenCity] = useState("")
   const [kitchenName, setKitchenName] = useState(location.state?.kitchenName || "")
+  const [kitchenCoords, setKitchenCoords] = useState(null)
 
   const targetKitchenId = location.state?.kitchenId || cart[0]?.kitchenId
   const checkoutItems = cart.filter(
@@ -48,7 +89,23 @@ export default function CheckoutPage() {
   const packingType = location.state?.packing || "standard"
   const deliveryMethod = location.state?.delivery || "free"
   const packingFee = location.state?.packingCost || 0
-  const deliveryFee = location.state?.deliveryCost || 0
+
+  useEffect(() => {
+    if (deliveryMethod === "self" && payment === "cod") {
+      setPayment("")
+    }
+  }, [deliveryMethod, payment])
+  const headerPrefLoc = locationPref || getLocationPreference()
+  const userLat = headerPrefLoc?.lat || headerPrefLoc?.latitude || user?.latitude
+  const userLng = headerPrefLoc?.lng || headerPrefLoc?.longitude || user?.longitude
+  const deliveryDistanceKm = (kitchenCoords?.latitude && kitchenCoords?.longitude && userLat && userLng)
+    ? calculateDistanceKm(kitchenCoords.latitude, kitchenCoords.longitude, userLat, userLng)
+    : null
+  const deliveryFee = deliveryMethod === "self"
+    ? 0
+    : deliveryDistanceKm !== null
+    ? calculateDeliveryCharge(deliveryDistanceKm)
+    : (Number(location.state?.deliveryCost) > 0 ? Number(location.state?.deliveryCost) : 30.00)
 
   const festivalDiscount = Number(
     itemsToOrder.reduce((sum, item) => {
@@ -77,12 +134,9 @@ export default function CheckoutPage() {
   const grandTotal = Number((discountedItemTotal + gstAmount + packingFee + deliveryFee).toFixed(2))
 
   const kitchenId = targetKitchenId
-  const profileAddr = [user?.address, user?.city, user?.pincode].filter(Boolean).join(", ")
-  
-  const headerPref = getLocationPreference()
-  const headerAddr = [headerPref?.address || headerPref?.suburb, headerPref?.city, headerPref?.state, headerPref?.pincode].filter(Boolean).join(", ")
-  
-  const deliveryAddress = profileAddr || headerAddr
+  const headerPref = locationPref || getLocationPreference()
+  const activeAddress = headerPref?.address || user?.address || [headerPref?.suburb, headerPref?.city, headerPref?.state, headerPref?.pincode].filter(Boolean).join(", ")
+  const deliveryAddress = activeAddress || [user?.address, user?.city, user?.pincode].filter(Boolean).join(", ")
 
   useEffect(() => {
     if (kitchenId) {
@@ -92,6 +146,12 @@ export default function CheckoutPage() {
             setKitchenCity(res.kitchen.city || "")
             if (!kitchenName) {
               setKitchenName(res.kitchen.name || "")
+            }
+            if (res.kitchen.latitude && res.kitchen.longitude) {
+              setKitchenCoords({
+                latitude: Number(res.kitchen.latitude),
+                longitude: Number(res.kitchen.longitude)
+              })
             }
           }
         })
@@ -129,7 +189,7 @@ export default function CheckoutPage() {
 
   const hasClosedOfferItems = itemsToOrder.some((item) => item.isOfferClosed)
 
-  const customerCity = (user?.city || headerPref?.city || "").trim().toLowerCase()
+  const customerCity = (headerPref?.city || user?.city || "").trim().toLowerCase()
   const targetKitchenCity = (kitchenCity || "").trim().toLowerCase()
   const isDeliveryUnavailable = deliveryMethod !== "self" && Boolean(customerCity) && Boolean(targetKitchenCity) && customerCity !== targetKitchenCity
 
@@ -142,8 +202,16 @@ export default function CheckoutPage() {
       setError("Some items in your cart are currently unavailable. Please go back to your cart and remove them before ordering.")
       return
     }
+    if (deliveryMethod === "self" && payment === "cod") {
+      setError("Cash on Delivery is not available for Self Pickup. Please pay via UPI / Google Pay.")
+      return
+    }
     if (!payment) {
-      setError("Please select a payment method (UPI / Online or Cash on Delivery) to proceed.")
+      setError(
+        deliveryMethod === "self"
+          ? "Please select UPI / Google Pay to proceed."
+          : "Please select a payment method (UPI / Online or Cash on Delivery) to proceed."
+      )
       return
     }
     if (!kitchenId) {
@@ -153,6 +221,20 @@ export default function CheckoutPage() {
 
     setLoading(true)
     setError("")
+
+    // Ensure customer's profile city and address are synced to Roha/selected location on backend
+    const targetCity = headerPref?.city || "Roha"
+    try {
+      await api("/api/auth/location", {
+        method: "PATCH",
+        body: JSON.stringify({
+          city: targetCity,
+          address: deliveryAddress,
+        }),
+      }, "customer")
+    } catch (locErr) {
+      console.warn("Could not sync location to backend profile:", locErr)
+    }
 
     try {
       if (payment === "upi" || payment === "online" || (payment === "cod" && deliveryMethod !== "self")) {
@@ -176,6 +258,8 @@ export default function CheckoutPage() {
             kitchenId,
             festivalDiscount,
             hasOffer,
+            deliveryCity: headerPref?.city || user?.city || "Roha",
+            deliveryAddress: deliveryAddress,
           }),
         }, "customer")
 
@@ -237,6 +321,7 @@ export default function CheckoutPage() {
                   packingFee,
                   deliveryFee,
                   deliveryAddress,
+                  deliveryCity: targetCity,
                 }),
               }, "customer")
 
@@ -307,6 +392,7 @@ export default function CheckoutPage() {
           packingFee,
           deliveryFee,
           deliveryAddress,
+          deliveryCity: targetCity,
         }),
       }, "customer")
       setOrderPlaced(true)
@@ -442,10 +528,15 @@ export default function CheckoutPage() {
 
             <div className="bg-white rounded-2xl p-4 shadow-sm">
               <h3 className="font-poppins font-semibold text-sm text-dark mb-3">Payment Method</h3>
+              {deliveryMethod === "self" && (
+                <p className="text-xs text-primary font-nunito mb-2.5 font-medium">
+                  Self Pickup orders only accept online payment (UPI / Google Pay). COD is not available.
+                </p>
+              )}
               <div className="space-y-2">
                 {[
                   { id: "upi", label: "UPI / Google Pay", icon: Wallet },
-                  { id: "cod", label: "Cash on Delivery", icon: CreditCard },
+                  ...(deliveryMethod !== "self" ? [{ id: "cod", label: "Cash on Delivery", icon: CreditCard }] : []),
                 ].map((opt) => {
                   const Icon = opt.icon
                   return (
@@ -465,6 +556,16 @@ export default function CheckoutPage() {
                   )
                 })}
               </div>
+              {payment === "cod" && deliveryMethod !== "self" && (
+                <div className="bg-amber-50 rounded-xl p-3 border border-amber-400 mt-3 text-xs font-nunito text-amber-900">
+                  <p className="font-poppins font-bold text-amber-800 flex items-center gap-1.5 mb-1 text-xs">
+                    <span>⚡</span> COD Advance Delivery Fee Notice
+                  </p>
+                  <p className="leading-relaxed">
+                    To confirm your Cash on Delivery order, the ₹{deliveryFee} delivery fee is paid online via UPI now. The remaining ₹{Math.max(0, Number((grandTotal - deliveryFee).toFixed(2)))} will be collected in cash by the rider at your doorstep.
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="bg-white rounded-2xl p-4 shadow-sm">
@@ -522,7 +623,7 @@ export default function CheckoutPage() {
               </div>
               <div className="hidden md:block mt-6">
                 <Button onClick={handlePlaceOrder} size="lg" className="w-full disabled:opacity-50" disabled={loading || isDeliveryUnavailable || hasUnavailableItems}>
-                  {hasUnavailableItems ? "Unavailable Items in Cart" : isDeliveryUnavailable ? "Delivery Unavailable" : loading ? "Placing order..." : `Place Order - ₹${grandTotal}`}
+                  {hasUnavailableItems ? "Unavailable Items in Cart" : isDeliveryUnavailable ? "Delivery Unavailable" : loading ? "Placing order..." : (payment === "cod" && deliveryMethod !== "self" ? `Pay Advance Delivery Fee - ₹${deliveryFee}` : `Place Order - ₹${grandTotal}`)}
                 </Button>
               </div>
             </div>
@@ -532,7 +633,7 @@ export default function CheckoutPage() {
 
       <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t p-4 z-50">
         <Button onClick={handlePlaceOrder} size="lg" className="w-full disabled:opacity-50" disabled={loading || isDeliveryUnavailable || hasUnavailableItems}>
-          {hasUnavailableItems ? "Unavailable Items in Cart" : isDeliveryUnavailable ? "Delivery Unavailable" : loading ? "Placing order..." : `Place Order - ₹${grandTotal}`}
+          {hasUnavailableItems ? "Unavailable Items in Cart" : isDeliveryUnavailable ? "Delivery Unavailable" : loading ? "Placing order..." : (payment === "cod" && deliveryMethod !== "self" ? `Pay Advance Delivery Fee - ₹${deliveryFee}` : `Place Order - ₹${grandTotal}`)}
         </Button>
       </div>
     </div>

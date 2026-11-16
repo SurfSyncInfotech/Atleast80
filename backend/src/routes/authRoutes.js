@@ -133,6 +133,35 @@ router.patch("/location", optionalAuth, async (req, res) => {
         "UPDATE users SET city = ?, address = ?, pincode = ? WHERE id = ?",
         [city || null, cleanAddress || null, pincode || null, req.user.id]
       )
+
+      // If user is a rider, update riders table and active orders with city coordinates
+      if (req.user.role === "rider" || req.user.riderId) {
+        let rLat = req.body.latitude
+        let rLng = req.body.longitude
+        if (!rLat || !rLng) {
+          const cLower = (city || "").trim().toLowerCase()
+          if (cLower === "roha") {
+            rLat = 18.43723650; rLng = 73.10840520;
+          } else if (cLower === "kolad") {
+            rLat = 18.41443710; rLng = 73.21738970;
+          } else if (cLower === "mangaon") {
+            rLat = 18.2520; rLng = 73.2878;
+          } else if (cLower === "pune") {
+            rLat = 18.5204; rLng = 73.8567;
+          } else if (cLower === "mumbai") {
+            rLat = 19.0760; rLng = 72.8777;
+          }
+        }
+        if (rLat && rLng) {
+          await pool.query("UPDATE riders SET latitude = ?, longitude = ? WHERE user_id = ?", [rLat, rLng, req.user.id])
+          await pool.query(
+            `UPDATE orders SET rider_latitude = ?, rider_longitude = ?
+             WHERE rider_id = (SELECT id FROM riders WHERE user_id = ? LIMIT 1)
+               AND delivery_status IN ('accepted', 'arrived_kitchen', 'picked_up', 'arrived_customer')`,
+            [rLat, rLng, req.user.id]
+          )
+        }
+      }
       const [updatedUsers] = await pool.query(
         "SELECT id, name, email, phone, role, city, address, pincode FROM users WHERE id = ?",
         [req.user.id]

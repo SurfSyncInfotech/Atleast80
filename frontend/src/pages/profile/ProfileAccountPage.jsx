@@ -49,9 +49,9 @@ export default function ProfileAccountPage() {
     return () => window.removeEventListener("location-preference-change", handleLocChange)
   }, [])
 
-  const currentAddress = user?.address || locationPref?.address || ""
-  const currentCity = user?.city || locationPref?.city || ""
-  const currentPincode = user?.pincode || locationPref?.pincode || ""
+  const currentAddress = locationPref?.address || user?.address || ""
+  const currentCity = locationPref?.city || user?.city || ""
+  const currentPincode = locationPref?.pincode || user?.pincode || ""
   const displayAddress = [currentAddress, currentCity, currentPincode].filter(Boolean).join(", ")
   const hasAddress = Boolean(displayAddress)
 
@@ -64,17 +64,17 @@ export default function ProfileAccountPage() {
   }, [])
 
   useEffect(() => {
-    if (!user) return
     const pref = getLocationPreference()
-    setForm({
-      name: user.name || "",
-      email: user.email || "",
-      phone: user.phone || "",
-      address: user.address || pref.address || "",
-      city: user.city || pref.city || "",
-      pincode: user.pincode || pref.pincode || "",
-    })
-  }, [user])
+    setForm((prev) => ({
+      ...prev,
+      name: user?.name || prev.name || "",
+      email: user?.email || prev.email || "",
+      phone: user?.phone || prev.phone || "",
+      address: pref.address || user?.address || "",
+      city: pref.city || user?.city || "",
+      pincode: pref.pincode || user?.pincode || "",
+    }))
+  }, [user, locationPref])
 
   const handleAutoDetectLocation = () => {
     if (!navigator.geolocation) {
@@ -136,12 +136,24 @@ export default function ProfileAccountPage() {
 
   const handleConfirmMapLocation = (loc) => {
     if (!loc) return
+    const newAddress = loc.address || form.address
+    const newCity = loc.city || form.city
+    const newPincode = loc.pincode || form.pincode
     setForm((prev) => ({
       ...prev,
-      address: loc.address || prev.address,
-      city: loc.city || prev.city,
-      pincode: loc.pincode || prev.pincode,
+      address: newAddress,
+      city: newCity,
+      pincode: newPincode,
     }))
+    setLocationPreference({
+      state: loc.state || "",
+      city: newCity,
+      suburb: loc.suburb || "",
+      address: newAddress,
+      pincode: newPincode,
+      lat: loc.latitude,
+      lng: loc.longitude,
+    }, { source: "manual" })
     setIsMapModalOpen(false)
   }
 

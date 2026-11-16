@@ -1,3 +1,22 @@
+# Environment variables & secrets
+.env
+.env.*
+*.env
+*.env.local
+backend/.env
+mobile/.env
+mobile-kitchen/.env
+mobile-rider/.env
+frontend/.env
+*.keystore
+*.jks
+
+# Scratch & temporary scripts
+scratch/
+backend/check_schema.mjs
+backend/patch_order.mjs
+backend/scripts/inspectKitchen.js
+
 # App Builds & Binaries
 *.apk
 *.apk*

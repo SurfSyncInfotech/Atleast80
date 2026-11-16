@@ -5,7 +5,8 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import {
   Clock, CheckCircle, XCircle, RefreshCw, Star, ShoppingBag, ChefHat,
   Circle, FileCheck, Shield, Sparkles, UtensilsCrossed, ChevronRight,
-  PlusCircle, Bell, LogOut, Image as ImageIcon, IndianRupee, Video, Trash2, AlertTriangle, Play, MessageSquare, Mail, Phone, X, ShieldCheck, FileText
+  PlusCircle, Bell, LogOut, Image as ImageIcon, IndianRupee, Video, Trash2, AlertTriangle, Play, MessageSquare, Mail, Phone, X, ShieldCheck, FileText,
+  Wallet
 } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import * as DocumentPicker from "expo-document-picker"
@@ -743,6 +744,13 @@ export default function KitchenDashboardScreen() {
                 icon: Sparkles,
                 color: "#7C3AED",
                 iconBg: "bg-purple-50",
+              },
+              {
+                label: "Next Payout Due",
+                value: `₹${orderStats.currentCycleRevenue ?? orderStats.unsettledRevenue ?? 0}`,
+                icon: Wallet,
+                color: "#059669",
+                iconBg: "bg-emerald-50",
               },
               {
                 label: "Rating",
@@ -1500,31 +1508,72 @@ export default function KitchenDashboardScreen() {
                   </Text>
                 </View>
               ) : (
-                payoutsList.map((p) => (
-                  <View key={p.id} style={{ backgroundColor: "#F9FAFB", borderRadius: 16, padding: 14, borderWidth: 1, borderColor: "#E5E7EB" }}>
-                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                      <Text style={{ fontSize: 16, fontWeight: "bold", fontFamily: "Poppins", color: "#059669" }}>
-                        ₹{p.netPayout}
-                      </Text>
-                      <View style={{ backgroundColor: "#D1FAE5", paddingHorizontal: 10, paddingVertical: 2, borderRadius: 12 }}>
-                        <Text style={{ fontSize: 10, fontWeight: "bold", fontFamily: "Poppins", color: "#065F46" }}>
-                          PAID ✅
-                        </Text>
+                payoutsList.map((p) => {
+                  const riderFee = p.riderFeeDeduction || Math.max(0, p.grossAmount - p.commissionDeduction - p.netPayout)
+                  const isFreePromo = Number(p.commissionDeduction) === 0
+                  return (
+                    <View key={p.id} style={{ backgroundColor: "#FFFFFF", borderRadius: 16, padding: 14, borderWidth: 1, borderColor: "#E5E7EB", gap: 10 }}>
+                      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderBottomWidth: 1, borderBottomColor: "#F3F4F6", paddingBottom: 8 }}>
+                        <View>
+                          <Text style={{ fontSize: 10, fontFamily: "Nunito", color: "#6B7280", textTransform: "uppercase", fontWeight: "600" }}>
+                            Net Bank Settlement
+                          </Text>
+                          <Text style={{ fontSize: 18, fontWeight: "bold", fontFamily: "Poppins", color: "#059669" }}>
+                            ₹{p.netPayout}
+                          </Text>
+                        </View>
+                        <View style={{ backgroundColor: "#D1FAE5", paddingHorizontal: 10, paddingVertical: 3, borderRadius: 12 }}>
+                          <Text style={{ fontSize: 10, fontWeight: "bold", fontFamily: "Poppins", color: "#065F46" }}>
+                            PAID ✅
+                          </Text>
+                        </View>
                       </View>
+
+                      <View style={{ backgroundColor: "#F9FAFB", borderRadius: 10, padding: 10, gap: 4 }}>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                          <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#4B5563" }}>Gross Food Sales:</Text>
+                          <Text style={{ fontSize: 11, fontFamily: "Poppins", fontWeight: "600", color: "#111827" }}>₹{p.grossAmount}</Text>
+                        </View>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                          <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#4B5563" }}>
+                            Platform Fee {isFreePromo ? "(0% Free Promo)" : `(${p.commissionRate || 10}%)`}:
+                          </Text>
+                          <Text style={{ fontSize: 11, fontFamily: "Poppins", fontWeight: "600", color: "#DC2626" }}>-₹{p.commissionDeduction}</Text>
+                        </View>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                          <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#4B5563" }}>Rider Delivery Fee:</Text>
+                          <Text style={{ fontSize: 11, fontFamily: "Poppins", fontWeight: "600", color: "#7C3AED" }}>-₹{riderFee}</Text>
+                        </View>
+                      </View>
+
+                      <View style={{ gap: 2 }}>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                          <Text style={{ fontSize: 10, fontFamily: "Nunito", color: "#6B7280" }}>UTR Reference:</Text>
+                          <Text style={{ fontSize: 11, fontWeight: "bold", fontFamily: "monospace", color: "#1F2937" }}>
+                            {p.utrNumber || "—"}
+                          </Text>
+                        </View>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                          <Text style={{ fontSize: 10, fontFamily: "Nunito", color: "#6B7280" }}>Paid on:</Text>
+                          <Text style={{ fontSize: 10, fontFamily: "Nunito", color: "#4B5563" }}>
+                            {p.paidAt ? new Date(p.paidAt).toLocaleString("en-IN") : "—"}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {p.notes ? (
+                        <View style={{ backgroundColor: "#FEF3C7", borderColor: "#FDE68A", borderWidth: 1, borderRadius: 8, padding: 8 }}>
+                          <Text style={{ fontSize: 9, fontFamily: "Poppins", fontWeight: "bold", color: "#92400E", textTransform: "uppercase" }}>
+                            💬 Admin Note:
+                          </Text>
+                          <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#78350F", marginTop: 2 }}>
+                            {p.notes}
+                          </Text>
+                        </View>
+                      ) : null}
                     </View>
-                    <View style={{ gap: 4 }}>
-                      <Text style={{ fontSize: 12, fontFamily: "Nunito", color: "#4B5563" }}>
-                        Gross Sales: ₹{p.grossAmount} | Comm (10%): -₹{p.commissionDeduction}
-                      </Text>
-                      <Text style={{ fontSize: 12, fontWeight: "bold", fontFamily: "monospace", color: "#1F2937" }}>
-                        UTR Ref: {p.utrNumber || "—"}
-                      </Text>
-                      <Text style={{ fontSize: 10, fontFamily: "Nunito", color: "#9CA3AF", marginTop: 2 }}>
-                        Paid on: {p.paidAt ? new Date(p.paidAt).toLocaleString("en-IN") : "—"}
-                      </Text>
-                    </View>
-                  </View>
-                ))
+                  )
+                })
               )}
             </ScrollView>
           </Pressable>

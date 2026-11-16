@@ -32,7 +32,7 @@ export default function MenuListItem({
     return (
       <View
         className={cn(
-          "bg-white rounded-[24px] border border-slate-100 shadow-sm flex-col pb-14 relative overflow-visible w-full",
+          "bg-white rounded-[24px] border border-slate-100 shadow-sm flex-col pb-14 relative overflow-visible w-full min-h-[250px]",
           !isAvailable && "opacity-80 bg-slate-50/50",
           className
         )}
@@ -89,7 +89,7 @@ export default function MenuListItem({
           </View>
 
           {/* Content */}
-          <View className="p-3 flex-1 flex-col justify-between">
+          <View className="p-3 flex-1 flex-col justify-between min-h-[85px]">
             <View>
               <View className="flex-row items-center mb-1 gap-1 flex-wrap">
                 {item.category === "grocery" ? (

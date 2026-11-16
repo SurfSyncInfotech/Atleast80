@@ -13,6 +13,7 @@ react {
     enableBundleCompression = false
     cliFile = new File(["node", "--print", "require.resolve('@expo/cli', { paths: [require.resolve('expo/package.json')] })"].execute(null, rootDir).text.trim())
     bundleCommand = "export:embed"
+    nodeExecutableAndArgs = ["node", "--max-old-space-size=2560"]
 
     autolinkLibrariesWithApp()
 }
@@ -40,6 +41,12 @@ android {
         versionName "600.0.0"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
+
+        externalNativeBuild {
+            cmake {
+                arguments "-DCMAKE_BUILD_PARALLEL_LEVEL=1"
+            }
+        }
     }
     signingConfigs {
         debug {

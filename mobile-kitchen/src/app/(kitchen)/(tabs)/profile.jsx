@@ -75,6 +75,8 @@ function kitchenToForm(kitchen) {
     confirmBankAccountNumber: kitchen.bank_account_number || kitchen.bankAccountNumber || "",
     bankIfsc: kitchen.bank_ifsc || kitchen.bankIfsc || "",
     upiId: kitchen.upi_id || kitchen.upiId || "",
+    latitude: kitchen.latitude || null,
+    longitude: kitchen.longitude || null,
   }
 }
 
@@ -169,6 +171,8 @@ export default function KitchenProfileScreen() {
           state: rawState || prev.state,
           city: city || prev.city,
           pincode: postcode || prev.pincode,
+          latitude,
+          longitude,
         }))
       }
     } finally {
@@ -180,13 +184,15 @@ export default function KitchenProfileScreen() {
 
   const handleConfirmMapLocation = (data) => {
     if (!data) return
-    const { address, city, state, pincode } = data
+    const { address, city, state, pincode, latitude, longitude } = data
     setForm((prev) => ({
       ...prev,
       address: address || prev.address,
       state: state || prev.state,
       city: city || prev.city,
       pincode: pincode || prev.pincode,
+      latitude: latitude || prev.latitude,
+      longitude: longitude || prev.longitude,
     }))
   }
 
@@ -1098,29 +1104,80 @@ export default function KitchenProfileScreen() {
                   </View>
                 ) : (
                   <View className="space-y-3">
-                    {payoutsList.map((p) => (
-                      <View key={p.id} className="bg-gray-50/80 p-3.5 rounded-xl border border-gray-200/60">
-                        <View className="flex-row items-center justify-between mb-1.5">
-                          <Text className="font-poppins font-bold text-base text-emerald-700">
-                            ₹{p.netPayout}
-                          </Text>
-                          <View className="bg-emerald-100 px-2.5 py-0.5 rounded-full border border-emerald-200">
-                            <Text className="font-poppins font-bold text-[10px] text-emerald-800">
-                              PAID ✅
-                            </Text>
+                    {payoutsList.map((p) => {
+                      const riderFee = p.riderFeeDeduction || Math.max(0, p.grossAmount - p.commissionDeduction - p.netPayout)
+                      const isFreePromo = Number(p.commissionDeduction) === 0
+                      return (
+                        <View key={p.id} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm space-y-2.5">
+                          {/* Header: Net Paid Amount & Status */}
+                          <View className="flex-row items-center justify-between pb-2 border-b border-gray-100">
+                            <View>
+                              <Text className="font-nunito text-[11px] text-gray uppercase font-semibold">
+                                Net Bank Settlement
+                              </Text>
+                              <Text className="font-poppins font-bold text-xl text-emerald-700">
+                                ₹{p.netPayout}
+                              </Text>
+                            </View>
+                            <View className="bg-emerald-100 px-3 py-1 rounded-full border border-emerald-200">
+                              <Text className="font-poppins font-bold text-[11px] text-emerald-800">
+                                PAID ✅
+                              </Text>
+                            </View>
                           </View>
+
+                          {/* Transparent Breakdown */}
+                          <View className="bg-gray-50/90 rounded-lg p-2.5 space-y-1.5 border border-gray-100">
+                            <View className="flex-row justify-between items-center">
+                              <Text className="font-nunito text-xs text-gray-700">Gross Food Sales:</Text>
+                              <Text className="font-poppins font-semibold text-xs text-dark">₹{p.grossAmount}</Text>
+                            </View>
+                            <View className="flex-row justify-between items-center">
+                              <Text className="font-nunito text-xs text-gray-700">
+                                Platform Fee {isFreePromo ? "(0% Free Promo)" : `(${p.commissionRate || 10}%)`}:
+                              </Text>
+                              <Text className="font-poppins font-semibold text-xs text-red-600">
+                                -₹{p.commissionDeduction}
+                              </Text>
+                            </View>
+                            <View className="flex-row justify-between items-center">
+                              <Text className="font-nunito text-xs text-gray-700">Rider Delivery Fee:</Text>
+                              <Text className="font-poppins font-semibold text-xs text-purple-700">
+                                -₹{riderFee}
+                              </Text>
+                            </View>
+                          </View>
+
+                          {/* Bank & UTR Reference */}
+                          <View className="pt-1">
+                            <View className="flex-row justify-between items-center">
+                              <Text className="font-nunito text-[11px] text-gray">UTR Reference:</Text>
+                              <Text className="font-mono text-xs font-bold text-dark">
+                                {p.utrNumber || "N/A"}
+                              </Text>
+                            </View>
+                            <View className="flex-row justify-between items-center mt-0.5">
+                              <Text className="font-nunito text-[11px] text-gray">Paid Date:</Text>
+                              <Text className="font-nunito text-[11px] text-gray-700 font-medium">
+                                {p.paidAt ? new Date(p.paidAt).toLocaleString("en-IN") : "N/A"}
+                              </Text>
+                            </View>
+                          </View>
+
+                          {/* Admin Note / Remarks */}
+                          {p.notes ? (
+                            <View className="bg-amber-50/80 border border-amber-200/80 rounded-lg p-2.5 mt-1">
+                              <Text className="font-poppins font-bold text-[10px] text-amber-900 uppercase">
+                                💬 Admin Note:
+                              </Text>
+                              <Text className="font-nunito text-xs text-amber-950 mt-0.5 font-medium">
+                                {p.notes}
+                              </Text>
+                            </View>
+                          ) : null}
                         </View>
-                        <Text className="font-nunito text-xs text-gray-700">
-                          Gross: ₹{p.grossAmount} | Comm. (10%): -₹{p.commissionDeduction} | Rider Fee: -₹{p.riderFeeDeduction || Math.max(0, p.grossAmount - p.commissionDeduction - p.netPayout)}
-                        </Text>
-                        <Text className="font-mono text-xs font-bold text-dark mt-1">
-                          UTR Ref: {p.utrNumber || "N/A"}
-                        </Text>
-                        <Text className="font-nunito text-[10px] text-gray mt-1">
-                          Paid Date: {p.paidAt ? new Date(p.paidAt).toLocaleString("en-IN") : "N/A"}
-                        </Text>
-                      </View>
-                    ))}
+                      )
+                    })}
                   </View>
                 )}
               </View>

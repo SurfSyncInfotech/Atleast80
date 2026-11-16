@@ -7,7 +7,8 @@ import {
   ActivityIndicator,
   Linking,
   Platform,
-  Modal
+  Modal,
+  TextInput
 } from "react-native"
 
 const Alert = {
@@ -55,11 +56,24 @@ const STATUS_COLORS = {
   cancelled: "bg-red-100 text-red-800 border-red-200",
 }
 
+
+function getNextAction(order) {
+  if (!order || !order.status) return null
+  const isSelfPickup = order.deliveryMethod === "self" || order.delivery_method === "self"
+  if (isSelfPickup) {
+    if (order.status === "pending") return { status: "confirmed", label: "Accept Order" }
+    if (order.status === "confirmed") return { status: "preparing", label: "Start Cooking" }
+    if (order.status === "preparing") return { status: "out_for_delivery", label: "Ready for Pickup" }
+    if (order.status === "out_for_delivery") return { status: "delivered", label: "Complete Pickup (OTP)", isOtp: true }
+    return null
+  }
+  return NEXT_STATUS[order.status] || null
+}
+
 const NEXT_STATUS = {
   pending: { status: "confirmed", label: "Accept Order" },
   confirmed: { status: "preparing", label: "Start Cooking" },
   preparing: { status: "out_for_delivery", label: "Dispatch Order" },
-  out_for_delivery: { status: "delivered", label: "Mark Delivered" },
 }
 
 const TABS = [
@@ -90,8 +104,10 @@ function StatusBadge({ order, status }) {
   const isReturned = targetOrder.status === "cancelled" && targetOrder.deliveryStatus === "returned"
   const displayStatus = targetOrder.showCancelledAlert ? "cancelled" : targetOrder.status
   
+  const isSelfPickup = targetOrder.deliveryMethod === "self" || targetOrder.delivery_method === "self"
   let label = STATUS_LABELS[displayStatus] || displayStatus
-  if (isHandoverPending) label = "Pending Handover"
+  if (isSelfPickup && displayStatus === "out_for_delivery") label = "Ready for Pickup"
+  else if (isHandoverPending) label = "Pending Handover"
   else if (isRescueTimeout) label = "Rescue Timeout"
   else if (isReturned) label = "Food Returned"
 
@@ -116,6 +132,9 @@ export default function KitchenOrdersScreen() {
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [otpModalOrder, setOtpModalOrder] = useState(null)
+  const [pickupOtpInput, setPickupOtpInput] = useState("")
+  const [verifyingOtp, setVerifyingOtp] = useState(false)
 
   const loadOrders = useCallback(async () => {
     try {
@@ -179,25 +198,37 @@ export default function KitchenOrdersScreen() {
     loadOrders(false)
   }
 
-  const handleStatusUpdate = async (orderId, newStatus) => {
+  const handleStatusUpdate = async (orderId, newStatus, otp = null) => {
     setUpdating(true)
     try {
+      const body = { status: newStatus }
+      if (otp) body.otp = otp
       const data = await api(`/api/orders/kitchen/${orderId}/status`, {
         method: "PATCH",
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify(body),
       })
       setAllOrders((prev) => prev.map((o) => (o.id === orderId ? data.order : o)))
       setDetailOrder((prev) => (prev?.id === orderId ? data.order : prev))
       if (newStatus === "out_for_delivery") {
-        Alert.alert(
-          "Order Dispatched Successfully",
-          `Awaiting rider assignment.\n\nRider Pickup Code: ${data.order.pickupCode}`
-        )
+        if (data.order?.deliveryMethod === "self") {
+          Alert.alert(
+            "Ready for Pickup 🛍️",
+            "Customer has been notified to pick up their order from your kitchen."
+          )
+        } else {
+          Alert.alert(
+            "Order Dispatched Successfully",
+            `Awaiting rider assignment.\n\nRider Pickup Code: ${data.order.pickupCode}`
+          )
+        }
+      } else if (newStatus === "delivered" && data.order?.deliveryMethod === "self") {
+        Alert.alert("Order Completed 🎉", "Self Pickup order verified with OTP and completed successfully!")
       } else {
         Alert.alert("Success", `Order status updated to ${STATUS_LABELS[newStatus]}`)
       }
+      return true
     } catch (err) {
-      if (err.status === 400 || err.message?.toLowerCase().includes("cancel")) {
+      if (err.message?.toLowerCase().includes("cancel")) {
         Alert.alert(
           "Order Cancelled ⚠️",
           "This order has already been cancelled by the customer.",
@@ -347,7 +378,8 @@ export default function KitchenOrdersScreen() {
           contentContainerStyle={{ paddingBottom: 110, gap: 12 }}
         >
           {filteredOrders.map((order) => {
-            const next = NEXT_STATUS[order.status]
+            const next = getNextAction(order)
+            const isSelfPickup = order.deliveryMethod === "self" || order.delivery_method === "self"
             return (
               <View
                 key={order.id}
@@ -356,9 +388,16 @@ export default function KitchenOrdersScreen() {
                 {/* ID & Date & Badge */}
                 <View className="flex-row justify-between items-start mb-3">
                   <View>
-                    <Text className="font-poppins font-bold text-[15px] text-dark">
-                      #{order.orderNumber}
-                    </Text>
+                    <View className="flex-row items-center gap-2">
+                      <Text className="font-poppins font-bold text-[15px] text-dark">
+                        #{order.orderNumber}
+                      </Text>
+                      {isSelfPickup && (
+                        <View className="bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                          <Text className="text-[9px] font-poppins font-bold text-emerald-800 uppercase">Self Pickup</Text>
+                        </View>
+                      )}
+                    </View>
                     <Text className="font-nunito text-[10px] text-gray mt-0.5">
                       {formatDate(order.createdAt)}
                     </Text>
@@ -468,7 +507,14 @@ export default function KitchenOrdersScreen() {
                      ) : (
                        next && (
                          <TouchableOpacity
-                           onPress={() => handleStatusUpdate(order.id, next.status)}
+                           onPress={() => {
+                             if (next.isOtp) {
+                               setPickupOtpInput("")
+                               setOtpModalOrder(order)
+                             } else {
+                               handleStatusUpdate(order.id, next.status)
+                             }
+                           }}
                            disabled={updating}
                            className="flex-[2] py-2.5 bg-primary rounded-xl items-center justify-center"
                          >
@@ -684,28 +730,145 @@ export default function KitchenOrdersScreen() {
                         </Text>
                       </TouchableOpacity>
                     </View>
-                  ) : (
-                    <>
-                      {NEXT_STATUS[detailOrder.status] && (
-                        <TouchableOpacity
-                          onPress={() => {
-                            handleStatusUpdate(detailOrder.id, NEXT_STATUS[detailOrder.status].status)
-                          }}
-                          disabled={updating}
-                          className="w-full py-3 bg-primary rounded-xl items-center justify-center mt-2"
-                        >
-                          {updating ? (
-                            <ActivityIndicator size="small" color="#FFFFFF" />
-                          ) : (
-                            <Text className="font-poppins font-bold text-sm text-white">
-                              {NEXT_STATUS[detailOrder.status].label}
-                            </Text>
-                          )}
-                        </TouchableOpacity>
-                      )}
-                    </>
-                  )}
+                  ) : (() => {
+                    const detailNext = getNextAction(detailOrder)
+                    if (!detailNext) return null
+                    return (
+                      <TouchableOpacity
+                        onPress={() => {
+                          if (detailNext.isOtp) {
+                            setPickupOtpInput("")
+                            setOtpModalOrder(detailOrder)
+                          } else {
+                            handleStatusUpdate(detailOrder.id, detailNext.status)
+                          }
+                        }}
+                        disabled={updating}
+                        className={cn(
+                          "w-full py-3 rounded-xl items-center justify-center mt-2",
+                          detailNext.isOtp ? "bg-emerald-700" : "bg-primary"
+                        )}
+                      >
+                        {updating ? (
+                          <ActivityIndicator size="small" color="#FFFFFF" />
+                        ) : (
+                          <Text className="font-poppins font-bold text-sm text-white">
+                            {detailNext.label}
+                          </Text>
+                        )}
+                      </TouchableOpacity>
+                    )
+                  })()}
               </ScrollView>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* Self Pickup OTP Verification Modal */}
+      {otpModalOrder && (
+        <Modal
+          visible={true}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => {
+            if (!verifyingOtp) setOtpModalOrder(null)
+          }}
+        >
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+            <View style={{ backgroundColor: "#FFFFFF", borderRadius: 24, width: "100%", maxWidth: 360, padding: 22, shadowColor: "#000", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.25, shadowRadius: 16, elevation: 10 }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                  <View style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: "#ECFDF5", alignItems: "center", justifyContent: "center" }}>
+                    <Package size={22} color="#0B6B3A" />
+                  </View>
+                  <View>
+                    <Text style={{ fontFamily: "Poppins", fontWeight: "bold", fontSize: 16, color: "#1F2937" }}>
+                      Complete Pickup
+                    </Text>
+                    <Text style={{ fontFamily: "Nunito", fontSize: 11, color: "#6B7280" }}>
+                      #{otpModalOrder.orderNumber} • {otpModalOrder.customerName}
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity onPress={() => setOtpModalOrder(null)} disabled={verifyingOtp} style={{ padding: 6 }}>
+                  <X size={18} color="#9CA3AF" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={{ backgroundColor: "#F9FAFB", borderRadius: 14, padding: 14, borderWidth: 1, borderColor: "#E5E7EB", marginVertical: 12 }}>
+                <Text style={{ fontFamily: "Nunito", fontSize: 12, color: "#4B5563", marginBottom: 8, textAlign: "center" }}>
+                  Ask the customer for their 4-digit Pickup Verification OTP:
+                </Text>
+                <TextInput
+                  value={pickupOtpInput}
+                  onChangeText={setPickupOtpInput}
+                  placeholder="0 0 0 0"
+                  placeholderTextColor="#9CA3AF"
+                  keyboardType="number-pad"
+                  maxLength={4}
+                  style={{
+                    backgroundColor: "#FFFFFF",
+                    borderWidth: 2,
+                    borderColor: "#0B6B3A",
+                    borderRadius: 14,
+                    fontSize: 26,
+                    fontFamily: "Poppins",
+                    fontWeight: "bold",
+                    textAlign: "center",
+                    letterSpacing: 10,
+                    paddingVertical: 10,
+                    color: "#0B6B3A",
+                  }}
+                />
+              </View>
+
+              <View style={{ flexDirection: "row", gap: 10, marginTop: 4 }}>
+                <TouchableOpacity
+                  onPress={() => setOtpModalOrder(null)}
+                  disabled={verifyingOtp}
+                  style={{ flex: 1, paddingVertical: 12, borderRadius: 12, backgroundColor: "#F3F4F6", alignItems: "center" }}
+                >
+                  <Text style={{ fontFamily: "Poppins", fontWeight: "bold", fontSize: 13, color: "#4B5563" }}>
+                    Cancel
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={async () => {
+                    if (!pickupOtpInput || pickupOtpInput.trim().length !== 4) {
+                      Alert.alert("Invalid OTP", "Please enter the 4-digit Pickup OTP provided by the customer.")
+                      return
+                    }
+                    setVerifyingOtp(true)
+                    try {
+                      await handleStatusUpdate(otpModalOrder.id, "delivered", pickupOtpInput.trim())
+                      setOtpModalOrder(null)
+                      setPickupOtpInput("")
+                    } catch (e) {
+                      // Handled
+                    } finally {
+                      setVerifyingOtp(false)
+                    }
+                  }}
+                  disabled={verifyingOtp || pickupOtpInput.length !== 4}
+                  style={{
+                    flex: 2,
+                    paddingVertical: 12,
+                    borderRadius: 12,
+                    backgroundColor: pickupOtpInput.length === 4 ? "#0B6B3A" : "#9CA3AF",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  {verifyingOtp ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={{ fontFamily: "Poppins", fontWeight: "bold", fontSize: 13, color: "#FFFFFF" }}>
+                      Verify & Complete
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </Modal>

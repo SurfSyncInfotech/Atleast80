@@ -1,6 +1,6 @@
 import React, { useState } from "react"
 import { View, Text, TouchableOpacity, Image, Platform, Animated } from "react-native"
-import { UtensilsCrossed, AlertTriangle, CheckCircle2, ChevronRight, Store } from "lucide-react-native"
+import { UtensilsCrossed, AlertTriangle, CheckCircle2, ChevronRight, Store, Star } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import { resolveMediaUrl } from "../../lib/media"
 import { cn } from "../../lib/utils"
@@ -164,6 +164,26 @@ export default function DishCard({ dish, userCity, onPress, className }) {
                 >
                   <Text style={{ fontFamily: "Nunito", fontSize: 10, fontWeight: "800", color: "#B45309" }}>
                     ⭐ Signature Dish
+                  </Text>
+                </View>
+              )}
+              {dish.rating > 0 && (
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    backgroundColor: "#FEF3C7",
+                    borderColor: "#FCD34D",
+                    borderWidth: 1,
+                    borderRadius: 8,
+                    paddingHorizontal: 6,
+                    paddingVertical: 1.5,
+                    gap: 3,
+                  }}
+                >
+                  <Star size={10} color="#D97706" fill="#D97706" />
+                  <Text style={{ fontFamily: "Nunito", fontSize: 10, fontWeight: "800", color: "#B45309" }}>
+                    {Number(dish.rating).toFixed(1)}
                   </Text>
                 </View>
               )}

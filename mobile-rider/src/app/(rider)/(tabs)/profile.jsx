@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { View, Text, ScrollView, TouchableOpacity, Alert, Platform, Switch, Modal, TextInput, ActivityIndicator } from "react-native"
+import { View, Text, ScrollView, TouchableOpacity, Alert, Platform, Switch, Modal, TextInput, ActivityIndicator, Keyboard, KeyboardAvoidingView } from "react-native"
 import { SafeAreaView } from "react-native-safe-area-context"
 import { LinearGradient } from "expo-linear-gradient"
 import { useRouter, useFocusEffect } from "expo-router"
@@ -98,6 +98,22 @@ export default function RiderProfileScreen() {
   const [payoutModalVisible, setPayoutModalVisible] = useState(false)
   const [savingPayout, setSavingPayout] = useState(false)
   const [payoutError, setPayoutError] = useState("")
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false)
+
+  useEffect(() => {
+    const showListener = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      () => setIsKeyboardVisible(true)
+    )
+    const hideListener = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => setIsKeyboardVisible(false)
+    )
+    return () => {
+      showListener.remove()
+      hideListener.remove()
+    }
+  }, [])
 
   const [payoutForm, setPayoutForm] = useState({
     payoutMode: "upi",
@@ -202,6 +218,7 @@ export default function RiderProfileScreen() {
         }),
       })
       await fetchPayoutSettings()
+      Keyboard.dismiss()
       setPayoutModalVisible(false)
       Alert.alert("Success", "Payout settings updated successfully")
     } catch (err) {
@@ -505,26 +522,180 @@ export default function RiderProfileScreen() {
             </View>
           ) : (
             <View style={{ gap: 10 }}>
-              {riderPayoutsList.map((p) => (
-                <View key={p.id} style={{ backgroundColor: "#F9FAFB", borderRadius: 14, padding: 12, borderWidth: 1, borderColor: "#E5E7EB" }}>
-                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                    <Text style={{ fontSize: 15, fontWeight: "bold", fontFamily: "Poppins", color: "#0B6B3A" }}>
-                      ₹{p.netPayout}
-                    </Text>
-                    <View style={{ backgroundColor: "#D1FAE5", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 }}>
-                      <Text style={{ fontSize: 9.5, fontWeight: "bold", fontFamily: "Poppins", color: "#065F46" }}>
-                        PAID ✅
-                      </Text>
+              {riderPayoutsList.map((p) => {
+                const gross = Number(p.grossAmount) || Number(p.netPayout)
+                const deductions = Number(p.commissionDeduction) || 0
+                return (
+                  <View
+                    key={p.id}
+                    style={{
+                      backgroundColor: "#FFFFFF",
+                      borderRadius: 16,
+                      padding: 14,
+                      borderWidth: 1,
+                      borderColor: "#E5E7EB",
+                      gap: 10,
+                      shadowColor: "#000",
+                      shadowOffset: { width: 0, height: 1 },
+                      shadowOpacity: 0.05,
+                      shadowRadius: 3,
+                      elevation: 2,
+                    }}
+                  >
+                    {/* Header: Net Paid Amount & Status */}
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        borderBottomWidth: 1,
+                        borderBottomColor: "#F3F4F6",
+                        paddingBottom: 8,
+                      }}
+                    >
+                      <View>
+                        <Text
+                          style={{
+                            fontSize: 10,
+                            fontFamily: "Nunito",
+                            color: "#6B7280",
+                            textTransform: "uppercase",
+                            fontWeight: "600",
+                          }}
+                        >
+                          Net Bank Settlement
+                        </Text>
+                        <Text
+                          style={{
+                            fontSize: 18,
+                            fontWeight: "bold",
+                            fontFamily: "Poppins",
+                            color: "#0B6B3A",
+                          }}
+                        >
+                          ₹{p.netPayout}
+                        </Text>
+                      </View>
+                      <View
+                        style={{
+                          backgroundColor: "#D1FAE5",
+                          paddingHorizontal: 10,
+                          paddingVertical: 3,
+                          borderRadius: 12,
+                          borderWidth: 1,
+                          borderColor: "#A7F3D0",
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 10,
+                            fontWeight: "bold",
+                            fontFamily: "Poppins",
+                            color: "#065F46",
+                          }}
+                        >
+                          PAID ✅
+                        </Text>
+                      </View>
                     </View>
+
+                    {/* Transparent Breakdown */}
+                    <View
+                      style={{
+                        backgroundColor: "#F9FAFB",
+                        borderRadius: 10,
+                        padding: 10,
+                        gap: 5,
+                        borderWidth: 1,
+                        borderColor: "#F3F4F6",
+                      }}
+                    >
+                      <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                        <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#4B5563" }}>
+                          Delivery Fees Earned:
+                        </Text>
+                        <Text style={{ fontSize: 11, fontFamily: "Poppins", fontWeight: "600", color: "#111827" }}>
+                          ₹{gross}
+                        </Text>
+                      </View>
+                      {deductions > 0 ? (
+                        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                          <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#4B5563" }}>
+                            Cash / Deductions Adjusted:
+                          </Text>
+                          <Text style={{ fontSize: 11, fontFamily: "Poppins", fontWeight: "600", color: "#DC2626" }}>
+                            -₹{deductions}
+                          </Text>
+                        </View>
+                      ) : (
+                        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                          <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#4B5563" }}>
+                            Platform Commission:
+                          </Text>
+                          <Text style={{ fontSize: 11, fontFamily: "Poppins", fontWeight: "600", color: "#059669" }}>
+                            ₹0 (Free)
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+
+                    {/* Bank & UTR Reference */}
+                    <View style={{ gap: 2 }}>
+                      <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                        <Text style={{ fontSize: 10, fontFamily: "Nunito", color: "#6B7280" }}>
+                          UTR Reference:
+                        </Text>
+                        <Text
+                          style={{
+                            fontSize: 11,
+                            fontWeight: "bold",
+                            fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
+                            color: "#1F2937",
+                          }}
+                        >
+                          {p.utrNumber || "N/A"}
+                        </Text>
+                      </View>
+                      <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                        <Text style={{ fontSize: 10, fontFamily: "Nunito", color: "#6B7280" }}>
+                          Paid Date:
+                        </Text>
+                        <Text style={{ fontSize: 10, fontFamily: "Nunito", color: "#4B5563" }}>
+                          {p.paidAt ? new Date(p.paidAt).toLocaleString("en-IN") : "N/A"}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Admin Note / Remarks */}
+                    {p.notes ? (
+                      <View
+                        style={{
+                          backgroundColor: "#FEF3C7",
+                          borderColor: "#FDE68A",
+                          borderWidth: 1,
+                          borderRadius: 8,
+                          padding: 8,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 9,
+                            fontFamily: "Poppins",
+                            fontWeight: "bold",
+                            color: "#92400E",
+                            textTransform: "uppercase",
+                          }}
+                        >
+                          💬 ADMIN NOTE:
+                        </Text>
+                        <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#78350F", marginTop: 2 }}>
+                          {p.notes}
+                        </Text>
+                      </View>
+                    ) : null}
                   </View>
-                  <Text style={{ fontSize: 11, fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }), color: "#1F2937" }}>
-                    UTR Ref: {p.utrNumber || "N/A"}
-                  </Text>
-                  <Text style={{ fontSize: 10, fontFamily: "Nunito", color: "#9CA3AF", marginTop: 2 }}>
-                    Paid Date: {p.paidAt ? new Date(p.paidAt).toLocaleString("en-IN") : "N/A"}
-                  </Text>
-                </View>
-              ))}
+                )
+              })}
             </View>
           )}
         </View>
@@ -753,23 +924,75 @@ export default function RiderProfileScreen() {
       </ScrollView>
 
       {/* Edit Payout Modal */}
-      <Modal visible={payoutModalVisible} transparent animationType="slide" onRequestClose={() => setPayoutModalVisible(false)}>
-        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
-          <View style={{ backgroundColor: "#FFF", borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, maxHeight: "85%" }}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16, borderBottomWidth: 1, borderBottomColor: COLORS.divider, pb: 12 }}>
-              <Text style={{ fontSize: 16, color: COLORS.value, ...TYPE.heading }}>Update Payout Settings</Text>
-              <TouchableOpacity onPress={() => setPayoutModalVisible(false)}>
-                <X size={20} color="#7A7A7A" />
-              </TouchableOpacity>
-            </View>
-
-            {payoutError ? (
-              <View style={{ backgroundColor: "#FDF2F2", padding: 12, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: "#F8D7D7" }}>
-                <Text style={{ color: "#EF4444", fontSize: 12, ...TYPE.label }}>{payoutError}</Text>
+      <Modal
+        visible={payoutModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          Keyboard.dismiss()
+          setPayoutModalVisible(false)
+        }}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "padding"}
+          enabled={isKeyboardVisible}
+          style={{ flex: 1 }}
+        >
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
+            <TouchableOpacity
+              activeOpacity={1}
+              style={{ position: "absolute", top: 0, bottom: 0, left: 0, right: 0 }}
+              onPress={() => {
+                Keyboard.dismiss()
+                setPayoutModalVisible(false)
+              }}
+            />
+            <View
+              style={{
+                backgroundColor: "#FFF",
+                borderTopLeftRadius: 24,
+                borderTopRightRadius: 24,
+                paddingHorizontal: 20,
+                paddingTop: 20,
+                paddingBottom: Platform.OS === "ios" ? 34 : 20,
+                maxHeight: isKeyboardVisible ? "75%" : "85%",
+              }}
+            >
+              <View
+                style={{
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 16,
+                  borderBottomWidth: 1,
+                  borderBottomColor: COLORS.divider,
+                  paddingBottom: 12,
+                }}
+              >
+                <Text style={{ fontSize: 16, color: COLORS.value, ...TYPE.heading }}>Update Payout Settings</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    Keyboard.dismiss()
+                    setPayoutModalVisible(false)
+                  }}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <X size={20} color="#7A7A7A" />
+                </TouchableOpacity>
               </View>
-            ) : null}
 
-            <ScrollView showsVerticalScrollIndicator={false}>
+              {payoutError ? (
+                <View style={{ backgroundColor: "#FDF2F2", padding: 12, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: "#F8D7D7" }}>
+                  <Text style={{ color: "#EF4444", fontSize: 12, ...TYPE.label }}>{payoutError}</Text>
+                </View>
+              ) : null}
+
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
+                contentContainerStyle={{ paddingBottom: 16 }}
+              >
               {/* Mode Selector */}
               <View style={{ flexDirection: "row", backgroundColor: "#F3F3F0", padding: 4, borderRadius: 14, marginBottom: 16 }}>
                 <TouchableOpacity
@@ -955,7 +1178,8 @@ export default function RiderProfileScreen() {
             </ScrollView>
           </View>
         </View>
-      </Modal>
+      </KeyboardAvoidingView>
+    </Modal>
 
       <PolicyModal
         visible={Boolean(policyType)}

@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom"
 import {
   Clock, CheckCircle, XCircle, RefreshCw,
   Star, ShoppingBag, IndianRupee, UtensilsCrossed,
-  ChevronRight, Circle,
+  ChevronRight, Circle, Wallet,
 } from "lucide-react"
 import KitchenLayout from "../../components/layout/KitchenLayout"
 import KitchenHomeImageSection from "../../components/kitchen/KitchenHomeImageSection"
@@ -188,11 +188,12 @@ export default function KitchenDashboardPage() {
       )}
 
       {isApproved && (
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 mb-6">
+        <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 sm:gap-4 mb-6">
           {[
             { label: "Today's Orders", value: String(orderStats.todayOrders || 0), icon: ShoppingBag, gradient: "from-blue-500 to-indigo-600", iconBg: "bg-white/20" },
             { label: "Today's Revenue", value: `₹${orderStats.todayRevenue || 0}`, icon: IndianRupee, gradient: "from-emerald-500 to-teal-600", iconBg: "bg-white/20" },
             { label: "Total Revenue", value: `₹${orderStats.totalRevenue || 0}`, icon: IndianRupee, gradient: "from-purple-500 to-violet-600", iconBg: "bg-white/20" },
+            { label: "Next Payout Due", value: `₹${orderStats.currentCycleRevenue ?? orderStats.unsettledRevenue ?? 0}`, icon: Wallet, gradient: "from-emerald-600 to-green-700", iconBg: "bg-white/20" },
             { label: "Rating", value: kitchen?.ratingVisible && kitchen?.rating ? Number(kitchen.rating).toFixed(1) : kitchen?.rating_count != null ? `${kitchen.rating_count}/10` : "—", icon: Star, gradient: "from-amber-400 to-orange-500", iconBg: "bg-white/25" },
             { label: "Menu Items", value: menuCount ?? "—", icon: UtensilsCrossed, gradient: "from-primary to-primary-dark", iconBg: "bg-white/20" },
           ].map((m) => {

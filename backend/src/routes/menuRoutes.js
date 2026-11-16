@@ -477,7 +477,7 @@ router.get("/search-dishes", async (req, res) => {
       `SELECT m.id AS item_id, m.name AS dish_name, m.price, m.description AS short_description,
               m.image, m.category, m.item_type,
               k.id AS kitchen_id, k.name AS kitchen_name, k.city AS kitchen_city, k.state AS kitchen_state,
-              k.best_item AS signature_dish
+              k.best_item AS signature_dish, k.rating, k.rating_count
        FROM menu_items m
        INNER JOIN kitchens k ON k.id = m.kitchen_id
        WHERE k.status = 'approved' AND k.is_active = 1 AND m.approval_status = 'approved' AND m.is_available = 1
@@ -492,7 +492,8 @@ router.get("/search-dishes", async (req, res) => {
     // 2. Search kitchens whose signature dish strictly matches query
     const [kitchenRows] = await pool.query(
       `SELECT k.id AS kitchen_id, k.name AS kitchen_name, k.city AS kitchen_city, k.state AS kitchen_state,
-              k.best_item AS signature_dish, k.speciality, k.description AS kitchen_desc, k.image
+              k.best_item AS signature_dish, k.speciality, k.description AS kitchen_desc, k.image,
+              k.rating, k.rating_count
        FROM kitchens k
        WHERE k.status = 'approved' AND k.is_active = 1
          AND k.best_item IS NOT NULL AND k.best_item != ''
@@ -523,6 +524,8 @@ router.get("/search-dishes", async (req, res) => {
         image: row.image,
         isCityMatch,
         isSignatureDish: isSigMatch,
+        rating: Number(row.rating || 0),
+        ratingCount: Number(row.rating_count || 0),
       })
     }
 
@@ -542,6 +545,8 @@ router.get("/search-dishes", async (req, res) => {
           image: k.image,
           isCityMatch,
           isSignatureDish: true,
+          rating: Number(k.rating || 0),
+          ratingCount: Number(k.rating_count || 0),
         })
       }
     }

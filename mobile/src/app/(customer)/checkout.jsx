@@ -1,8 +1,37 @@
+
+function calculateDistanceKm(lat1, lon1, lat2, lon2) {
+  const numLat1 = Number(lat1)
+  const numLon1 = Number(lon1)
+  const numLat2 = Number(lat2)
+  const numLon2 = Number(lon2)
+  if (isNaN(numLat1) || isNaN(numLon1) || isNaN(numLat2) || isNaN(numLon2) || !lat1 || !lon1 || !lat2 || !lon2) return null
+  const R = 6371
+  const dLat = (numLat2 - numLat1) * (Math.PI / 180)
+  const dLon = (numLon2 - numLon1) * (Math.PI / 180)
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(numLat1 * (Math.PI / 180)) *
+      Math.cos(numLat2 * (Math.PI / 180)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return Number((R * c * 1.25).toFixed(1))
+}
+
+function calculateDeliveryCharge(distanceKm) {
+  const km = Number(distanceKm) || 0
+  const baseKm = 2.0
+  const baseRate = 30.0
+  const perKmRate = 10.0
+  if (km <= baseKm) return baseRate
+  const extraKm = km - baseKm
+  return Number((baseRate + extraKm * perKmRate).toFixed(2))
+}
 import { useState, useEffect } from "react"
 import { View, Text, ScrollView, TouchableOpacity, Image, ActivityIndicator, Modal, Platform } from "react-native"
 import { useLocalSearchParams, useRouter } from "expo-router"
 import { SafeAreaView } from "react-native-safe-area-context"
-import { ArrowLeft, MapPin, Clock, CreditCard, Wallet, CheckCircle, X, QrCode, ShieldCheck } from "lucide-react-native"
+import { ArrowLeft, MapPin, Clock, CreditCard, Wallet, CheckCircle, X, QrCode, ShieldCheck, User, LogIn } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import Button from "../../components/ui/Button"
 import { useCart } from "../../context/CartContext"
@@ -30,10 +59,13 @@ export default function CheckoutScreen() {
   const [orderPlaced, setOrderPlaced] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  const [authModalVisible, setAuthModalVisible] = useState(false)
   const [headerAddrStr, setHeaderAddrStr] = useState("")
 
   const [kitchenCity, setKitchenCity] = useState("")
   const [kitchenName, setKitchenName] = useState(params?.kitchenName || "")
+  const [kitchenCoords, setKitchenCoords] = useState(null)
+  const [userCoords, setUserCoords] = useState(null)
 
   const targetKitchenId = params?.kitchenId || cart[0]?.kitchenId
   const checkoutItems = cart.filter(
@@ -47,7 +79,14 @@ export default function CheckoutScreen() {
   const packingType = params?.packing || "standard"
   const deliveryMethod = params?.delivery || "free"
   const packingFee = Number(params?.packingCost || 0)
-  const deliveryFee = Number(params?.deliveryCost || 0)
+  const deliveryDistanceKm = (kitchenCoords?.latitude && kitchenCoords?.longitude && userCoords?.latitude && userCoords?.longitude)
+    ? calculateDistanceKm(kitchenCoords.latitude, kitchenCoords.longitude, userCoords.latitude, userCoords.longitude)
+    : null
+  const deliveryFee = deliveryMethod === "self"
+    ? 0
+    : deliveryDistanceKm !== null
+    ? calculateDeliveryCharge(deliveryDistanceKm)
+    : (Number(params?.deliveryCost) > 0 ? Number(params?.deliveryCost) : 30.00)
   const festivalDiscount = Number(
     itemsToOrder.reduce((sum, item) => {
       if (item.isOfferActive === false) return sum
@@ -83,6 +122,11 @@ export default function CheckoutScreen() {
         if (parts.length > 0) {
           setHeaderAddrStr(parts.join(", "))
         }
+        const uLat = pref.lat || pref.latitude || user?.latitude
+        const uLng = pref.lng || pref.longitude || user?.longitude
+        if (uLat && uLng) {
+          setUserCoords({ latitude: Number(uLat), longitude: Number(uLng) })
+        }
       }
     }).catch(() => {})
   }, [])
@@ -95,6 +139,12 @@ export default function CheckoutScreen() {
             setKitchenCity(res.kitchen.city || "")
             if (!kitchenName) {
               setKitchenName(res.kitchen.name || "")
+            }
+            if (res.kitchen.latitude && res.kitchen.longitude) {
+              setKitchenCoords({
+                latitude: Number(res.kitchen.latitude),
+                longitude: Number(res.kitchen.longitude)
+              })
             }
           }
         })
@@ -139,6 +189,12 @@ export default function CheckoutScreen() {
       router.replace("/cart")
     }
   }, [cart.length, orderPlaced, loading, router])
+
+  useEffect(() => {
+    if (deliveryMethod === "self" && payment === "cod") {
+      setPayment("")
+    }
+  }, [deliveryMethod, payment])
 
   const [rzpData, setRzpData] = useState(null)
   const [razorpayModalVisible, setRazorpayModalVisible] = useState(false)
@@ -209,7 +265,12 @@ export default function CheckoutScreen() {
         }, 300)
       }, 2500)
     } catch (err) {
-      setError(err.message || "Failed to place order")
+      if (/authentication required|jwt|token|unauthorized/i.test(err.message || "")) {
+        setAuthModalVisible(true)
+        setError("Please login or sign up first to place your order.")
+      } else {
+        setError(err.message || "Failed to place order")
+      }
       setUpiModalVisible(false)
       setRazorpayModalVisible(false)
       // If offer was closed or updated, trigger an availability/offer refresh
@@ -292,7 +353,12 @@ export default function CheckoutScreen() {
 
       setRazorpayModalVisible(true)
     } catch (err) {
-      setError(err.message || "Failed to launch Razorpay gateway")
+      if (/authentication required|jwt|token|unauthorized/i.test(err.message || "")) {
+        setAuthModalVisible(true)
+        setError("Please login or sign up first to place your order.")
+      } else {
+        setError(err.message || "Failed to launch Razorpay gateway")
+      }
       setLoading(false)
     }
   }
@@ -318,6 +384,10 @@ export default function CheckoutScreen() {
   const hasClosedOfferItems = itemsToOrder.some((item) => item.isOfferClosed)
 
   const handlePlaceOrder = () => {
+    if (!user) {
+      setAuthModalVisible(true)
+      return
+    }
     if (hasClosedOfferItems) {
       setError("The festival offer from this kitchen has ended or was closed by the seller. Please remove the affected items before proceeding.")
       return
@@ -326,8 +396,16 @@ export default function CheckoutScreen() {
       setError("Some items in your cart are currently unavailable. Please go back to your cart and remove them before proceeding.")
       return
     }
+    if (deliveryMethod === "self" && payment === "cod") {
+      setError("Cash on Delivery is not available for Self Pickup. Please pay via UPI / Google Pay.")
+      return
+    }
     if (!payment) {
-      setError("Please select a payment method (UPI / Google Pay or Cash on Delivery) to proceed.")
+      setError(
+        deliveryMethod === "self"
+          ? "Please select UPI / Google Pay to proceed."
+          : "Please select a payment method (UPI / Google Pay or Cash on Delivery) to proceed."
+      )
       return
     }
     if (!kitchenId) {
@@ -405,6 +483,74 @@ export default function CheckoutScreen() {
               {kitchenName || "This kitchen"} only delivers within <Text className="font-bold">{kitchenCity}</Text>. Please change your location or pick a kitchen in {user?.city || "your area"}.
             </Text>
           </View>
+        ) : (!user || /authentication required|jwt|token|unauthorized|login or sign up/i.test(error || "")) ? (
+          <View style={{
+            backgroundColor: "#F0FDF4",
+            borderColor: "#86EFAC",
+            borderWidth: 1.5,
+            borderRadius: 20,
+            padding: 16,
+            marginBottom: 16,
+            ...Platform.select({
+              default: {
+                shadowColor: "#0B6B3A",
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.06,
+                shadowRadius: 6,
+                elevation: 1,
+              }
+            })
+          }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 }}>
+              <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: "#0B6B3A", alignItems: "center", justifyContent: "center" }}>
+                <User size={22} color="#FFFFFF" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontFamily: "Poppins", fontWeight: "bold", fontSize: 15, color: "#14532D" }}>
+                  Please Login or Sign Up First
+                </Text>
+                <Text style={{ fontFamily: "Nunito", fontSize: 12, color: "#166534", marginTop: 2 }}>
+                  Log in or create an account to place your food order and track live delivery.
+                </Text>
+              </View>
+            </View>
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <TouchableOpacity
+                onPress={() => router.push("/(auth)/login")}
+                activeOpacity={0.85}
+                style={{
+                  flex: 1,
+                  backgroundColor: "#0B6B3A",
+                  height: 42,
+                  borderRadius: 14,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Text style={{ fontFamily: "Poppins", fontWeight: "bold", fontSize: 13, color: "#FFFFFF" }}>
+                  Login
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => router.push("/(auth)/signup")}
+                activeOpacity={0.85}
+                style={{
+                  flex: 1,
+                  backgroundColor: "#FFFFFF",
+                  borderWidth: 1.5,
+                  borderColor: "#0B6B3A",
+                  height: 42,
+                  borderRadius: 14,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Text style={{ fontFamily: "Poppins", fontWeight: "bold", fontSize: 13, color: "#0B6B3A" }}>
+                  Sign Up
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         ) : error ? (
           <View className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
             <Text className="font-nunito text-sm text-red-700">{error}</Text>
@@ -447,10 +593,15 @@ export default function CheckoutScreen() {
         {/* Payment Method Card */}
         <View className="bg-white rounded-2xl p-4 shadow-sm mb-4 border border-gray-50">
           <Text className="font-poppins font-semibold text-sm text-dark mb-3">Payment Method</Text>
+          {deliveryMethod === "self" && (
+            <Text className="font-nunito text-xs text-[#0B6B3A] mb-2 font-medium">
+              Self Pickup orders only accept online payment (UPI / Google Pay). COD is not available.
+            </Text>
+          )}
           <View className="space-y-2">
             {[
               { id: "upi", label: "UPI / Google Pay", icon: Wallet },
-              { id: "cod", label: "Cash on Delivery", icon: CreditCard },
+              ...(deliveryMethod !== "self" ? [{ id: "cod", label: "Cash on Delivery", icon: CreditCard }] : []),
             ].map((opt) => {
               const Icon = opt.icon
               const active = payment === opt.id
@@ -478,7 +629,7 @@ export default function CheckoutScreen() {
                 ⚡ COD Advance Delivery Fee Notice
               </Text>
               <Text style={{ fontFamily: "Nunito", color: "#92400E", fontSize: 11.5, lineHeight: 17 }}>
-                To confirm your Cash on Delivery order, the ₹30 delivery fee is paid online via UPI now. The remaining ₹{Math.max(0, grandTotal - 30)} will be collected in cash by the rider at your doorstep.
+                To confirm your Cash on Delivery order, the ₹{deliveryFee} delivery fee is paid online via UPI now. The remaining ₹{Math.max(0, Number((grandTotal - deliveryFee).toFixed(2)))} will be collected in cash by the rider at your doorstep.
               </Text>
             </View>
           )}
@@ -571,7 +722,9 @@ export default function CheckoutScreen() {
       <View className="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-100 p-4 z-50 shadow-2xl">
         <Button onPress={handlePlaceOrder} size="lg" className="w-full h-12" loading={loading} disabled={loading || isDeliveryUnavailable || hasUnavailableItems}>
           <Text className="text-white text-base font-bold">
-            {hasUnavailableItems
+            {!user
+              ? "Login or Sign Up to Order"
+              : hasUnavailableItems
               ? "Unavailable Items in Cart"
               : isDeliveryUnavailable
               ? "Delivery Unavailable"
@@ -613,7 +766,7 @@ export default function CheckoutScreen() {
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
                 <ShieldCheck size={14} color="#10B981" />
                 <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#10B981", fontWeight: "600" }}>
-                  {payment === "cod" ? "Pay ₹30 Now • Remaining ₹" + Math.max(0, grandTotal - 30) + " as Cash at Doorstep" : "Secured by Atleast80 UPI Gateway"}
+                  {payment === "cod" ? "Pay ₹" + deliveryFee + " Now • Remaining ₹" + Math.max(0, Number((grandTotal - deliveryFee).toFixed(2))) + " as Cash at Doorstep" : "Secured by Atleast80 UPI Gateway"}
                 </Text>
               </View>
             </View>
@@ -743,6 +896,7 @@ export default function CheckoutScreen() {
               onMessage={(event) => handleRazorpayWebMessage(event.nativeEvent.data)}
               style={{ flex: 1 }}
             />
+
           </SafeAreaView>
         </Modal>
       )}
@@ -821,6 +975,57 @@ export default function CheckoutScreen() {
           </View>
         </View>
       )}
+      {/* Auth Prompt Modal */}
+      <Modal visible={authModalVisible} transparent animationType="fade" onRequestClose={() => setAuthModalVisible(false)}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+          <View style={{ width: "100%", maxWidth: 360, backgroundColor: "#FFFFFF", borderRadius: 24, padding: 24, alignItems: "center" }}>
+            <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#DCFCE7", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+              <User size={32} color="#16A34A" />
+            </View>
+            <Text style={{ fontSize: 18, fontFamily: "Poppins", fontWeight: "bold", color: "#1F2937", textAlign: "center" }}>
+              Login or Sign Up First
+            </Text>
+            <Text style={{ fontSize: 13, fontFamily: "Nunito", color: "#4B5563", marginTop: 8, textAlign: "center", lineHeight: 20 }}>
+              You need to sign in to place your order, complete payment and track your food live.
+            </Text>
+            <View style={{ width: "100%", marginTop: 22, gap: 10 }}>
+              <TouchableOpacity
+                onPress={() => {
+                  setAuthModalVisible(false)
+                  router.push("/(auth)/login")
+                }}
+                activeOpacity={0.85}
+                style={{ width: "100%", height: 48, borderRadius: 24, backgroundColor: "#0B6B3A", alignItems: "center", justifyContent: "center" }}
+              >
+                <Text style={{ color: "#FFFFFF", fontFamily: "Poppins", fontWeight: "bold", fontSize: 15 }}>
+                  Login to Account
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  setAuthModalVisible(false)
+                  router.push("/(auth)/signup")
+                }}
+                activeOpacity={0.85}
+                style={{ width: "100%", height: 48, borderRadius: 24, borderWidth: 1.5, borderColor: "#0B6B3A", alignItems: "center", justifyContent: "center", backgroundColor: "#FFFFFF" }}
+              >
+                <Text style={{ color: "#0B6B3A", fontFamily: "Poppins", fontWeight: "bold", fontSize: 15 }}>
+                  Create New Account
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setAuthModalVisible(false)}
+                activeOpacity={0.7}
+                style={{ width: "100%", height: 40, alignItems: "center", justifyContent: "center", marginTop: 2 }}
+              >
+                <Text style={{ color: "#6B7280", fontFamily: "Poppins", fontWeight: "600", fontSize: 13 }}>
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   )
 }

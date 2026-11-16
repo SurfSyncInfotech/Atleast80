@@ -363,12 +363,15 @@ router.get("/me/payouts", authRequired, requireRole("kitchen"), async (req, res)
 
     res.json({
       payouts: rows.map((r) => {
-        const gross = Number(Number(r.gross_amount).toFixed(2))
-        const comm = Number(Number(r.deductions_commissions).toFixed(2))
+        const rawGross = Number(Number(r.gross_amount).toFixed(2))
         const gst = Number(Number(r.deductions_gst || 0).toFixed(2))
+        // Show actual food item base price as Gross sales (excluding GST)
+        const gross = gst > 0 && rawGross > gst ? Number((rawGross - gst).toFixed(2)) : rawGross
+        const comm = Number(Number(r.deductions_commissions).toFixed(2))
         const net = Number(Number(r.net_payout).toFixed(2))
         const storedRiderFee = Number(Number(r.deductions_rider_fees || 0).toFixed(2))
-        const riderFee = storedRiderFee > 0 ? storedRiderFee : Number(Math.max(0, gross - comm - gst - net).toFixed(2))
+        const riderFee = storedRiderFee > 0 ? storedRiderFee : Number(Math.max(0, gross - comm - net).toFixed(2))
+        const commissionRate = comm === 0 ? 0 : 10
 
         return {
           id: r.id,
@@ -377,7 +380,8 @@ router.get("/me/payouts", authRequired, requireRole("kitchen"), async (req, res)
           periodEnd: r.period_end,
           grossAmount: gross,
           commissionDeduction: comm,
-          gstDeduction: gst,
+          commissionRate,
+          gstDeduction: 0,
           riderFeeDeduction: riderFee,
           netPayout: net,
           status: r.status,
@@ -588,6 +592,8 @@ router.patch("/me", authRequired, requireRole("kitchen"), async (req, res) => {
     openingTime,
     description,
     offer,
+    latitude,
+    longitude,
   } = req.body
 
   if (!name?.trim() || !ownerName?.trim() || !speciality?.trim() || !bestItem?.trim()) {
@@ -652,11 +658,30 @@ router.patch("/me", authRequired, requireRole("kitchen"), async (req, res) => {
       [ownerName.trim(), phone.trim(), req.user.id]
     )
 
+    let finalLat = (latitude !== undefined && latitude !== null && !isNaN(Number(latitude))) ? Number(latitude) : null;
+    let finalLng = (longitude !== undefined && longitude !== null && !isNaN(Number(longitude))) ? Number(longitude) : null;
+
+    if ((!finalLat || !finalLng) && address) {
+      try {
+        const fullAddrStr = [address.trim(), city?.trim(), state?.trim(), pincode?.trim()].filter(Boolean).join(", ");
+        const gKey = process.env.GOOGLE_MAPS_API_KEY || "AIzaSyDdkmLpJjLrOLBkqceMQ63ZZodNgksd1Uc";
+        const gRes = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(fullAddrStr)}&key=${gKey}`);
+        const gData = await gRes.json();
+        if (gData.status === "OK" && gData.results?.[0]?.geometry?.location) {
+          finalLat = gData.results[0].geometry.location.lat;
+          finalLng = gData.results[0].geometry.location.lng;
+        }
+      } catch (geoErr) {
+        console.warn("Kitchen geocoding fallback error:", geoErr.message);
+      }
+    }
+
     await connection.query(
       `UPDATE kitchens SET
         name = ?, owner_name = ?, phone = ?, speciality = ?, kitchen_type = ?,
         best_item = ?, fssai_number = ?, address = ?, city = ?, state = ?,
-        pincode = ?, opening_time = ?, description = ?, offer = ?
+        pincode = ?, opening_time = ?, description = ?, offer = ?,
+        latitude = COALESCE(?, latitude), longitude = COALESCE(?, longitude)
        WHERE user_id = ?`,
       [
         name.trim(),
@@ -673,6 +698,8 @@ router.patch("/me", authRequired, requireRole("kitchen"), async (req, res) => {
         openingTime.trim(),
         description.trim(),
         offer?.trim() || null,
+        finalLat,
+        finalLng,
         req.user.id,
       ]
     )
@@ -740,11 +767,43 @@ router.patch("/me/status", authRequired, requireRole("kitchen"), async (req, res
   }
 })
 
+async function applyKitchenFilterEnhancements(pool, row) {
+  // 1. Hygiene Verified Filter: Check live 24h compliance
+  const { compliant } = await getHygieneCompliance(pool, row.id)
+  row.hygiene_score = compliant ? 100 : 0
+
+  // 2. Ration Filter: Check if kitchen offers grocery/ration
+  const isExplicitOff = row.is_grocery_active === 0 || row.is_grocery_active === false || row.is_grocery_active === "0"
+  let offersGrocery = !isExplicitOff
+
+  if (isExplicitOff) {
+    try {
+      const [items] = await pool.query(
+        "SELECT id FROM menu_items WHERE kitchen_id = ? AND category = 'grocery' AND is_available = 1 LIMIT 1",
+        [row.id]
+      )
+      offersGrocery = items.length > 0
+    } catch {
+      offersGrocery = false
+    }
+  }
+
+  if (offersGrocery) {
+    const hasRationTag = /ration|grocery|essential/i.test(`${row.speciality || ""} ${row.best_item || ""}`)
+    if (!hasRationTag) {
+      row.speciality = row.speciality ? `${row.speciality} • Ration & Grocery` : "Ration & Grocery"
+    }
+  }
+
+  return row
+}
+
 router.get("/featured", async (req, res) => {
   try {
     const city = req.query.city?.toString().trim() || null
     let query = `SELECT k.id, k.name, k.owner_name, k.speciality, k.image, k.cover_image, k.rating, k.delivery_time,
               k.hygiene_score, k.offer, k.best_item, k.city, k.state, k.kitchen_type, k.status, k.is_featured, k.featured_order, k.reviewed_at, k.visibility_status, k.is_active,
+              k.is_grocery_active, k.is_fresh_food_active,
               k.festival_offer_enabled, k.festival_offer_title, k.festival_offer_category, k.festival_offer_discount_percent, k.festival_offer_start_date, k.festival_offer_end_date, k.festival_offer_description, k.festival_offer_image, k.festival_offer_image_2,
               ${SQL_RATING_COUNT}
        FROM kitchens k
@@ -759,7 +818,10 @@ router.get("/featured", async (req, res) => {
     const [rows] = await pool.query(query, params)
     const visible = []
     for (const row of rows) {
-      if (await isKitchenPubliclyVisible(pool, row)) visible.push(row)
+      if (await isKitchenPubliclyVisible(pool, row)) {
+        await applyKitchenFilterEnhancements(pool, row)
+        visible.push(row)
+      }
     }
     res.json({ kitchens: withPublicRatings(formatKitchens(visible)) })
   } catch (error) {
@@ -773,6 +835,7 @@ router.get("/", async (req, res) => {
     const city = req.query.city?.toString().trim() || null
     let query = `SELECT k.id, k.name, k.owner_name, k.speciality, k.image, k.cover_image, k.rating, k.delivery_time,
               k.hygiene_score, k.offer, k.best_item, k.city, k.state, k.kitchen_type, k.status, k.reviewed_at, k.visibility_status, k.is_active,
+              k.is_grocery_active, k.is_fresh_food_active,
               k.festival_offer_enabled, k.festival_offer_title, k.festival_offer_category, k.festival_offer_discount_percent, k.festival_offer_start_date, k.festival_offer_end_date, k.festival_offer_description, k.festival_offer_image, k.festival_offer_image_2,
               ${SQL_RATING_COUNT}
        FROM kitchens k
@@ -787,7 +850,10 @@ router.get("/", async (req, res) => {
     const [rows] = await pool.query(query, params)
     const visible = []
     for (const row of rows) {
-      if (await isKitchenPubliclyVisible(pool, row)) visible.push(row)
+      if (await isKitchenPubliclyVisible(pool, row)) {
+        await applyKitchenFilterEnhancements(pool, row)
+        visible.push(row)
+      }
     }
     res.json({ kitchens: withPublicRatings(formatKitchens(visible)) })
   } catch (error) {
@@ -800,7 +866,7 @@ router.get("/:id", async (req, res) => {
   try {
     const [rows] = await pool.query(
       `SELECT k.id, k.name, k.owner_name, k.phone, k.speciality, k.description, k.image, k.cover_image, k.rating,
-              k.delivery_time, k.hygiene_score, k.offer, k.best_item, k.city, k.state, k.address, k.pincode, k.status, k.reviewed_at, k.visibility_status, k.is_active,
+              k.delivery_time, k.hygiene_score, k.offer, k.best_item, k.city, k.state, k.address, k.pincode, k.latitude, k.longitude, k.status, k.reviewed_at, k.visibility_status, k.is_active,
               k.is_fresh_food_active, k.is_grocery_active,
               k.festival_offer_enabled, k.festival_offer_title, k.festival_offer_category, k.festival_offer_discount_percent, k.festival_offer_start_date, k.festival_offer_end_date, k.festival_offer_description, k.festival_offer_image, k.festival_offer_image_2,
               ${SQL_RATING_COUNT}
@@ -819,6 +885,7 @@ router.get("/:id", async (req, res) => {
     }
 
     const { compliant } = await getHygieneCompliance(pool, rows[0].id)
+    await applyKitchenFilterEnhancements(pool, rows[0])
 
     res.json({
       kitchen: withPublicRating(formatKitchen(rows[0])),

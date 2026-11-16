@@ -231,6 +231,12 @@ export async function connectDB() {
         await connection.query("ALTER TABLE kitchens ADD COLUMN festival_offer_image VARCHAR(255) DEFAULT NULL")
       } catch (_) { }
       try {
+        await connection.query("ALTER TABLE kitchens ADD COLUMN latitude DECIMAL(10, 8) DEFAULT NULL")
+      } catch (_) { }
+      try {
+        await connection.query("ALTER TABLE kitchens ADD COLUMN longitude DECIMAL(11, 8) DEFAULT NULL")
+      } catch (_) { }
+      try {
         await connection.query("ALTER TABLE kitchens ADD COLUMN festival_offer_image_2 VARCHAR(255) DEFAULT NULL")
       } catch (_) { }
       try {
@@ -314,10 +320,22 @@ export async function connectDB() {
         await connection.query("ALTER TABLE orders ADD COLUMN rider_latitude DECIMAL(10, 8) DEFAULT NULL")
       } catch (_) { }
       try {
+        await connection.query("ALTER TABLE orders ADD COLUMN rider_longitude DECIMAL(11, 8) DEFAULT NULL")
+      } catch (_) { }
+      try {
+        await connection.query("ALTER TABLE orders ADD COLUMN delivery_latitude DECIMAL(10, 8) DEFAULT NULL")
+      } catch (_) { }
+      try {
+        await connection.query("ALTER TABLE orders ADD COLUMN delivery_longitude DECIMAL(11, 8) DEFAULT NULL")
+      } catch (_) { }
+      try {
         await connection.query("ALTER TABLE orders ADD COLUMN cancellation_reason VARCHAR(255) DEFAULT NULL")
       } catch (_) { }
       try {
         await connection.query("ALTER TABLE orders ADD COLUMN gst_amount DECIMAL(10, 2) NOT NULL DEFAULT 0.00")
+      } catch (_) { }
+      try {
+        await connection.query("ALTER TABLE orders ADD COLUMN arrived_at_customer_at TIMESTAMP DEFAULT NULL")
       } catch (_) { }
 
       try {
@@ -605,6 +623,39 @@ export async function connectDB() {
       console.log("✅ Auto-migrated grocery_presets table")
     } catch (e) {
       console.error("❌ Auto-migration of grocery_presets table failed:", e.message)
+    }
+
+    // Auto-migrate kitchens columns for grocery/fresh food and sync hygiene_score
+    try {
+      try {
+        await connection.query("ALTER TABLE kitchens ADD COLUMN is_grocery_active TINYINT(1) NOT NULL DEFAULT 1")
+      } catch (_) {}
+      try {
+        await connection.query("ALTER TABLE kitchens ADD COLUMN is_fresh_food_active TINYINT(1) NOT NULL DEFAULT 1")
+      } catch (_) {}
+      try {
+        await connection.query("UPDATE kitchens SET is_grocery_active = 1 WHERE is_grocery_active IS NULL")
+      } catch (_) {}
+      try {
+        await connection.query("UPDATE kitchens SET is_fresh_food_active = 1 WHERE is_fresh_food_active IS NULL")
+      } catch (_) {}
+
+      // Sync active approved hygiene checks to kitchens.hygiene_score
+      const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000)
+      await connection.query(`
+        UPDATE kitchens k
+        SET hygiene_score = 100
+        WHERE EXISTS (
+          SELECT 1 FROM hygiene_checks hc
+          WHERE hc.kitchen_id = k.id
+            AND hc.area = 'daily_check'
+            AND hc.status = 'approved'
+            AND hc.recorded_at > ?
+        )
+      `, [cutoff])
+      console.log("✅ Auto-migrated and synced kitchen hygiene_score and grocery status")
+    } catch (e) {
+      // Ignored if table doesn't exist yet
     }
 
     connection.release()

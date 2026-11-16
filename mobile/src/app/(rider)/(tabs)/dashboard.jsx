@@ -269,12 +269,7 @@ export default function RiderDashboardScreen() {
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
       const { latitude, longitude } = loc.coords
 
-      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`, {
-        headers: {
-          "User-Agent": "Atleast80Rider/1.0"
-        }
-      })
-      const data = await res.json()
+      const data = await api(`/api/locations/reverse?lat=${latitude}&lng=${longitude}`)
       if (data && data.address) {
         const displayState = data.address.state || ""
         const displayCity = data.address.city || data.address.town || data.address.village || data.address.county || data.address.suburb || ""

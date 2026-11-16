@@ -93,6 +93,7 @@ router.delete("/me", authRequired, requireRole("kitchen"), requireApprovedKitche
       video.id,
       req.kitchenId,
     ])
+    await pool.query("UPDATE kitchens SET hygiene_score = 0 WHERE id = ?", [req.kitchenId])
     removeHygieneFile(video.mediaUrl)
 
     const status = await getHygieneCompliance(pool, req.kitchenId)

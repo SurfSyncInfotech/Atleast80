@@ -2,7 +2,7 @@
   "expo": {
     "name": "Atleast80 Rider",
     "slug": "mobile-rider",
-    "version": "202.0.0",
+    "version": "600.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/logo.png",
     "scheme": "mobile-rider",
@@ -13,7 +13,7 @@
     "android": {
       "package": "com.atleast80.rider",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 202
+      "versionCode": 600
     },
     "web": {
       "output": "single",

@@ -142,6 +142,7 @@ export default function KitchenPayoutsPage() {
                     <th className="py-3 px-4">Rider Fee</th>
                     <th className="py-3 px-4">Net Amount Received</th>
                     <th className="py-3 px-4">UTR Reference</th>
+                    <th className="py-3 px-4">Admin Note / Remarks</th>
                     <th className="py-3 px-4">Status</th>
                   </tr>
                 </thead>
@@ -152,12 +153,26 @@ export default function KitchenPayoutsPage() {
                         {p.paidAt ? new Date(p.paidAt).toLocaleString("en-IN") : "—"}
                       </td>
                       <td className="py-3.5 px-4 font-semibold text-dark">₹{p.grossAmount}</td>
-                      <td className="py-3.5 px-4 font-semibold text-red-600">-₹{p.commissionDeduction}</td>
+                      <td className="py-3.5 px-4 font-semibold text-red-600">
+                        -₹{p.commissionDeduction}
+                        {Number(p.commissionDeduction) === 0 && (
+                          <span className="block text-[10px] text-emerald-600 font-normal">0% Promo</span>
+                        )}
+                      </td>
                       <td className="py-3.5 px-4 font-semibold text-purple-700">-₹{p.riderFeeDeduction}</td>
                       <td className="py-3.5 px-4 font-poppins font-bold text-emerald-700 text-base">
                         ₹{p.netPayout}
                       </td>
                       <td className="py-3.5 px-4 font-mono font-bold text-dark text-xs">{p.utrNumber || "—"}</td>
+                      <td className="py-3.5 px-4 font-nunito text-xs max-w-xs">
+                        {p.notes ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-50 text-amber-900 border border-amber-200/70 font-medium">
+                            💬 {p.notes}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 italic">—</span>
+                        )}
+                      </td>
                       <td className="py-3.5 px-4">
                         <span className="bg-emerald-100 text-emerald-800 font-poppins font-bold text-[10px] px-2.5 py-0.5 rounded-full uppercase tracking-wide">
                           Paid ✅

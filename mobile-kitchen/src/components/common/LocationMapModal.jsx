@@ -1,3 +1,8 @@
+
+function stripPlusCode(addr) {
+  if (!addr || typeof addr !== "string") return addr || ""
+  return addr.replace(/^[A-Z0-9]{4,8}\+[A-Z0-9]{2,5},?\s*/i, "").trim()
+}
 import React, { useEffect, useRef, useState } from "react"
 import {
   Modal,
@@ -189,7 +194,7 @@ export default function LocationMapModal({
         const postcode = data.postcode || addr.postcode || ""
         const formatted = data.formattedAddress || data.displayName || [suburb, city, state, postcode].filter(Boolean).join(", ")
 
-        setDetectedAddress(formatted)
+        setDetectedAddress(stripPlusCode(formatted))
         if (city) setDetectedCity(city)
         if (state) setDetectedState(state)
         if (postcode) setDetectedPincode(postcode)
@@ -288,7 +293,7 @@ export default function LocationMapModal({
     if (lat && lng) {
       setCurrentCoords({ lat, lng })
       const formatted = item.formattedAddress || item.displayName || ""
-      setDetectedAddress(formatted)
+      setDetectedAddress(stripPlusCode(formatted))
       if (item.city) setDetectedCity(item.city)
       if (item.state) setDetectedState(item.state)
       if (item.postcode) setDetectedPincode(item.postcode)
@@ -348,8 +353,9 @@ export default function LocationMapModal({
           var map = L.map('map', { zoomControl: false }).setView([${mapLat}, ${mapLng}], ${mapZoom});
           window.map = map;
           
-          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19
+          L.tileLayer('https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+            maxZoom: 20,
+            subdomains: ['0', '1', '2', '3']
           }).addTo(map);
 
           var marker = L.marker([${mapLat}, ${mapLng}], { draggable: true }).addTo(map);

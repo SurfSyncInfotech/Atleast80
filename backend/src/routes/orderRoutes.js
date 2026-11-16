@@ -68,6 +68,24 @@ function mapOrder(row) {
     cancellationOtp: row.cancellation_otp || null,
     deliveryStatus: row.delivery_status || null,
     riderId: row.rider_id || null,
+    riderName: row.rider_name || null,
+    riderPhone: row.rider_phone || null,
+  }
+}
+
+function mapKitchenOrder(row) {
+  if (!row) return null
+  const base = mapOrder(row)
+  const foodTotal = Math.max(0, Number(row.item_total) - Number(row.festival_discount || 0))
+  let deliveryStatus = base.deliveryStatus
+  if (deliveryStatus === "cancelled_unreachable") {
+    deliveryStatus = "rescue_timeout"
+  }
+  return {
+    ...base,
+    deliveryStatus,
+    grandTotal: foodTotal,
+    gstAmount: 0,
   }
 }
 
@@ -159,7 +177,7 @@ router.get("/kitchen", authRequired, requireRole("kitchen"), requireApprovedKitc
 
     const orders = await Promise.all(
       rows.map(async (row) => ({
-        ...mapOrder(row),
+        ...mapKitchenOrder(row),
         items: await fetchOrderItems(row.id),
         review: await fetchOrderReview(row.id),
       }))
@@ -175,15 +193,21 @@ router.get("/kitchen", authRequired, requireRole("kitchen"), requireApprovedKitc
 router.get("/kitchen/stats", authRequired, requireRole("kitchen"), requireApprovedKitchen, async (req, res) => {
   try {
     const [todayRows] = await pool.query(
-      `SELECT COUNT(*) AS count, COALESCE(SUM(grand_total), 0) AS revenue
+      `SELECT COUNT(*) AS count, COALESCE(SUM(item_total), 0) AS revenue
        FROM orders
-       WHERE kitchen_id = ? AND DATE(created_at) = CURDATE() AND status != 'cancelled'`,
+       WHERE kitchen_id = ? AND DATE(created_at) = CURDATE() AND (
+         status != 'cancelled' 
+         OR (payment_method IN ('online', 'upi', 'razorpay') AND delivery_status = 'cancelled_unreachable')
+       )`,
       [req.kitchenId]
     )
     const [totalRows] = await pool.query(
-      `SELECT COUNT(*) AS count, COALESCE(SUM(grand_total), 0) AS revenue
+      `SELECT COUNT(*) AS count, COALESCE(SUM(item_total), 0) AS revenue
        FROM orders
-       WHERE kitchen_id = ? AND status != 'cancelled'`,
+       WHERE kitchen_id = ? AND (
+         status != 'cancelled' 
+         OR (payment_method IN ('online', 'upi', 'razorpay') AND delivery_status = 'cancelled_unreachable')
+       )`,
       [req.kitchenId]
     )
     const [pendingRows] = await pool.query(
@@ -191,11 +215,26 @@ router.get("/kitchen/stats", authRequired, requireRole("kitchen"), requireApprov
        WHERE kitchen_id = ? AND (status IN ('pending', 'confirmed', 'preparing', 'out_for_delivery') OR (status = 'delivered' AND delivery_status = 'handover_pending'))`,
       [req.kitchenId]
     )
+    const [settledRows] = await pool.query(
+      `SELECT COALESCE(SUM(s.gross_amount - COALESCE(s.deductions_gst, 0)), 0) AS settled_gross,
+              COALESCE(SUM(s.net_payout), 0) AS settled_net
+       FROM settlements s
+       WHERE s.entity_type = 'kitchen' AND (s.entity_id = ? OR s.entity_id = ?) AND s.status = 'paid'`,
+      [req.kitchenId, req.user.id]
+    )
+
+    const totalRev = Number(Number(totalRows[0].revenue).toFixed(2))
+    const settledGross = Number(Number(settledRows[0]?.settled_gross || 0).toFixed(2))
+    const currentCycleRev = Number(Math.max(0, totalRev - settledGross).toFixed(2))
 
     res.json({
       todayOrders: Number(todayRows[0].count),
       todayRevenue: Number(todayRows[0].revenue),
-      totalRevenue: Number(totalRows[0].revenue),
+      totalRevenue: totalRev,
+      currentCycleRevenue: currentCycleRev,
+      unsettledRevenue: currentCycleRev,
+      totalSettledGross: settledGross,
+      totalSettledPayout: Number(Number(settledRows[0]?.settled_net || 0).toFixed(2)),
       totalOrders: Number(totalRows[0].count),
       activeOrders: Number(pendingRows[0].count),
     })
@@ -220,7 +259,7 @@ router.get("/kitchen/:id", authRequired, requireRole("kitchen"), requireApproved
     }
 
     const order = {
-      ...mapOrder(rows[0]),
+      ...mapKitchenOrder(rows[0]),
       items: await fetchOrderItems(rows[0].id),
       review: await fetchOrderReview(rows[0].id),
     }
@@ -240,7 +279,7 @@ router.patch("/kitchen/:id/status", authRequired, requireRole("kitchen"), requir
 
   try {
     const [rows] = await pool.query(
-      "SELECT id, status, kitchen_id FROM orders WHERE id = ? AND kitchen_id = ?",
+      "SELECT id, status, kitchen_id, delivery_method, delivery_otp FROM orders WHERE id = ? AND kitchen_id = ?",
       [req.params.id, req.kitchenId]
     )
 
@@ -259,13 +298,15 @@ router.patch("/kitchen/:id/status", authRequired, requireRole("kitchen"), requir
 
     if (newStatus === "out_for_delivery") {
       if (rows[0].delivery_method === "self") {
-        // Self Pickup order: No rider assignment, no rider broadcast!
+        // Self Pickup order: Generate pickup verification OTP & mark ready for pickup
+        const pickupOtp = String(Math.floor(1000 + Math.random() * 9000))
         await pool.query(
           `UPDATE orders 
            SET status = 'out_for_delivery',
-               delivery_status = 'self_pickup'
+               delivery_status = 'ready_for_pickup',
+               delivery_otp = COALESCE(delivery_otp, ?)
            WHERE id = ?`,
-          [req.params.id]
+          [pickupOtp, req.params.id]
         )
       } else {
         // Home delivery order: Assign codes & broadcast to riders
@@ -277,10 +318,31 @@ router.patch("/kitchen/:id/status", authRequired, requireRole("kitchen"), requir
                delivery_status = 'pending_assignment', 
                pickup_code = ?, 
                delivery_otp = ?, 
-               delivery_fee = 30.00 
+               delivery_fee = COALESCE(NULLIF(delivery_fee, 0), 30.00) 
            WHERE id = ?`,
           [pickupCode, deliveryOtp, req.params.id]
         )
+      }
+    } else if (newStatus === "delivered") {
+      if (rows[0].delivery_method === "self") {
+        const enteredOtp = (req.body.otp || "").toString().trim()
+        const actualOtp = (rows[0].delivery_otp || "").toString().trim()
+        if (actualOtp && enteredOtp !== actualOtp) {
+          return res.status(400).json({
+            message: "Invalid Pickup OTP. Please enter the correct 4-digit code provided by the customer.",
+          })
+        }
+        await pool.query(
+          `UPDATE orders 
+           SET status = 'delivered',
+               delivery_status = 'picked_up'
+           WHERE id = ?`,
+          [req.params.id]
+        )
+      } else {
+        return res.status(400).json({
+          message: "Delivery orders cannot be marked delivered by the kitchen. Only the assigned delivery rider can complete the delivery.",
+        })
       }
     } else {
       await pool.query("UPDATE orders SET status = ? WHERE id = ?", [newStatus, req.params.id])
@@ -293,7 +355,7 @@ router.patch("/kitchen/:id/status", authRequired, requireRole("kitchen"), requir
     )
 
     const order = {
-      ...mapOrder(updated[0]),
+      ...mapKitchenOrder(updated[0]),
       items: await fetchOrderItems(updated[0].id),
       review: await fetchOrderReview(updated[0].id),
     }
@@ -354,7 +416,7 @@ router.patch("/kitchen/:id/confirm-handover", authRequired, requireRole("kitchen
 
     // 2. Verify order is in valid state for handover/return confirmation
     const isValidDelivered = order.status === "delivered" && order.delivery_status === "handover_pending"
-    const isValidReturned = order.status === "cancelled" && order.delivery_status === "rescue_timeout"
+    const isValidReturned = order.status === "cancelled" && ["rescue_timeout", "cancelled_unreachable"].includes(order.delivery_status)
     if (!isValidDelivered && !isValidReturned) {
       await connection.rollback()
       return res.status(400).json({ message: "Order status is not valid for cash handover or food return confirmation" })
@@ -377,6 +439,20 @@ router.patch("/kitchen/:id/confirm-handover", authRequired, requireRole("kitchen
 
     await connection.commit()
 
+    // Notify assigned rider that food return has been verified by kitchen partner
+    if (isValidReturned && order.rider_id) {
+      try {
+        sendPushToRider(
+          order.rider_id,
+          "Food Return Confirmed 📦",
+          `The kitchen partner has confirmed receipt of returned food for Order #${order.order_number || orderId}. Delivery cleared!`,
+          { orderId: String(orderId), type: "food_return_confirmed" }
+        )
+      } catch (pushErr) {
+        console.error("Non-blocking error sending push to rider on food return confirmation:", pushErr.message)
+      }
+    }
+
     // Fetch the updated order object to return
     const [updated] = await pool.query(
       `SELECT o.*, u.name AS customer_name, u.phone AS customer_phone
@@ -385,7 +461,7 @@ router.patch("/kitchen/:id/confirm-handover", authRequired, requireRole("kitchen
     )
 
     const mappedOrder = {
-      ...mapOrder(updated[0]),
+      ...mapKitchenOrder(updated[0]),
       items: await fetchOrderItems(updated[0].id),
       review: await fetchOrderReview(updated[0].id),
     }
@@ -402,6 +478,31 @@ router.patch("/kitchen/:id/confirm-handover", authRequired, requireRole("kitchen
 
 
 // ─── Customer routes ────────────────────────────────────────────────────────
+
+function calculateDistanceKm(lat1, lon1, lat2, lon2) {
+  if (!lat1 || !lon1 || !lat2 || !lon2) return null;
+  const numLat1 = Number(lat1);
+  const numLon1 = Number(lon1);
+  const numLat2 = Number(lat2);
+  const numLon2 = Number(lon2);
+  if (isNaN(numLat1) || isNaN(numLon1) || isNaN(numLat2) || isNaN(numLon2)) return null;
+  const R = 6371;
+  const dLat = (numLat2 - numLat1) * (Math.PI / 180);
+  const dLon = (numLon2 - numLon1) * (Math.PI / 180);
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(numLat1 * (Math.PI / 180)) * Math.cos(numLat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Number((R * c * 1.25).toFixed(1));
+}
+
+function calculateDeliveryCharge(distanceKm) {
+  const km = Number(distanceKm) || 0;
+  const baseKm = 2.0;
+  const baseRate = 30.0;
+  const perKmRate = 10.0;
+  if (km <= baseKm) return baseRate;
+  const extraKm = km - baseKm;
+  return Number((baseRate + extraKm * perKmRate).toFixed(2));
+}
 
 router.post("/", authRequired, requireRole("customer"), async (req, res) => {
   const {
@@ -432,15 +533,25 @@ router.post("/", authRequired, requireRole("customer"), async (req, res) => {
     }
 
     const [users] = await pool.query(
-      "SELECT address, city, pincode FROM users WHERE id = ?",
+      "SELECT id, address, city, pincode FROM users WHERE id = ?",
       [req.user.id]
     )
-    const user = users[0] || {}
+    if (users.length === 0) {
+      return res.status(401).json({
+        message: "Your login session is invalid or user account was not found. Please logout and login again.",
+        invalidSession: true
+      })
+    }
+    const user = users[0]
 
-    const customerCity = (user.city || "").trim().toLowerCase()
+    const reqCity = (req.body.deliveryCity || req.body.city || "").trim().toLowerCase()
+    const customerCity = reqCity || (user.city || "").trim().toLowerCase()
     const kitchenCity = (kitchens[0].city || "").trim().toLowerCase()
+    const deliveryAddr = (req.body.delivery_address || user.address || "").toLowerCase()
 
-    if (customerCity && kitchenCity && customerCity !== kitchenCity) {
+    const isMatch = !customerCity || customerCity === kitchenCity || deliveryAddr.includes(kitchenCity) || (kitchenCity === "roha" && (deliveryAddr.includes("roha") || deliveryAddr.includes("kolad")))
+
+    if (!isMatch) {
       return res.status(400).json({
         message: `Delivery unavailable. ${kitchens[0].name} only delivers within ${kitchens[0].city}. Please order from a kitchen near ${user.city || 'your area'}!`
       })
@@ -577,13 +688,43 @@ router.post("/", authRequired, requireRole("customer"), async (req, res) => {
       }, 0).toFixed(2)
     )
 
-    const discountedItemTotal = Math.max(0, itemTotal - festivalDiscount)
-    const grandTotal = Number((discountedItemTotal + gstAmount + Number(packingFee) + Number(deliveryFee)).toFixed(2))
-
     const address =
       deliveryAddress ||
       [user.address, user.city, user.pincode].filter(Boolean).join(", ") ||
       "Address not set"
+
+    let deliveryLat = req.body.deliveryLatitude || req.body.delivery_latitude || req.body.latitude || null
+    let deliveryLng = req.body.deliveryLongitude || req.body.delivery_longitude || req.body.longitude || null
+    if ((!deliveryLat || !deliveryLng) && address) {
+      try {
+        const gKey = process.env.GOOGLE_MAPS_API_KEY || "AIzaSyDdkmLpJjLrOLBkqceMQ63ZZodNgksd1Uc"
+        const gRes = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${gKey}`)
+        const gData = await gRes.json()
+        if (gData.status === "OK" && gData.results?.[0]?.geometry?.location) {
+          deliveryLat = gData.results[0].geometry.location.lat
+          deliveryLng = gData.results[0].geometry.location.lng
+        }
+      } catch (_) {}
+    }
+
+    // Dynamic Delivery Fee: Base 2 km = ₹30, Above 2 km = ₹30 + ₹10/km
+    let finalDeliveryFee = Number(deliveryFee) || 0
+    if (deliveryMethod !== "self") {
+      let dist = null
+      if (kitchens[0]?.latitude && kitchens[0]?.longitude && deliveryLat && deliveryLng) {
+        dist = calculateDistanceKm(kitchens[0].latitude, kitchens[0].longitude, deliveryLat, deliveryLng)
+      }
+      if (dist !== null) {
+        finalDeliveryFee = calculateDeliveryCharge(dist)
+      } else if (finalDeliveryFee <= 0) {
+        finalDeliveryFee = 30.00
+      }
+    } else {
+      finalDeliveryFee = 0.00
+    }
+
+    const discountedItemTotal = Math.max(0, itemTotal - festivalDiscount)
+    const grandTotal = Number((discountedItemTotal + gstAmount + Number(packingFee) + finalDeliveryFee).toFixed(2))
 
     const connection = await pool.getConnection()
     try {
@@ -591,8 +732,8 @@ router.post("/", authRequired, requireRole("customer"), async (req, res) => {
 
       const orderNumber = generateOrderNumber()
       const normalizedPaymentMethod = (paymentMethod === "upi" || paymentMethod === "razorpay" || paymentMethod === "online") ? "online" : "cod"
-      const advanceAmount = normalizedPaymentMethod === "cod" ? 30.00 : grandTotal
-      const remainingAmount = normalizedPaymentMethod === "cod" ? Math.max(0, Number((grandTotal - 30.00).toFixed(2))) : 0.00
+      const advanceAmount = normalizedPaymentMethod === "cod" ? finalDeliveryFee : grandTotal
+      const remainingAmount = normalizedPaymentMethod === "cod" ? Math.max(0, Number((grandTotal - finalDeliveryFee).toFixed(2))) : 0.00
 
       const initialPaymentRef = req.body.paymentRef || req.body.payment_ref || req.body.razorpay_payment_id || null
 
@@ -600,8 +741,8 @@ router.post("/", authRequired, requireRole("customer"), async (req, res) => {
         `INSERT INTO orders (
           order_number, user_id, kitchen_id, status, payment_method,
           packing_type, delivery_method, item_total, festival_discount, gst_amount, packing_fee, delivery_fee,
-          grand_total, delivery_address, advance_amount, remaining_amount, doorstep_payment_method, payment_ref
-        ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'cash', ?)`,
+          grand_total, delivery_address, delivery_latitude, delivery_longitude, advance_amount, remaining_amount, doorstep_payment_method, payment_ref, delivery_otp
+        ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'cash', ?, ?)`,
         [
           orderNumber,
           req.user.id,
@@ -613,12 +754,15 @@ router.post("/", authRequired, requireRole("customer"), async (req, res) => {
           festivalDiscount,
           gstAmount,
           packingFee,
-          deliveryFee,
+          finalDeliveryFee,
           grandTotal,
           address,
+          deliveryLat,
+          deliveryLng,
           advanceAmount,
           remainingAmount,
           initialPaymentRef,
+          deliveryMethod === "self" ? String(Math.floor(1000 + Math.random() * 9000)) : null,
         ]
       )
 
@@ -668,7 +812,7 @@ router.post("/", authRequired, requireRole("customer"), async (req, res) => {
         sendPushToUser(
           kitchens[0].user_id,
           "New Order Received! 🔔",
-          `You have received a new order #${orderNumber} for ₹${grandTotal.toFixed(2)}. Tap to view details and confirm.`
+          `You have received a new order #${orderNumber} for ₹${discountedItemTotal.toFixed(2)}. Tap to view details and confirm.`
         )
 
         // Insert In-App Alert for Customer
@@ -700,7 +844,7 @@ router.post("/", authRequired, requireRole("customer"), async (req, res) => {
         delivery_method: deliveryMethod,
         item_total: itemTotal,
         packing_fee: packingFee,
-        delivery_fee: deliveryFee,
+        delivery_fee: finalDeliveryFee,
         grand_total: grandTotal,
         delivery_address: address,
         created_at: new Date(),
@@ -728,9 +872,12 @@ router.post("/", authRequired, requireRole("customer"), async (req, res) => {
 router.get("/", authRequired, requireRole("customer"), async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT o.*, ${KITCHEN_ORDER_FIELDS}
+      `SELECT o.*, ${KITCHEN_ORDER_FIELDS},
+              ru.name AS rider_name, ru.phone AS rider_phone
        FROM orders o
        JOIN kitchens k ON k.id = o.kitchen_id
+       LEFT JOIN riders r ON r.id = o.rider_id
+       LEFT JOIN users ru ON ru.id = r.user_id
        WHERE o.user_id = ?
        ORDER BY o.created_at DESC`,
       [req.user.id]
@@ -851,7 +998,7 @@ router.patch("/:id/cancel", authRequired, requireRole("customer"), async (req, r
 
   try {
     const [rows] = await pool.query(
-      "SELECT id, status, user_id, rider_id, order_number, delivery_fee FROM orders WHERE id = ? AND user_id = ?",
+      "SELECT id, status, user_id, rider_id, order_number, delivery_fee, payment_method FROM orders WHERE id = ? AND user_id = ?",
       [orderId, req.user.id]
     )
 
@@ -863,9 +1010,15 @@ router.patch("/:id/cancel", authRequired, requireRole("customer"), async (req, r
     const deliveryFee = Number(rows[0].delivery_fee)
     const assignedRiderId = rows[0].rider_id
     const orderNum = rows[0].order_number || orderId
+    const isPrepaid = ["online", "upi", "razorpay"].includes(String(rows[0].payment_method || "").toLowerCase())
 
     if (currentStatus === "out_for_delivery") {
-      // Customer cancels after dispatch: Advance delivery fee (₹30) was already paid online at checkout.
+      if (isPrepaid) {
+        return res.status(400).json({
+          message: "Orders cannot be cancelled once dispatched. Your fresh meal has already been prepared and is on the way!"
+        })
+      }
+      // Customer cancels after dispatch (COD): Advance delivery fee (₹30) was already paid online at checkout.
       // Transition directly to status = 'cancelled', delivery_status = 'rescue_active' and start 3-min rescue.
       await pool.query(
         `UPDATE orders 
@@ -935,9 +1088,12 @@ router.patch("/:id/cancel", authRequired, requireRole("customer"), async (req, r
 router.get("/:id", authRequired, requireRole("customer"), async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT o.*, ${KITCHEN_ORDER_FIELDS}, k.phone AS kitchen_phone
+      `SELECT o.*, ${KITCHEN_ORDER_FIELDS}, k.phone AS kitchen_phone,
+              ru.name AS rider_name, ru.phone AS rider_phone
        FROM orders o
        JOIN kitchens k ON k.id = o.kitchen_id
+       LEFT JOIN riders r ON r.id = o.rider_id
+       LEFT JOIN users ru ON ru.id = r.user_id
        WHERE o.id = ? AND o.user_id = ?`,
       [req.params.id, req.user.id]
     )
@@ -1130,4 +1286,3 @@ router.post("/rescue/:id/claim", authRequired, requireRole("customer"), async (r
 })
 
 export default router
-

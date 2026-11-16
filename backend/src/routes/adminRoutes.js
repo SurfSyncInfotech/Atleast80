@@ -384,6 +384,11 @@ router.patch("/kitchens/:id/hygiene/approve", async (req, res) => {
     )
 
     await pool.query(
+      "UPDATE kitchens SET hygiene_score = 100 WHERE id = ?",
+      [id]
+    )
+
+    await pool.query(
       `INSERT INTO alerts (target_role, kitchen_id, title, body, is_system, created_by)
        VALUES ('kitchen', ?, 'Daily Hygiene Approved', 'Aapki daily kitchen hygiene video verify aur approve kar di gayi hai! HYGIENE OK status active hai.', 1, ?)`,
       [id, req.user?.id || null]
@@ -423,6 +428,11 @@ router.patch("/kitchens/:id/hygiene/reject", async (req, res) => {
        SET status = 'rejected', rejection_reason = ?, reviewed_at = NOW(), reviewed_by = ? 
        WHERE id = ?`,
       [rejectReasonText, req.user?.id || null, latest[0].id]
+    )
+
+    await pool.query(
+      "UPDATE kitchens SET hygiene_score = 0 WHERE id = ?",
+      [id]
     )
 
     const alertBody = `Video aapne galat bheja hai. Reason: ${rejectReasonText}. Please kitchen area ki clean video share kijiye.`
@@ -1524,12 +1534,12 @@ router.get("/riders", async (req, res) => {
 
     const [riders] = await pool.query(
       `SELECT r.*, u.name, u.email, u.phone,
-              (SELECT COUNT(id) FROM orders WHERE rider_id = r.id AND status = 'delivered' AND DATE(created_at) = CURDATE()) AS today_orders_count,
-              (SELECT COALESCE(SUM(delivery_fee), 0) FROM orders WHERE rider_id = r.id AND status = 'delivered' AND DATE(created_at) = CURDATE()) AS today_earnings,
+              (SELECT COUNT(id) FROM orders WHERE rider_id = r.id AND (status = 'delivered' OR cancel_fee_paid = 1) AND DATE(created_at) = CURDATE()) AS today_orders_count,
+              (SELECT COALESCE(SUM(COALESCE(NULLIF(delivery_fee, 0), 30.00) + 20.00), 0) FROM orders WHERE rider_id = r.id AND (status = 'delivered' OR cancel_fee_paid = 1) AND DATE(created_at) = CURDATE()) AS today_earnings,
               (SELECT COALESCE(SUM(grand_total), 0) FROM orders WHERE rider_id = r.id AND status = 'delivered' AND payment_method = 'cod' AND DATE(created_at) = CURDATE()) AS today_cash_collected,
               (SELECT COALESCE(SUM(amount), 0) FROM rider_cash_handovers WHERE rider_id = r.id AND date = CURDATE()) AS today_cash_handover,
-              (SELECT COUNT(id) FROM orders WHERE rider_id = r.id AND status = 'delivered') AS total_orders_count,
-              (SELECT COALESCE(SUM(delivery_fee), 0) FROM orders WHERE rider_id = r.id AND status = 'delivered') AS total_earnings
+              (SELECT COUNT(id) FROM orders WHERE rider_id = r.id AND (status = 'delivered' OR cancel_fee_paid = 1)) AS total_orders_count,
+              (SELECT COALESCE(SUM(COALESCE(NULLIF(delivery_fee, 0), 30.00) + 20.00), 0) FROM orders WHERE rider_id = r.id AND (status = 'delivered' OR cancel_fee_paid = 1)) AS total_earnings
        ${query}
        ORDER BY r.created_at DESC
        LIMIT ? OFFSET ?`,
@@ -1749,9 +1759,9 @@ router.get("/payments/summary", async (_req, res) => {
       SELECT 
         COALESCE(SUM(CASE 
           WHEN payment_method IN ('online', 'upi', 'razorpay') AND (status != 'cancelled' OR LOWER(COALESCE(refund_status, 'none')) NOT IN ('refunded', 'approved', 'processed', 'completed')) THEN grand_total
-          WHEN payment_method IN ('online', 'upi', 'razorpay') AND status = 'cancelled' AND LOWER(COALESCE(refund_status, 'none')) IN ('refunded', 'approved', 'processed', 'completed') AND (delivery_status IN ('rescue_active', 'rescue_timeout', 'returned', 'cancelled_unreachable') OR cancel_fee_paid = 1) THEN COALESCE(NULLIF(delivery_fee, 0), 30.00)
+          WHEN payment_method IN ('online', 'upi', 'razorpay') AND status = 'cancelled' AND LOWER(COALESCE(refund_status, 'none')) IN ('refunded', 'approved', 'processed', 'completed') AND (delivery_status IN ('rescue_active', 'rescue_timeout', 'returned', 'returned_to_kitchen', 'cancelled_unreachable') OR cancel_fee_paid = 1) THEN COALESCE(NULLIF(delivery_fee, 0), 30.00)
           WHEN payment_method = 'cod' AND (status != 'cancelled' OR LOWER(COALESCE(refund_status, 'none')) NOT IN ('refunded', 'approved', 'processed', 'completed')) THEN (COALESCE(NULLIF(advance_amount, 0), 30.00) + CASE WHEN status = 'delivered' AND doorstep_payment_method = 'admin_qr_online' THEN COALESCE(NULLIF(remaining_amount, 0), GREATEST(0, grand_total - 30.00)) ELSE 0 END)
-          WHEN payment_method = 'cod' AND status = 'cancelled' AND LOWER(COALESCE(refund_status, 'none')) IN ('refunded', 'approved', 'processed', 'completed') AND (delivery_status IN ('rescue_active', 'rescue_timeout', 'returned', 'cancelled_unreachable') OR cancel_fee_paid = 1) THEN COALESCE(NULLIF(advance_amount, 0), 30.00)
+          WHEN payment_method = 'cod' AND status = 'cancelled' AND LOWER(COALESCE(refund_status, 'none')) IN ('refunded', 'approved', 'processed', 'completed') AND (delivery_status IN ('rescue_active', 'rescue_timeout', 'returned', 'returned_to_kitchen', 'cancelled_unreachable') OR cancel_fee_paid = 1) THEN COALESCE(NULLIF(advance_amount, 0), 30.00)
           ELSE 0 
         END), 0) AS onlineTotal,
         
@@ -1936,7 +1946,7 @@ router.get("/payments/refunds", async (req, res) => {
       FROM orders
       WHERE status = 'cancelled'
         AND (
-          ((delivery_status IS NULL OR delivery_status NOT IN ('rescue_active', 'rescue_timeout', 'returned', 'cancelled_unreachable')) AND COALESCE(cancel_fee_paid, 0) = 0)
+          ((delivery_status IS NULL OR delivery_status NOT IN ('rescue_active', 'rescue_timeout', 'returned', 'returned_to_kitchen', 'cancelled_unreachable')) AND COALESCE(cancel_fee_paid, 0) = 0)
           OR (payment_method IN ('online', 'upi', 'razorpay'))
         )
     `)
@@ -1952,7 +1962,7 @@ router.get("/payments/refunds", async (req, res) => {
        LEFT JOIN users u ON u.id = o.user_id
        WHERE o.status = 'cancelled'
          AND (
-           ((o.delivery_status IS NULL OR o.delivery_status NOT IN ('rescue_active', 'rescue_timeout', 'returned', 'cancelled_unreachable')) AND COALESCE(o.cancel_fee_paid, 0) = 0)
+           ((o.delivery_status IS NULL OR o.delivery_status NOT IN ('rescue_active', 'rescue_timeout', 'returned', 'returned_to_kitchen', 'cancelled_unreachable')) AND COALESCE(o.cancel_fee_paid, 0) = 0)
            OR (o.payment_method IN ('online', 'upi', 'razorpay'))
          )
        ORDER BY o.updated_at DESC
@@ -1963,7 +1973,7 @@ router.get("/payments/refunds", async (req, res) => {
     res.json({
       refunds: rows.map((r) => {
         const isOnline = ['online', 'upi', 'razorpay'].includes(r.payment_method)
-        const isDoorstepCancel = ['rescue_active', 'rescue_timeout', 'returned', 'cancelled_unreachable'].includes(r.delivery_status) || Boolean(Number(r.cancel_fee_paid) === 1)
+        const isDoorstepCancel = ['rescue_active', 'rescue_timeout', 'returned', 'returned_to_kitchen', 'cancelled_unreachable'].includes(r.delivery_status) || Boolean(Number(r.cancel_fee_paid) === 1)
         
         let refundAmount = 0
         if (isOnline) {
@@ -2018,7 +2028,7 @@ router.patch("/payments/refunds/:id", async (req, res) => {
 
     // 2. Calculate refund amount
     const isOnline = ["online", "upi", "razorpay"].includes(String(order.payment_method).toLowerCase())
-    const isDoorstepCancel = ["rescue_active", "rescue_timeout", "returned", "cancelled_unreachable"].includes(order.delivery_status) || Boolean(Number(order.cancel_fee_paid) === 1)
+    const isDoorstepCancel = ["rescue_active", "rescue_timeout", "returned", "returned_to_kitchen", "cancelled_unreachable"].includes(order.delivery_status) || Boolean(Number(order.cancel_fee_paid) === 1)
 
     let refundAmount = 0
     if (req.body.amount !== undefined && req.body.amount !== null && !isNaN(Number(req.body.amount))) {
@@ -2248,17 +2258,17 @@ router.get("/payments/settlements", async (_req, res) => {
       SELECT k.id AS kitchen_id, k.name AS kitchen_name, k.city, u.name AS owner_name, u.phone AS owner_phone,
              k.payout_mode, k.bank_account_name, k.bank_name, k.bank_account_number, k.bank_ifsc, k.upi_id,
              k.submitted_at, u.created_at AS user_created_at,
-             COALESCE(SUM(o.grand_total), 0) AS total_gross_sales,
+             COALESCE(SUM(o.item_total), 0) AS total_gross_sales,
              COALESCE(SUM(o.item_total), 0) AS total_food_sales,
              COALESCE(SUM(o.gst_amount), 0) AS total_gst_amount,
-             COALESCE(SUM(o.delivery_fee), 0) AS total_rider_fees,
+             COALESCE(SUM(CASE WHEN o.id IS NOT NULL AND o.delivery_method != 'self' THEN 20.00 ELSE 0 END), 0) AS total_rider_fees,
              COALESCE((
-               SELECT SUM(s.gross_amount)
+               SELECT SUM(s.gross_amount - COALESCE(s.deductions_gst, 0))
                FROM settlements s
                WHERE s.entity_type = 'kitchen' AND (s.entity_id = k.id OR s.entity_id = k.user_id) AND s.status = 'paid'
              ), 0) AS settled_gross_sales,
              COALESCE((
-               SELECT SUM(GREATEST(0, COALESCE(s.deductions_rider_fees, 0), s.gross_amount - s.deductions_commissions - COALESCE(s.deductions_gst, 0) - s.net_payout))
+               SELECT SUM(GREATEST(0, COALESCE(s.deductions_rider_fees, 0), (s.gross_amount - COALESCE(s.deductions_gst, 0)) - s.deductions_commissions - s.net_payout))
                FROM settlements s
                WHERE s.entity_type = 'kitchen' AND (s.entity_id = k.id OR s.entity_id = k.user_id) AND s.status = 'paid'
              ), 0) AS settled_rider_fees,
@@ -2267,10 +2277,13 @@ router.get("/payments/settlements", async (_req, res) => {
                FROM settlements s
                WHERE s.entity_type = 'kitchen' AND (s.entity_id = k.id OR s.entity_id = k.user_id) AND s.status = 'paid'
              ), 0) AS settled_gst,
-             COUNT(o.id) AS order_count
+              COUNT(o.id) AS order_count
       FROM kitchens k
       JOIN users u ON u.id = k.user_id
-      LEFT JOIN orders o ON o.kitchen_id = k.id AND o.status = 'delivered'
+      LEFT JOIN orders o ON o.kitchen_id = k.id AND (
+        o.status = 'delivered'
+        OR (o.status = 'cancelled' AND o.payment_method IN ('online', 'upi', 'razorpay') AND o.delivery_status = 'cancelled_unreachable')
+      )
       WHERE k.status = 'approved'
       GROUP BY k.id
     `)
@@ -2279,7 +2292,7 @@ router.get("/payments/settlements", async (_req, res) => {
     const [riderRows] = await pool.query(`
       SELECT r.id AS rider_id, u.name AS rider_name, u.phone AS rider_phone, r.cash_collected,
              r.payout_mode, r.bank_account_name, r.bank_name, r.bank_account_number, r.bank_ifsc, r.upi_id,
-             COALESCE(SUM(o.delivery_fee), 0) AS total_delivery_fee,
+             COALESCE(SUM(CASE WHEN o.id IS NOT NULL THEN (COALESCE(NULLIF(o.delivery_fee, 0), 30.00) + 20.00) ELSE 0 END), 0) AS total_delivery_fee,
              COALESCE((
                SELECT SUM(s.gross_amount)
                FROM settlements s
@@ -2288,7 +2301,11 @@ router.get("/payments/settlements", async (_req, res) => {
              COUNT(o.id) AS completed_deliveries
       FROM riders r
       JOIN users u ON u.id = r.user_id
-      LEFT JOIN orders o ON o.rider_id = r.id AND o.status = 'delivered'
+      LEFT JOIN orders o ON o.rider_id = r.id AND (
+        o.status = 'delivered'
+        OR o.cancel_fee_paid = 1
+        OR (o.status = 'cancelled' AND o.delivery_status IN ('cancelled_unreachable', 'rescue_timeout', 'returned', 'returned_to_kitchen', 'rescue_active'))
+      )
       WHERE r.status = 'active'
       GROUP BY r.id
     `)
@@ -2306,16 +2323,13 @@ router.get("/payments/settlements", async (_req, res) => {
 
     res.json({
       kitchenPayouts: kitchenRows.map((k) => {
-        const totalGross = Number(Number(k.total_gross_sales).toFixed(2))
-        const totalGst = Number(Number(k.total_gst_amount).toFixed(2))
+        const totalGross = Number(Number(k.total_food_sales).toFixed(2))
         const totalRiderFees = Number(Number(k.total_rider_fees).toFixed(2))
         const settledGross = Number(Number(k.settled_gross_sales).toFixed(2))
         const settledRiderFees = Number(Number(k.settled_rider_fees).toFixed(2))
-        const settledGst = Number(Number(k.settled_gst).toFixed(2))
 
         const unsettledGross = Number(Math.max(0, totalGross - settledGross).toFixed(2))
         const unsettledRiderFees = Number(Math.max(0, totalRiderFees - settledRiderFees).toFixed(2))
-        const unsettledGst = Number(Math.max(0, totalGst - settledGst).toFixed(2))
 
         // 6 Months Free Platform Fee Offer Check
         const regDate = k.submitted_at || k.user_created_at || new Date()
@@ -2323,10 +2337,9 @@ router.get("/payments/settlements", async (_req, res) => {
         const isPromoActive = diffMonths <= 6
         const commissionRate = isPromoActive ? 0 : 0.10
 
-        const foodBase = Number(Math.max(0, unsettledGross - unsettledGst).toFixed(2))
-        const commission = Number((foodBase * commissionRate).toFixed(2))
-        // Net Kitchen Payout = Gross Sales - GST (18%) - Rider Delivery Fee - Platform Commission
-        const net = Number(Math.max(0, unsettledGross - unsettledGst - commission - unsettledRiderFees).toFixed(2))
+        const commission = Number((unsettledGross * commissionRate).toFixed(2))
+        // Net Kitchen Payout = Food Sales - Platform Commission - Rider Delivery Fee
+        const net = Number(Math.max(0, unsettledGross - commission - unsettledRiderFees).toFixed(2))
 
         return {
           kitchenId: k.kitchen_id,
@@ -2344,12 +2357,12 @@ router.get("/payments/settlements", async (_req, res) => {
           totalSalesEver: totalGross,
           settledSalesEver: settledGross,
           orderCount: k.order_count,
-          gstDeduction: unsettledGst,
+          gstDeduction: 0,
           commissionDeduction: commission,
           commissionRate: isPromoActive ? 0 : 10,
           isPromoActive,
           riderFeeDeduction: unsettledRiderFees,
-          totalDeductions: Number((unsettledGst + commission + unsettledRiderFees).toFixed(2)),
+          totalDeductions: Number((commission + unsettledRiderFees).toFixed(2)),
           netPayout: net,
         }
       }),

@@ -34,7 +34,26 @@ const NEXT_STATUS = {
   pending: { status: "confirmed", label: "Accept" },
   confirmed: { status: "preparing", label: "Prepare" },
   preparing: { status: "out_for_delivery", label: "Dispatch" },
-  out_for_delivery: { status: "delivered", label: "Deliver" },
+}
+
+function getNextAction(order) {
+  if (!order) return null
+  const isSelf = order.deliveryMethod === "self"
+  if (isSelf) {
+    switch (order.status) {
+      case "pending":
+        return { status: "confirmed", label: "Accept" }
+      case "confirmed":
+        return { status: "preparing", label: "Prepare" }
+      case "preparing":
+        return { status: "out_for_delivery", label: "Ready for Pickup" }
+      case "out_for_delivery":
+        return { status: "delivered", label: "Complete Pickup (OTP)", requiresOtp: true }
+      default:
+        return null
+    }
+  }
+  return NEXT_STATUS[order.status] || null
 }
 
 const TABS = [
@@ -74,9 +93,9 @@ function StatusBadge({ status, showCancelledAlert }) {
   )
 }
 
-function OrderDetailModal({ order, onClose, onStatusUpdate, onAcknowledge, updating }) {
+function OrderDetailModal({ order, onClose, onStatusUpdate, onOpenOtpModal, onAcknowledge, updating }) {
   if (!order) return null
-  const next = NEXT_STATUS[order.status]
+  const next = getNextAction(order)
 
   return (
     <motion.div
@@ -95,7 +114,14 @@ function OrderDetailModal({ order, onClose, onStatusUpdate, onAcknowledge, updat
       >
         <div className="sticky top-0 bg-white border-b border-gray-100 px-5 py-4 flex items-start justify-between gap-3 z-10">
           <div>
-            <p className="font-poppins font-bold text-lg text-dark">#{order.orderNumber}</p>
+            <div className="flex items-center gap-2">
+              <p className="font-poppins font-bold text-lg text-dark">#{order.orderNumber}</p>
+              {order.deliveryMethod === "self" && (
+                <span className="inline-flex items-center text-[11px] font-poppins font-bold bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded">
+                  Self Pickup
+                </span>
+              )}
+            </div>
             <p className="font-nunito text-xs text-gray mt-0.5">{formatDate(order.createdAt)}</p>
           </div>
           <div className="flex items-center gap-2">
@@ -120,11 +146,17 @@ function OrderDetailModal({ order, onClose, onStatusUpdate, onAcknowledge, updat
                 +91 {order.customerPhone}
               </p>
             )}
-            <p className="flex items-start gap-2 text-sm text-gray font-nunito">
-              <MapPin size={14} className="text-primary flex-shrink-0 mt-0.5" />
-              {order.deliveryAddress}
-            </p>
-            {order.pickupCode && (
+            {order.deliveryMethod === "self" ? (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 font-nunito font-semibold">
+                🛍️ Customer will pick up order directly from kitchen.
+              </div>
+            ) : (
+              <p className="flex items-start gap-2 text-sm text-gray font-nunito">
+                <MapPin size={14} className="text-primary flex-shrink-0 mt-0.5" />
+                {order.deliveryAddress}
+              </p>
+            )}
+            {order.deliveryMethod !== "self" && order.pickupCode && (
               <div className="bg-primary/5 border border-primary/10 rounded-xl p-3 mt-3 flex items-center justify-between">
                 <span className="text-xs font-poppins font-bold text-gray uppercase tracking-wider">Rider Pickup Code:</span>
                 <span className="text-sm font-poppins font-bold text-primary tracking-widest bg-white border border-primary/20 rounded px-2.5 py-0.5">{order.pickupCode}</span>
@@ -209,7 +241,13 @@ function OrderDetailModal({ order, onClose, onStatusUpdate, onAcknowledge, updat
               <div className="flex gap-2 pt-1">
                 <Button
                   className="w-full"
-                  onClick={() => onStatusUpdate(order.id, next.status)}
+                  onClick={() => {
+                    if (next.requiresOtp) {
+                      onOpenOtpModal(order)
+                    } else {
+                      onStatusUpdate(order.id, next.status)
+                    }
+                  }}
                   disabled={updating}
                 >
                   {updating ? "Updating..." : next.label}
@@ -233,6 +271,8 @@ export default function KitchenOrdersPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(15)
+  const [otpModalOrder, setOtpModalOrder] = useState(null)
+  const [pickupOtpInput, setPickupOtpInput] = useState("")
 
   const loadOrders = useCallback(async () => {
     try {
@@ -318,28 +358,38 @@ export default function KitchenOrdersPage() {
     loadOrders()
   }
 
-  const handleStatusUpdate = async (orderId, newStatus) => {
+  const handleStatusUpdate = async (orderId, newStatus, otp = null) => {
     setUpdating(true)
     try {
+      const payload = { status: newStatus }
+      if (otp) payload.otp = otp
       const data = await api(
         `/api/orders/kitchen/${orderId}/status`,
-        { method: "PATCH", body: JSON.stringify({ status: newStatus }) },
+        { method: "PATCH", body: JSON.stringify(payload) },
         "kitchen"
       )
       setAllOrders((prev) => prev.map((o) => (o.id === orderId ? data.order : o)))
       setDetailOrder((prev) => (prev?.id === orderId ? data.order : prev))
       if (newStatus === "out_for_delivery") {
-        alert(`Order Dispatched Successfully!\n\nAwaiting rider assignment.\n\nRider Pickup Code: ${data.order.pickupCode}`)
+        if (data.order?.deliveryMethod === "self") {
+          alert("Order is Ready for Pickup!\n\nCustomer has been notified to pick up the order. When they arrive, collect their 4-digit OTP to complete order.")
+        } else {
+          alert(`Order Dispatched Successfully!\n\nAwaiting rider assignment.\n\nRider Pickup Code: ${data.order.pickupCode}`)
+        }
+      } else if (newStatus === "delivered" && data.order?.deliveryMethod === "self") {
+        alert("Self Pickup Order Completed Successfully! 🎉")
       } else {
         alert(`Order status updated to "${STATUS_LABELS[newStatus] || newStatus}" successfully!`)
       }
+      return true
     } catch (err) {
-      if (err.status === 400 || err.message?.toLowerCase().includes("cancel")) {
+      if (err.message?.toLowerCase().includes("cancel")) {
         alert("This order has already been cancelled by the customer.")
         loadOrders()
       } else {
         alert(err.message || "Failed to update status")
       }
+      return false
     } finally {
       setUpdating(false)
     }
@@ -448,7 +498,7 @@ export default function KitchenOrdersPage() {
                 </thead>
                 <tbody>
                   {paginatedOrders.items.map((order) => {
-                    const next = NEXT_STATUS[order.status]
+                    const next = getNextAction(order)
                     const itemCount = order.items?.reduce((s, i) => s + i.qty, 0) || order.items?.length || 0
 
                     return (
@@ -460,7 +510,14 @@ export default function KitchenOrdersPage() {
                         )}
                       >
                         <td className="px-4 py-3">
-                          <p className="font-poppins font-semibold text-sm text-dark">#{order.orderNumber}</p>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <p className="font-poppins font-semibold text-sm text-dark">#{order.orderNumber}</p>
+                            {order.deliveryMethod === "self" && (
+                              <span className="inline-flex items-center text-[10px] font-poppins font-bold bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.2 rounded">
+                                Self Pickup
+                              </span>
+                            )}
+                          </div>
                           <p className="font-nunito text-[11px] text-gray">{formatShortDate(order.createdAt)}</p>
                         </td>
                         <td className="px-4 py-3">
@@ -512,7 +569,14 @@ export default function KitchenOrdersPage() {
                                 <button
                                   type="button"
                                   disabled={updating}
-                                  onClick={() => handleStatusUpdate(order.id, next.status)}
+                                  onClick={() => {
+                                    if (next.requiresOtp) {
+                                      setPickupOtpInput("")
+                                      setOtpModalOrder(order)
+                                    } else {
+                                      handleStatusUpdate(order.id, next.status)
+                                    }
+                                  }}
                                   className="inline-flex items-center gap-0.5 px-2.5 py-1.5 rounded-lg text-xs font-poppins font-semibold text-white bg-primary hover:bg-primary-dark cursor-pointer transition-colors disabled:opacity-50"
                                 >
                                   {next.label}
@@ -545,9 +609,97 @@ export default function KitchenOrdersPage() {
             order={detailOrder}
             onClose={() => setDetailOrder(null)}
             onStatusUpdate={handleStatusUpdate}
+            onOpenOtpModal={(ord) => {
+              setPickupOtpInput("")
+              setOtpModalOrder(ord)
+            }}
             onAcknowledge={handleAcknowledgeCancellation}
             updating={updating}
           />
+        )}
+      </AnimatePresence>
+
+      {/* Self Pickup OTP Verification Modal */}
+      <AnimatePresence>
+        {otpModalOrder && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
+            onClick={() => { if (!updating) setOtpModalOrder(null) }}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl border border-gray-100"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-primary">
+                    <Package size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-poppins font-bold text-base text-dark">Complete Pickup</h3>
+                    <p className="font-nunito text-xs text-gray">#{otpModalOrder.orderNumber} • {otpModalOrder.customerName}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setOtpModalOrder(null)}
+                  disabled={updating}
+                  className="p-1.5 rounded-lg hover:bg-gray-100 text-gray transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 my-3 text-center">
+                <p className="font-nunito text-xs text-gray-600 mb-2 font-medium">
+                  Ask the customer for their 4-digit Pickup Verification OTP:
+                </p>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={4}
+                  value={pickupOtpInput}
+                  onChange={(e) => setPickupOtpInput(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                  placeholder="0 0 0 0"
+                  autoFocus
+                  className="w-full text-center text-2xl font-poppins font-bold tracking-[0.4em] py-2 border-2 border-primary/40 focus:border-primary focus:outline-none rounded-xl bg-white text-primary"
+                />
+              </div>
+
+              <div className="flex gap-2.5 mt-4">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => { setOtpModalOrder(null); setPickupOtpInput("") }}
+                  disabled={updating}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  className="flex-1 bg-primary hover:bg-primary-dark"
+                  disabled={updating || pickupOtpInput.length !== 4}
+                  onClick={async () => {
+                    const success = await handleStatusUpdate(otpModalOrder.id, "delivered", pickupOtpInput.trim())
+                    if (success) {
+                      setOtpModalOrder(null)
+                      setPickupOtpInput("")
+                      if (detailOrder?.id === otpModalOrder.id) {
+                        setDetailOrder(null)
+                      }
+                    }
+                  }}
+                >
+                  {updating ? "Verifying..." : "Verify & Complete"}
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </KitchenLayout>
