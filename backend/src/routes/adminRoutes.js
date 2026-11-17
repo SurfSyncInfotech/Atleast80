@@ -1535,11 +1535,11 @@ router.get("/riders", async (req, res) => {
     const [riders] = await pool.query(
       `SELECT r.*, u.name, u.email, u.phone,
               (SELECT COUNT(id) FROM orders WHERE rider_id = r.id AND (status = 'delivered' OR cancel_fee_paid = 1) AND DATE(created_at) = CURDATE()) AS today_orders_count,
-              (SELECT COALESCE(SUM(COALESCE(NULLIF(delivery_fee, 0), 30.00) + 20.00), 0) FROM orders WHERE rider_id = r.id AND (status = 'delivered' OR cancel_fee_paid = 1) AND DATE(created_at) = CURDATE()) AS today_earnings,
+              (SELECT COALESCE(SUM(CASE WHEN status = 'delivered' THEN (COALESCE(NULLIF(delivery_fee, 0), 30.00) + 20.00) ELSE COALESCE(NULLIF(delivery_fee, 0), 30.00) END), 0) FROM orders WHERE rider_id = r.id AND (status = 'delivered' OR cancel_fee_paid = 1) AND DATE(created_at) = CURDATE()) AS today_earnings,
               (SELECT COALESCE(SUM(grand_total), 0) FROM orders WHERE rider_id = r.id AND status = 'delivered' AND payment_method = 'cod' AND DATE(created_at) = CURDATE()) AS today_cash_collected,
               (SELECT COALESCE(SUM(amount), 0) FROM rider_cash_handovers WHERE rider_id = r.id AND date = CURDATE()) AS today_cash_handover,
               (SELECT COUNT(id) FROM orders WHERE rider_id = r.id AND (status = 'delivered' OR cancel_fee_paid = 1)) AS total_orders_count,
-              (SELECT COALESCE(SUM(COALESCE(NULLIF(delivery_fee, 0), 30.00) + 20.00), 0) FROM orders WHERE rider_id = r.id AND (status = 'delivered' OR cancel_fee_paid = 1)) AS total_earnings
+              (SELECT COALESCE(SUM(CASE WHEN status = 'delivered' THEN (COALESCE(NULLIF(delivery_fee, 0), 30.00) + 20.00) ELSE COALESCE(NULLIF(delivery_fee, 0), 30.00) END), 0) FROM orders WHERE rider_id = r.id AND (status = 'delivered' OR cancel_fee_paid = 1)) AS total_earnings
        ${query}
        ORDER BY r.created_at DESC
        LIMIT ? OFFSET ?`,
@@ -2261,7 +2261,7 @@ router.get("/payments/settlements", async (_req, res) => {
              COALESCE(SUM(o.item_total), 0) AS total_gross_sales,
              COALESCE(SUM(o.item_total), 0) AS total_food_sales,
              COALESCE(SUM(o.gst_amount), 0) AS total_gst_amount,
-             COALESCE(SUM(CASE WHEN o.id IS NOT NULL AND o.delivery_method != 'self' THEN 20.00 ELSE 0 END), 0) AS total_rider_fees,
+             COALESCE(SUM(CASE WHEN o.id IS NOT NULL AND o.delivery_method != 'self' AND o.status = 'delivered' THEN 20.00 ELSE 0 END), 0) AS total_rider_fees,
              COALESCE((
                SELECT SUM(s.gross_amount - COALESCE(s.deductions_gst, 0))
                FROM settlements s
@@ -2292,7 +2292,7 @@ router.get("/payments/settlements", async (_req, res) => {
     const [riderRows] = await pool.query(`
       SELECT r.id AS rider_id, u.name AS rider_name, u.phone AS rider_phone, r.cash_collected,
              r.payout_mode, r.bank_account_name, r.bank_name, r.bank_account_number, r.bank_ifsc, r.upi_id,
-             COALESCE(SUM(CASE WHEN o.id IS NOT NULL THEN (COALESCE(NULLIF(o.delivery_fee, 0), 30.00) + 20.00) ELSE 0 END), 0) AS total_delivery_fee,
+             COALESCE(SUM(CASE WHEN o.id IS NOT NULL THEN (CASE WHEN o.status = 'delivered' THEN (COALESCE(NULLIF(o.delivery_fee, 0), 30.00) + 20.00) ELSE COALESCE(NULLIF(o.delivery_fee, 0), 30.00) END) ELSE 0 END), 0) AS total_delivery_fee,
              COALESCE((
                SELECT SUM(s.gross_amount)
                FROM settlements s

@@ -295,11 +295,19 @@ router.get("/dashboard", authRequired, requireRole("rider"), async (req, res) =>
     )
 
     // Calculate total and today's earnings from completed deliveries and cancelled orders where doorstep cancel fee was paid
+    // For delivered: delivery_fee + 20 (from kitchen). For cancelled doorstep: ONLY delivery_fee (paid by customer, kitchen deduction = 0).
     const [earningRows] = await pool.query(
       `SELECT 
-         COALESCE(SUM(delivery_fee + 20), 0) AS total_earnings, 
+         COALESCE(SUM(CASE 
+           WHEN status = 'delivered' THEN delivery_fee + 20 
+           ELSE delivery_fee 
+         END), 0) AS total_earnings, 
          COUNT(id) AS total_deliveries,
-         COALESCE(SUM(CASE WHEN DATE(created_at) = CURDATE() THEN delivery_fee + 20 ELSE 0 END), 0) AS today_earnings,
+         COALESCE(SUM(CASE 
+           WHEN DATE(created_at) = CURDATE() THEN 
+             (CASE WHEN status = 'delivered' THEN delivery_fee + 20 ELSE delivery_fee END)
+           ELSE 0 
+         END), 0) AS today_earnings,
          COUNT(CASE WHEN DATE(created_at) = CURDATE() THEN id ELSE NULL END) AS today_deliveries
        FROM orders WHERE rider_id = ? AND (status = 'delivered' OR cancel_fee_paid = 1)`,
       [req.user.riderId]
