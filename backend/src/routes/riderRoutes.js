@@ -306,6 +306,21 @@ router.get("/dashboard", authRequired, requireRole("rider"), async (req, res) =>
     )
     const stats = earningRows[0]
 
+    // Fetch settled payouts total for rider to calculate Next Payout (unsettled / current cycle earnings)
+    const [settledRows] = await pool.query(
+      `SELECT COALESCE(SUM(s.gross_amount), 0) AS settled_gross,
+              COUNT(s.id) AS total_payouts_count,
+              MAX(s.id) AS latest_payout_id
+       FROM settlements s
+       WHERE s.entity_type = 'rider' AND (s.entity_id = ? OR s.entity_id = ?) AND s.status = 'paid'`,
+      [req.user.riderId, req.user.id]
+    )
+    const settledGross = Number(Number(settledRows[0]?.settled_gross || 0).toFixed(2))
+    const totalEarnings = Number(Number(stats.total_earnings || 0).toFixed(2))
+    const nextPayout = Number(Math.max(0, totalEarnings - settledGross).toFixed(2))
+    const latestPayoutId = settledRows[0]?.latest_payout_id || 0
+    const totalPayoutsCount = Number(settledRows[0]?.total_payouts_count || 0)
+
     // Auto-expire any rescue_active orders whose 3-minute (180s) window has passed in database
     await pool.query(
       `UPDATE orders 
@@ -375,7 +390,12 @@ router.get("/dashboard", authRequired, requireRole("rider"), async (req, res) =>
       status: rider.status,
       isOnline: Boolean(rider.is_online),
       cashCollected: Number(rider.cash_collected),
-      totalEarnings: Number(stats.total_earnings),
+      totalEarnings: totalEarnings,
+      nextPayout: nextPayout,
+      unsettledEarnings: nextPayout,
+      totalSettledEarnings: settledGross,
+      latestPayoutId: latestPayoutId,
+      totalPayoutsCount: totalPayoutsCount,
       totalDeliveries: Number(stats.total_deliveries),
       todayEarnings: Number(stats.today_earnings),
       todayDeliveries: Number(stats.today_deliveries),

@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from "react"
+import AsyncStorage from "@react-native-async-storage/async-storage"
 import {
   View,
   Text,
@@ -192,10 +193,47 @@ export default function RiderDashboardScreen() {
   const [riderPayoutsModalVisible, setRiderPayoutsModalVisible] = useState(false)
   const [riderPayoutsList, setRiderPayoutsList] = useState([])
   const [riderPayoutsLoading, setRiderPayoutsLoading] = useState(false)
+  const [hasNewPayout, setHasNewPayout] = useState(false)
+
+  // Track if admin has settled a new payout that rider hasn't viewed yet
+  useEffect(() => {
+    async function checkUnseenPayout() {
+      if (!metrics?.latestPayoutId) {
+        setHasNewPayout(false)
+        return
+      }
+      try {
+        const lastSeen = await AsyncStorage.getItem("rider_last_seen_payout_id")
+        if (!lastSeen) {
+          if (Number(metrics.latestPayoutId) > 0 && Number(metrics.totalPayoutsCount || 0) > 0) {
+            setHasNewPayout(true)
+          }
+        } else if (Number(metrics.latestPayoutId) > Number(lastSeen)) {
+          setHasNewPayout(true)
+        } else {
+          setHasNewPayout(false)
+        }
+      } catch (e) {
+        console.log("Error checking seen payout:", e)
+      }
+    }
+    checkUnseenPayout()
+  }, [metrics?.latestPayoutId, metrics?.totalPayoutsCount])
 
   const handleOpenRiderPayoutsModal = async () => {
     setRiderPayoutsModalVisible(true)
     setRiderPayoutsLoading(true)
+
+    // Mark latest payout as seen so red badge clears immediately on rider click
+    if (metrics?.latestPayoutId) {
+      try {
+        await AsyncStorage.setItem("rider_last_seen_payout_id", String(metrics.latestPayoutId))
+        setHasNewPayout(false)
+      } catch (e) {
+        console.log("Failed to save seen payout:", e)
+      }
+    }
+
     try {
       const data = await api("/api/rider/me/payouts")
       setRiderPayoutsList(data.payouts || [])
@@ -729,13 +767,29 @@ export default function RiderDashboardScreen() {
           <View style={{ height: 1, backgroundColor: "#F1F1EF", marginHorizontal: 20 }} />
 
           <View style={{ flexDirection: "row" }}>
-            <View style={{ flex: 1, paddingVertical: 16, alignItems: "center", gap: 4 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <CheckCircle size={15} color="#0B6B3A" />
-                <Text style={{ fontSize: 16, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F" }}>{metrics?.totalDeliveries || 0}</Text>
+            <View style={{ flex: 1, paddingVertical: 14, alignItems: "center", gap: 3 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                <CheckCircle size={14} color="#0B6B3A" />
+                <Text style={{ fontSize: 15, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F" }}>{metrics?.totalDeliveries || 0}</Text>
               </View>
-              <Text style={{ fontSize: 10.5, color: "#8A8A8A", fontFamily: "Nunito" }}>Deliveries</Text>
+              <Text style={{ fontSize: 10, color: "#8A8A8A", fontFamily: "Nunito" }}>Deliveries</Text>
             </View>
+
+            <View style={{ width: 1, backgroundColor: "#F1F1EF" }} />
+
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={handleOpenRiderPayoutsModal}
+              style={{ flex: 1, paddingVertical: 14, alignItems: "center", gap: 3 }}
+            >
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                <Wallet size={14} color="#059669" />
+                <Text style={{ fontSize: 15, fontWeight: "bold", fontFamily: "Poppins", color: "#059669" }}>
+                  ₹{metrics?.nextPayout ?? metrics?.unsettledEarnings ?? 0}
+                </Text>
+              </View>
+              <Text style={{ fontSize: 10, color: "#059669", fontFamily: "Nunito", fontWeight: "600" }}>Next Payout</Text>
+            </TouchableOpacity>
 
             <View style={{ width: 1, backgroundColor: "#F1F1EF" }} />
 
@@ -767,13 +821,13 @@ export default function RiderDashboardScreen() {
                   Alert.alert("Cash in Hand", "You have no outstanding COD cash to deposit right now.")
                 }
               }}
-              style={{ flex: 1, paddingVertical: 16, alignItems: "center", gap: 4 }}
+              style={{ flex: 1, paddingVertical: 14, alignItems: "center", gap: 3 }}
             >
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <CreditCard size={15} color={cashCollected > 0 ? "#F59E0B" : "#0B6B3A"} />
-                <Text style={{ fontSize: 16, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F" }}>₹{cashCollected}</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                <CreditCard size={14} color={cashCollected > 0 ? "#F59E0B" : "#0B6B3A"} />
+                <Text style={{ fontSize: 15, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F" }}>₹{cashCollected}</Text>
               </View>
-              <Text style={{ fontSize: 10.5, color: cashCollected > 0 ? "#B7791F" : "#8A8A8A", fontFamily: "Nunito", fontWeight: cashCollected > 0 ? "bold" : "400" }}>
+              <Text style={{ fontSize: 10, color: cashCollected > 0 ? "#B7791F" : "#8A8A8A", fontFamily: "Nunito", fontWeight: cashCollected > 0 ? "bold" : "400" }}>
                 {cashCollected > 0 ? "Cash · Deposit due" : "Cash in Hand"}
               </Text>
             </TouchableOpacity>
@@ -793,31 +847,64 @@ export default function RiderDashboardScreen() {
             alignItems: "center",
             justifyContent: "space-between",
             borderWidth: 1.5,
-            borderColor: "#E5E7EB",
-            shadowColor: "#000",
+            borderColor: hasNewPayout ? "#FCA5A5" : "#E5E7EB",
+            shadowColor: hasNewPayout ? "#EF4444" : "#000",
             shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.04,
+            shadowOpacity: hasNewPayout ? 0.08 : 0.04,
             shadowRadius: 10,
             elevation: 2,
           }}
         >
           <View style={{ flexDirection: "row", alignItems: "center", gap: 12, flex: 1 }}>
-            <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: "#ECFDF5", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#A7F3D0" }}>
-              <Wallet size={22} color="#059669" />
+            <View style={{
+              width: 44,
+              height: 44,
+              borderRadius: 14,
+              backgroundColor: hasNewPayout ? "#FEE2E2" : "#ECFDF5",
+              alignItems: "center",
+              justifyContent: "center",
+              borderWidth: 1,
+              borderColor: hasNewPayout ? "#FCA5A5" : "#A7F3D0"
+            }}>
+              <Wallet size={22} color={hasNewPayout ? "#DC2626" : "#059669"} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 14, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F" }}>
-                Payouts & Bank Settlements
-              </Text>
-              <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#6B7280", marginTop: 2 }}>
-                View all bank transfers & UTR receipts
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Text style={{ fontSize: 14, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F" }}>
+                  Payouts & Bank Settlements
+                </Text>
+                {hasNewPayout && (
+                  <View style={{ backgroundColor: "#EF4444", borderRadius: 10, paddingHorizontal: 6, paddingVertical: 1.5 }}>
+                    <Text style={{ fontSize: 9.5, fontWeight: "bold", fontFamily: "Poppins", color: "#FFFFFF" }}>
+                      1 NEW
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <Text style={{ fontSize: 11, fontFamily: "Nunito", color: hasNewPayout ? "#DC2626" : "#6B7280", marginTop: 2, fontWeight: hasNewPayout ? "600" : "400" }}>
+                {hasNewPayout ? "New payout transfer received! View UTR" : "View all bank transfers & UTR receipts"}
               </Text>
             </View>
           </View>
-          <View style={{ backgroundColor: "#059669", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 }}>
-            <Text style={{ fontSize: 11, fontWeight: "bold", fontFamily: "Poppins", color: "#FFFFFF" }}>
-              View History
-            </Text>
+          <View style={{ position: "relative" }}>
+            <View style={{ backgroundColor: hasNewPayout ? "#DC2626" : "#059669", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 }}>
+              <Text style={{ fontSize: 11, fontWeight: "bold", fontFamily: "Poppins", color: "#FFFFFF" }}>
+                View History
+              </Text>
+            </View>
+            {hasNewPayout && (
+              <View style={{
+                position: "absolute",
+                top: -3,
+                right: -3,
+                width: 9,
+                height: 9,
+                borderRadius: 4.5,
+                backgroundColor: "#EF4444",
+                borderWidth: 1.5,
+                borderColor: "#FFFFFF"
+              }} />
+            )}
           </View>
         </TouchableOpacity>
 
