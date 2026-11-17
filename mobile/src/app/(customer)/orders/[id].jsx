@@ -878,7 +878,7 @@ export default function OrderTrackingScreen() {
           />
         )}
 
-        {["pending", "confirmed", "preparing", "out_for_delivery"].includes(order.status) && (
+        {["pending", "confirmed", "preparing"].includes(order.status) && (
           <TouchableOpacity
             onPress={openCancelModal}
             disabled={cancelling}

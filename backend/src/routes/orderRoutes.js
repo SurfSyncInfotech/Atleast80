@@ -1012,34 +1012,10 @@ router.patch("/:id/cancel", authRequired, requireRole("customer"), async (req, r
     const orderNum = rows[0].order_number || orderId
     const isPrepaid = ["online", "upi", "razorpay"].includes(String(rows[0].payment_method || "").toLowerCase())
 
-    if (currentStatus === "out_for_delivery") {
-      if (isPrepaid) {
-        return res.status(400).json({
-          message: "Orders cannot be cancelled once dispatched. Your fresh meal has already been prepared and is on the way!"
-        })
-      }
-      // Customer cancels after dispatch (COD): Advance delivery fee (₹30) was already paid online at checkout.
-      // Transition directly to status = 'cancelled', delivery_status = 'rescue_active' and start 3-min rescue.
-      await pool.query(
-        `UPDATE orders 
-         SET status = 'cancelled', 
-             delivery_status = 'rescue_active', 
-             cancel_fee_paid = 1,
-             updated_at = NOW() 
-         WHERE id = ?`,
-        [orderId]
-      )
-      startRescueTimeout(orderId)
-
-      // Broadcast food rescue notification to nearby users in same city
-      try {
-        const [orderRow] = await pool.query("SELECT kitchen_id, order_number, grand_total, user_id FROM orders WHERE id = ?", [orderId])
-        if (orderRow.length > 0) {
-          broadcastRescueNotification(orderRow[0].kitchen_id, orderRow[0].order_number, orderRow[0].grand_total, orderId, orderRow[0].user_id)
-        }
-      } catch (broadcastErr) {
-        console.error("Non-blocking error broadcasting rescue notification on customer cancel:", broadcastErr.message)
-      }
+    if (currentStatus === "out_for_delivery" || currentStatus === "delivered") {
+      return res.status(400).json({
+        message: "Orders cannot be cancelled once dispatched. Your fresh meal has already been prepared and is on the way!"
+      })
     } else {
       const allowedToCancel = ["pending", "confirmed", "preparing"]
       if (!allowedToCancel.includes(currentStatus)) {
