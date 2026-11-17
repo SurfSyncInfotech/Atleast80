@@ -772,26 +772,50 @@ async function applyKitchenFilterEnhancements(pool, row) {
   const { compliant } = await getHygieneCompliance(pool, row.id)
   row.hygiene_score = compliant ? 100 : 0
 
-  // 2. Ration Filter: Check if kitchen offers grocery/ration
+  // 2. Ration Filter: Check if kitchen ACTUALLY offers grocery/ration items
   const isExplicitOff = row.is_grocery_active === 0 || row.is_grocery_active === false || row.is_grocery_active === "0"
-  let offersGrocery = !isExplicitOff
+  let offersGrocery = false
 
-  if (isExplicitOff) {
+  if (!isExplicitOff) {
     try {
       const [items] = await pool.query(
-        "SELECT id FROM menu_items WHERE kitchen_id = ? AND category = 'grocery' AND is_available = 1 LIMIT 1",
+        `SELECT id FROM menu_items 
+         WHERE kitchen_id = ? 
+           AND is_available = 1 
+           AND (
+             category = 'grocery' 
+             OR category = 'ration' 
+             OR LOWER(name) LIKE '%ration%' 
+             OR LOWER(name) LIKE '%grocery%' 
+             OR LOWER(name) LIKE '%essential%'
+           ) 
+         LIMIT 1`,
         [row.id]
       )
-      offersGrocery = items.length > 0
-    } catch {
+      const hasActualGroceryItems = Boolean(items && items.length > 0)
+      const originalSpecialityClean = (row.speciality || "")
+        .replace(/\s*•\s*Ration\s*&\s*Grocery/gi, "")
+        .trim()
+      const originalHasRationTag = /ration|grocery|essential/i.test(`${originalSpecialityClean} ${row.best_item || ""}`)
+
+      offersGrocery = hasActualGroceryItems || originalHasRationTag
+
+      if (offersGrocery) {
+        if (!originalHasRationTag) {
+          row.speciality = originalSpecialityClean ? `${originalSpecialityClean} • Ration & Grocery` : "Ration & Grocery"
+        }
+      } else {
+        // Ensure non-grocery kitchens do not carry lingering ration tag
+        row.speciality = originalSpecialityClean
+      }
+    } catch (err) {
+      console.error("Kitchen grocery check error:", err)
       offersGrocery = false
     }
-  }
-
-  if (offersGrocery) {
-    const hasRationTag = /ration|grocery|essential/i.test(`${row.speciality || ""} ${row.best_item || ""}`)
-    if (!hasRationTag) {
-      row.speciality = row.speciality ? `${row.speciality} • Ration & Grocery` : "Ration & Grocery"
+  } else {
+    // Explicitly disabled grocery: strip any appended tag
+    if (row.speciality) {
+      row.speciality = row.speciality.replace(/\s*•\s*Ration\s*&\s*Grocery/gi, "").trim()
     }
   }
 
