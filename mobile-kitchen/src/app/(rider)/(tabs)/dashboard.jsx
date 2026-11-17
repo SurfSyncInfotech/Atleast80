@@ -855,56 +855,65 @@ export default function RiderDashboardScreen() {
             elevation: 2,
           }}
         >
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 12, flex: 1 }}>
-            <View style={{
-              width: 44,
-              height: 44,
-              borderRadius: 14,
-              backgroundColor: hasNewPayout ? "#FEE2E2" : "#ECFDF5",
-              alignItems: "center",
-              justifyContent: "center",
-              borderWidth: 1,
-              borderColor: hasNewPayout ? "#FCA5A5" : "#A7F3D0"
-            }}>
-              <Wallet size={22} color={hasNewPayout ? "#DC2626" : "#059669"} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <Text style={{ fontSize: 14, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F" }}>
-                  Payouts & Bank Settlements
-                </Text>
-                {hasNewPayout && (
-                  <View style={{ backgroundColor: "#EF4444", borderRadius: 10, paddingHorizontal: 6, paddingVertical: 1.5 }}>
-                    <Text style={{ fontSize: 9.5, fontWeight: "bold", fontFamily: "Poppins", color: "#FFFFFF" }}>
-                      1 NEW
-                    </Text>
-                  </View>
-                )}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12, flex: 1, marginRight: 8 }}>
+            <View style={{ position: "relative" }}>
+              <View style={{
+                width: 44,
+                height: 44,
+                borderRadius: 14,
+                backgroundColor: hasNewPayout ? "#FEE2E2" : "#ECFDF5",
+                alignItems: "center",
+                justifyContent: "center",
+                borderWidth: 1,
+                borderColor: hasNewPayout ? "#FCA5A5" : "#A7F3D0"
+              }}>
+                <Wallet size={22} color={hasNewPayout ? "#DC2626" : "#059669"} />
               </View>
-              <Text style={{ fontSize: 11, fontFamily: "Nunito", color: hasNewPayout ? "#DC2626" : "#6B7280", marginTop: 2, fontWeight: hasNewPayout ? "600" : "400" }}>
-                {hasNewPayout ? "New payout transfer received! View UTR" : "View all bank transfers & UTR receipts"}
+              {hasNewPayout && (
+                <View style={{
+                  position: "absolute",
+                  top: -4,
+                  right: -4,
+                  backgroundColor: "#EF4444",
+                  borderRadius: 10,
+                  minWidth: 18,
+                  height: 18,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  paddingHorizontal: 4,
+                  borderWidth: 2,
+                  borderColor: "#FFFFFF"
+                }}>
+                  <Text style={{ fontSize: 9.5, fontWeight: "bold", fontFamily: "Poppins", color: "#FFFFFF", lineHeight: 12 }}>
+                    1
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 13.5, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F" }} numberOfLines={1}>
+                Payouts & Bank Settlements
               </Text>
+              {hasNewPayout ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 3 }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#DC2626" }} />
+                  <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#DC2626", fontWeight: "700" }}>
+                    New transfer received · View UTR
+                  </Text>
+                </View>
+              ) : (
+                <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#6B7280", marginTop: 2 }} numberOfLines={1}>
+                  View all bank transfers & UTR receipts
+                </Text>
+              )}
             </View>
           </View>
-          <View style={{ position: "relative" }}>
-            <View style={{ backgroundColor: hasNewPayout ? "#DC2626" : "#059669", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 }}>
-              <Text style={{ fontSize: 11, fontWeight: "bold", fontFamily: "Poppins", color: "#FFFFFF" }}>
-                View History
-              </Text>
-            </View>
-            {hasNewPayout && (
-              <View style={{
-                position: "absolute",
-                top: -3,
-                right: -3,
-                width: 9,
-                height: 9,
-                borderRadius: 4.5,
-                backgroundColor: "#EF4444",
-                borderWidth: 1.5,
-                borderColor: "#FFFFFF"
-              }} />
-            )}
+
+          <View style={{ backgroundColor: "#059669", paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12 }}>
+            <Text style={{ fontSize: 11, fontWeight: "bold", fontFamily: "Poppins", color: "#FFFFFF" }}>
+              View History
+            </Text>
           </View>
         </TouchableOpacity>
 
