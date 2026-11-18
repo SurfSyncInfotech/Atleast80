@@ -2487,15 +2487,15 @@ export default function RiderDashboardScreen() {
       </LinearGradient>
 
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={{ flex: 1 }}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
       >
         <ScrollView
           ref={scrollViewRef}
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: Math.max(120, insets.bottom + 80) }}
-          showsVerticalScrollIndicator={false}
+          nestedScrollEnabled={true}
+          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: Math.max(260, insets.bottom + 200) }}
+          showsVerticalScrollIndicator={true}
         >
         {/* Stats card */}
         <View style={{ backgroundColor: "#FFFFFF", borderRadius: 24, marginTop: 18, marginBottom: 16, shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.06, shadowRadius: 16, elevation: 3, overflow: "hidden" }}>
@@ -2726,6 +2726,96 @@ export default function RiderDashboardScreen() {
 
             {/* Progress stepper */}
             <DeliveryStepper currentStatus={metrics.activeOrder.delivery_status} />
+
+            {/* Food Rescue Broadcast Banner - Prominently at Top when Rescue Active */}
+            {metrics.activeOrder.delivery_status === "rescue_active" && (
+              <RescueCountdownCard
+                activeOrder={metrics.activeOrder}
+                onTimeout={async () => {
+                  setMetrics((m) => m?.activeOrder ? {
+                    ...m,
+                    activeOrder: { ...m.activeOrder, delivery_status: "rescue_timeout" }
+                  } : m)
+                  try {
+                    const fresh = await getRiderDashboard()
+                    setMetrics(fresh)
+                  } catch (e) {
+                    console.warn("Failed to refresh dashboard on rescue timeout:", e)
+                  }
+                }}
+              />
+            )}
+
+            {/* Return Food to Kitchen Banner & Controls - Prominently at Top when Cancelled */}
+            {(metrics.activeOrder.delivery_status === "rescue_timeout" || metrics.activeOrder.delivery_status === "cancelled_unreachable") && (
+              <View style={{ backgroundColor: "#FEF2F2", borderRadius: 16, padding: 16, gap: 12, borderWidth: 1.5, borderColor: "#FCA5A5" }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <AlertCircle size={20} color="#B91C1C" />
+                  <Text style={{ fontFamily: "Poppins", fontWeight: "bold", color: "#B91C1C", fontSize: 13.5, flex: 1 }}>
+                    Order Cancelled — Return Food to Kitchen 🏠
+                  </Text>
+                </View>
+
+                <Text style={{ fontFamily: "Nunito", fontSize: 12, color: "#991B1B", lineHeight: 18 }}>
+                  {metrics.activeOrder.delivery_status === "cancelled_unreachable"
+                    ? "Order was cancelled because customer was unreachable / not responding at doorstep."
+                    : "No nearby customer claimed the food within 3 minutes."}
+                  {" Please return the food items to the kitchen partner or call the kitchen owner for instructions."}
+                </Text>
+
+                <View style={{ backgroundColor: "#FFFFFF", borderRadius: 14, padding: 12, gap: 8, borderWidth: 1, borderColor: "#FECACA" }}>
+                  <Text style={{ fontSize: 10.5, fontWeight: "bold", color: "#7F1D1D", fontFamily: "Poppins", uppercase: true }}>
+                    KITCHEN CONTACT DETAILS:
+                  </Text>
+                  <Text style={{ fontSize: 13.5, fontWeight: "bold", color: "#1F2937", fontFamily: "Poppins" }}>
+                    {metrics.activeOrder.kitchen_name}
+                  </Text>
+                  <Text style={{ fontSize: 11.5, color: "#4B5563", fontFamily: "Nunito" }}>
+                    {metrics.activeOrder.kitchen_address}
+                  </Text>
+                  {metrics.activeOrder.kitchen_phone ? (
+                    <TouchableOpacity
+                      onPress={() => handleCall(metrics.activeOrder.kitchen_phone)}
+                      style={{
+                        backgroundColor: "#059669",
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 8,
+                        paddingVertical: 10,
+                        borderRadius: 10,
+                        marginTop: 4
+                      }}
+                    >
+                      <Phone size={14} color="#FFFFFF" />
+                      <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontSize: 12, fontFamily: "Poppins" }}>
+                        Call Kitchen Owner ({metrics.activeOrder.kitchen_phone})
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+
+                <TouchableOpacity
+                  onPress={() => handleDismissReturnedOrder(metrics.activeOrder.id)}
+                  disabled={actionLoading}
+                  style={{
+                    backgroundColor: "#DC2626",
+                    paddingVertical: 12,
+                    borderRadius: 12,
+                    alignItems: "center",
+                    opacity: actionLoading ? 0.7 : 1
+                  }}
+                >
+                  {actionLoading ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins" }}>
+                      Return Completed / Clear Active Delivery
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
 
             {/* Addresses info */}
             {(() => {
@@ -3047,93 +3137,7 @@ export default function RiderDashboardScreen() {
                 </View>
               )}
 
-              {metrics.activeOrder.delivery_status === "rescue_active" && (
-                <RescueCountdownCard
-                  activeOrder={metrics.activeOrder}
-                  onTimeout={async () => {
-                    setMetrics((m) => m?.activeOrder ? {
-                      ...m,
-                      activeOrder: { ...m.activeOrder, delivery_status: "rescue_timeout" }
-                    } : m)
-                    try {
-                      const fresh = await getRiderDashboard()
-                      setMetrics(fresh)
-                    } catch (e) {
-                      console.warn("Failed to refresh dashboard on rescue timeout:", e)
-                    }
-                  }}
-                />
-              )}
 
-              {(metrics.activeOrder.delivery_status === "rescue_timeout" || metrics.activeOrder.delivery_status === "cancelled_unreachable") && (
-                <View style={{ backgroundColor: "#FEF2F2", borderRadius: 16, padding: 16, gap: 12, borderWidth: 1.5, borderColor: "#FCA5A5" }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                    <AlertCircle size={20} color="#B91C1C" />
-                    <Text style={{ fontFamily: "Poppins", fontWeight: "bold", color: "#B91C1C", fontSize: 13.5, flex: 1 }}>
-                      Order Cancelled — Return Food to Kitchen 🏠
-                    </Text>
-                  </View>
-
-                  <Text style={{ fontFamily: "Nunito", fontSize: 12, color: "#991B1B", lineHeight: 18 }}>
-                    {metrics.activeOrder.delivery_status === "cancelled_unreachable"
-                      ? "Order was cancelled because customer was unreachable / not responding at doorstep."
-                      : "No nearby customer claimed the food within 3 minutes."}
-                    {" Please return the food items to the kitchen partner or call the kitchen owner for instructions."}
-                  </Text>
-
-                  <View style={{ backgroundColor: "#FFFFFF", borderRadius: 14, padding: 12, gap: 8, borderWidth: 1, borderColor: "#FECACA" }}>
-                    <Text style={{ fontSize: 10.5, fontWeight: "bold", color: "#7F1D1D", fontFamily: "Poppins", uppercase: true }}>
-                      KITCHEN CONTACT DETAILS:
-                    </Text>
-                    <Text style={{ fontSize: 13.5, fontWeight: "bold", color: "#1F2937", fontFamily: "Poppins" }}>
-                      {metrics.activeOrder.kitchen_name}
-                    </Text>
-                    <Text style={{ fontSize: 11.5, color: "#4B5563", fontFamily: "Nunito" }}>
-                      {metrics.activeOrder.kitchen_address}
-                    </Text>
-                    {metrics.activeOrder.kitchen_phone ? (
-                      <TouchableOpacity
-                        onPress={() => handleCall(metrics.activeOrder.kitchen_phone)}
-                        style={{
-                          backgroundColor: "#059669",
-                          flexDirection: "row",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          gap: 8,
-                          paddingVertical: 10,
-                          borderRadius: 10,
-                          marginTop: 4
-                        }}
-                      >
-                        <Phone size={14} color="#FFFFFF" />
-                        <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontSize: 12, fontFamily: "Poppins" }}>
-                          Call Kitchen Owner ({metrics.activeOrder.kitchen_phone})
-                        </Text>
-                      </TouchableOpacity>
-                    ) : null}
-                  </View>
-
-                  <TouchableOpacity
-                    onPress={() => handleDismissReturnedOrder(metrics.activeOrder.id)}
-                    disabled={actionLoading}
-                    style={{
-                      backgroundColor: "#DC2626",
-                      paddingVertical: 12,
-                      borderRadius: 12,
-                      alignItems: "center",
-                      opacity: actionLoading ? 0.7 : 1
-                    }}
-                  >
-                    {actionLoading ? (
-                      <ActivityIndicator size="small" color="#FFFFFF" />
-                    ) : (
-                      <Text style={{ color: "#FFFFFF", fontWeight: "bold", fontFamily: "Poppins" }}>
-                        Return Completed / Clear Active Delivery
-                      </Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              )}
 
               {metrics.activeOrder.delivery_status === "handover_pending" && (
                 <View style={{ backgroundColor: "#FFF9E6", borderRadius: 12, padding: 16, gap: 6 }}>
