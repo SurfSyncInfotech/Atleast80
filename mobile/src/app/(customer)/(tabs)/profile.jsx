@@ -682,6 +682,35 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           )}
 
+          {/* Customer Support Card */}
+          <TouchableOpacity
+            onPress={handleSupportEmailPress}
+            activeOpacity={0.8}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: 16,
+              borderRadius: 20,
+              backgroundColor: "#EAF7EE",
+              borderWidth: 1,
+              borderColor: "#D6EAE7",
+              marginTop: 4,
+              marginBottom: 8,
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12, flex: 1 }}>
+              <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center" }}>
+                <Headphones size={18} color="#0B6B3A" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 13, fontFamily: "Poppins", fontWeight: "bold", color: "#1F1F1F" }}>Customer Support</Text>
+                <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#0B6B3A", fontWeight: "600", marginTop: 2 }}>{supportEmail}</Text>
+              </View>
+            </View>
+            <ChevronRight size={16} color="#7A7A7A" />
+          </TouchableOpacity>
+
           <TouchableOpacity
             onPress={() => {
               const body = `Please delete my Atleast80 account.\n\nName: ${user?.name || ""}\nPhone: ${user?.phone || ""}\nRegistered email: ${user?.email || ""}`

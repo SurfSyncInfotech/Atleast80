@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { Mail, Phone, MapPin, Pencil, X, Trash2, ChevronRight, Navigation, Map } from "lucide-react"
+import { Mail, Phone, MapPin, Pencil, X, Trash2, ChevronRight, Navigation, Map, Headphones } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import Button from "../../components/ui/Button"
 import LocationMapModal from "../../components/common/LocationMapModal"
@@ -35,6 +35,7 @@ export default function ProfileAccountPage() {
   })
   const [saveError, setSaveError] = useState("")
   const [saving, setSaving] = useState(false)
+  const [supportEmail, setSupportEmail] = useState("support@atleast80.com")
   const [deletionEmail, setDeletionEmail] = useState("liveatleast80@gmail.com")
   const [detectingLocation, setDetectingLocation] = useState(false)
   const [isMapModalOpen, setIsMapModalOpen] = useState(false)
@@ -58,6 +59,7 @@ export default function ProfileAccountPage() {
   useEffect(() => {
     getPublicContactSettings()
       .then((data) => {
+        if (data?.supportEmail) setSupportEmail(data.supportEmail)
         if (data?.accountDeletionEmail) setDeletionEmail(data.accountDeletionEmail)
       })
       .catch(() => {})
@@ -212,6 +214,22 @@ export default function ProfileAccountPage() {
           Add delivery address for checkout →
         </button>
       )}
+
+      <a
+        href={`mailto:${supportEmail || "support@atleast80.com"}?subject=${encodeURIComponent("Atleast80 Customer Support Request")}&body=${encodeURIComponent(`Hello Atleast80 Support Team,\n\nName: ${user?.name || ""}\nPhone: ${user?.phone || ""}\nEmail: ${user?.email || ""}\n\nIssue Description:\n`)}`}
+        className="mt-6 w-full flex items-center justify-between gap-3 p-4 rounded-2xl border border-emerald-100 bg-emerald-50/70 hover:bg-emerald-50 transition-colors text-left cursor-pointer"
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center flex-shrink-0 shadow-xs">
+            <Headphones size={18} className="text-emerald-700" />
+          </div>
+          <div className="min-w-0">
+            <p className="font-poppins font-semibold text-sm text-dark">Customer Support</p>
+            <p className="font-nunito text-xs text-emerald-700 font-semibold mt-0.5">{supportEmail || "support@atleast80.com"}</p>
+          </div>
+        </div>
+        <ChevronRight size={16} className="text-gray flex-shrink-0" />
+      </a>
 
       <button
         type="button"
