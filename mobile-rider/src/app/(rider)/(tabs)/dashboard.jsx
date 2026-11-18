@@ -406,59 +406,59 @@ const GOOGLE_MAPS_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "AIzaSyDd
 // 1. Transparent Split Distance Breakdown Component
 function TripDistanceBreakdown({ pickupKm, dropKm, totalKm, isPickupDone = false }) {
   return (
-    <View style={{ backgroundColor: "#F7FDF9", borderWidth: 1.5, borderColor: "#D1FAE5", borderRadius: 14, padding: 12, marginVertical: 8 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+    <View style={{ backgroundColor: "#F7FDF9", borderWidth: 1.5, borderColor: "#D1FAE5", borderRadius: 14, padding: 10, marginVertical: 8 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 6 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 5, flexShrink: 1 }}>
           <Navigation size={12} color="#0B6B3A" />
-          <Text style={{ fontSize: 11, fontFamily: "Poppins", fontWeight: "bold", color: "#065F46", letterSpacing: 0.3 }}>
-            TRIP DISTANCE BREAKDOWN
+          <Text style={{ fontSize: 10.5, fontFamily: "Poppins", fontWeight: "bold", color: "#065F46", letterSpacing: 0.2 }} numberOfLines={1}>
+            TRIP BREAKDOWN
           </Text>
         </View>
-        <View style={{ backgroundColor: "#EAF7EE", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
-          <Text style={{ fontSize: 9.5, color: "#0B6B3A", fontFamily: "Nunito", fontWeight: "bold" }}>
-            Google Road Kilometers
+        <View style={{ backgroundColor: "#EAF7EE", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, flexShrink: 0 }}>
+          <Text style={{ fontSize: 9, color: "#0B6B3A", fontFamily: "Nunito", fontWeight: "bold" }}>
+            Road Distance
           </Text>
         </View>
       </View>
 
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
         {/* Leg 1: Rider -> Kitchen */}
-        <View style={{ flex: 1, alignItems: "center", backgroundColor: isPickupDone ? "#ECFDF5" : "#FFFFFF", paddingVertical: 8, paddingHorizontal: 4, borderRadius: 10, borderWidth: 1, borderColor: isPickupDone ? "#A7F3D0" : "#E5E7EB" }}>
+        <View style={{ flex: 1, alignItems: "center", backgroundColor: isPickupDone ? "#ECFDF5" : "#FFFFFF", paddingVertical: 6, paddingHorizontal: 2, borderRadius: 10, borderWidth: 1, borderColor: isPickupDone ? "#A7F3D0" : "#E5E7EB" }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
-            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: isPickupDone ? "#059669" : "#0B6B3A" }} />
-            <Text style={{ fontSize: 10, color: "#4B5563", fontFamily: "Nunito", fontWeight: "600" }}>To Kitchen</Text>
+            <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: isPickupDone ? "#059669" : "#0B6B3A" }} />
+            <Text style={{ fontSize: 9.5, color: "#4B5563", fontFamily: "Nunito", fontWeight: "700" }} numberOfLines={1}>Pickup</Text>
           </View>
-          <Text style={{ fontSize: 13, fontWeight: "bold", color: "#0B6B3A", fontFamily: "Poppins", marginTop: 2 }}>
+          <Text style={{ fontSize: 12, fontWeight: "bold", color: "#0B6B3A", fontFamily: "Poppins", marginTop: 1 }} numberOfLines={1}>
             {pickupKm ? `${pickupKm} km` : "--"}
           </Text>
-          <Text style={{ fontSize: 9, color: "#059669", fontFamily: "Nunito", fontWeight: "bold" }}>₹20 Pickup</Text>
+          <Text style={{ fontSize: 8.5, color: "#059669", fontFamily: "Nunito", fontWeight: "bold" }}>₹20</Text>
         </View>
 
-        <Text style={{ fontSize: 14, color: "#9CA3AF", fontWeight: "bold" }}>+</Text>
+        <Text style={{ fontSize: 13, color: "#9CA3AF", fontWeight: "bold" }}>+</Text>
 
         {/* Leg 2: Kitchen -> Customer */}
-        <View style={{ flex: 1, alignItems: "center", backgroundColor: "#FFFFFF", paddingVertical: 8, paddingHorizontal: 4, borderRadius: 10, borderWidth: 1, borderColor: "#E5E7EB" }}>
+        <View style={{ flex: 1, alignItems: "center", backgroundColor: "#FFFFFF", paddingVertical: 6, paddingHorizontal: 2, borderRadius: 10, borderWidth: 1, borderColor: "#E5E7EB" }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
-            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#FF6B00" }} />
-            <Text style={{ fontSize: 10, color: "#4B5563", fontFamily: "Nunito", fontWeight: "600" }}>To Customer</Text>
+            <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: "#FF6B00" }} />
+            <Text style={{ fontSize: 9.5, color: "#4B5563", fontFamily: "Nunito", fontWeight: "700" }} numberOfLines={1}>Drop</Text>
           </View>
-          <Text style={{ fontSize: 13, fontWeight: "bold", color: "#FF6B00", fontFamily: "Poppins", marginTop: 2 }}>
+          <Text style={{ fontSize: 12, fontWeight: "bold", color: "#FF6B00", fontFamily: "Poppins", marginTop: 1 }} numberOfLines={1}>
             {dropKm ? `${dropKm} km` : "--"}
           </Text>
-          <Text style={{ fontSize: 9, color: "#FF6B00", fontFamily: "Nunito", fontWeight: "bold" }}>
-            ₹{calculateDeliveryCharge(dropKm).toFixed(0)} Drop
+          <Text style={{ fontSize: 8.5, color: "#FF6B00", fontFamily: "Nunito", fontWeight: "bold" }}>
+            ₹{calculateDeliveryCharge(dropKm).toFixed(0)}
           </Text>
         </View>
 
-        <Text style={{ fontSize: 14, color: "#9CA3AF", fontWeight: "bold" }}>=</Text>
+        <Text style={{ fontSize: 13, color: "#9CA3AF", fontWeight: "bold" }}>=</Text>
 
         {/* Total Trip */}
-        <View style={{ flex: 1.25, alignItems: "center", backgroundColor: "#0B6B3A", paddingVertical: 8, paddingHorizontal: 4, borderRadius: 10, shadowColor: "#0B6B3A", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 4, elevation: 2 }}>
-          <Text style={{ fontSize: 10, color: "#EAF7EE", fontFamily: "Nunito", fontWeight: "700" }}>Total Trip</Text>
-          <Text style={{ fontSize: 13.5, fontWeight: "bold", color: "#FFFFFF", fontFamily: "Poppins", marginTop: 1 }}>
+        <View style={{ flex: 1.15, alignItems: "center", backgroundColor: "#0B6B3A", paddingVertical: 6, paddingHorizontal: 2, borderRadius: 10, elevation: 2 }}>
+          <Text style={{ fontSize: 9.5, color: "#EAF7EE", fontFamily: "Nunito", fontWeight: "700" }} numberOfLines={1}>Total Trip</Text>
+          <Text style={{ fontSize: 12, fontWeight: "bold", color: "#FFFFFF", fontFamily: "Poppins", marginTop: 1 }} numberOfLines={1}>
             {totalKm ? `${totalKm} km` : "--"}
           </Text>
-          <Text style={{ fontSize: 9, color: "#A7F3D0", fontFamily: "Nunito", fontWeight: "bold" }}>
+          <Text style={{ fontSize: 8.5, color: "#A7F3D0", fontFamily: "Nunito", fontWeight: "bold" }}>
             ₹{calculateRiderPayout(dropKm).toFixed(0)} Payout
           </Text>
         </View>
@@ -3223,26 +3223,28 @@ export default function RiderDashboardScreen() {
 
                       return (
                         <>
-                          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                              <View style={{ flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: "#FFF1E6", paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6 }}>
-                                <Zap size={9} color="#FF6B00" />
-                                <Text style={{ fontSize: 9, color: "#FF6B00", fontFamily: "Poppins", fontWeight: "bold" }}>NEW</Text>
+                          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                            <View style={{ flex: 1, gap: 4 }}>
+                              <View style={{ flexDirection: "row", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+                                <View style={{ flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: "#FFF1E6", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 }}>
+                                  <Zap size={9} color="#FF6B00" />
+                                  <Text style={{ fontSize: 9, color: "#FF6B00", fontFamily: "Poppins", fontWeight: "bold" }}>NEW</Text>
+                                </View>
+                                <Text style={{ fontSize: 11, color: "#6B7280", fontFamily: "Poppins", fontWeight: "600" }} numberOfLines={1}>#{order.order_number}</Text>
                               </View>
-                              <Text style={{ fontSize: 12, color: "#7A7A7A", fontFamily: "Poppins" }}>#{order.order_number}</Text>
                               {totalDistance && (
-                                <View style={{ backgroundColor: "#F3F4F6", paddingHorizontal: 8, paddingVertical: 2.5, borderRadius: 6, flexDirection: "row", alignItems: "center", gap: 3 }}>
+                                <View style={{ backgroundColor: "#F3F4F6", paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, flexDirection: "row", alignItems: "center", gap: 3, alignSelf: "flex-start" }}>
                                   <Navigation size={9} color="#0B6B3A" />
-                                  <Text style={{ fontSize: 10, color: "#0B6B3A", fontFamily: "Poppins", fontWeight: "bold" }}>~{totalDistance} km</Text>
+                                  <Text style={{ fontSize: 10, color: "#0B6B3A", fontFamily: "Poppins", fontWeight: "bold" }}>~{totalDistance} km total</Text>
                                 </View>
                               )}
                             </View>
-                            <View style={{ alignItems: "flex-end" }}>
+                            <View style={{ alignItems: "flex-end", flexShrink: 0 }}>
                               <Text style={{ fontSize: 9.5, color: "#9E9E9E", fontFamily: "Nunito" }}>Estimated payout</Text>
-                              <Text style={{ fontSize: 16, fontWeight: "bold", color: "#0B6B3A", fontFamily: "Poppins" }}>
+                              <Text style={{ fontSize: 16, fontWeight: "bold", color: "#0B6B3A", fontFamily: "Poppins", lineHeight: 20 }}>
                                 ₹{calculateRiderPayout(dropDistance, order.delivery_fee).toFixed(2)}
                               </Text>
-                              <Text style={{ fontSize: 8.5, color: "#7A7A7A", fontFamily: "Nunito", marginTop: 1 }}>
+                              <Text style={{ fontSize: 8.5, color: "#6B7280", fontFamily: "Nunito", marginTop: 1 }}>
                                 ₹20 pickup + ₹{(order.delivery_fee && Number(order.delivery_fee) > 0 ? Number(order.delivery_fee) : calculateDeliveryCharge(dropDistance)).toFixed(0)} drop
                               </Text>
                             </View>
@@ -3258,44 +3260,44 @@ export default function RiderDashboardScreen() {
                           />
 
                           {/* Full Addresses with Distance */}
-                          <View style={{ gap: 10 }}>
-                            <View style={{ flexDirection: "row", gap: 10, alignItems: "flex-start" }}>
+                          <View style={{ gap: 8 }}>
+                            <View style={{ flexDirection: "row", gap: 8, alignItems: "flex-start" }}>
                               <View style={{ marginTop: 2 }}>
-                                <MapPin size={15} color="#0B6B3A" />
+                                <MapPin size={14} color="#0B6B3A" />
                               </View>
                               <View style={{ flex: 1 }}>
-                                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 4 }}>
-                                  <Text style={{ fontSize: 12.5, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>
+                                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                                  <Text style={{ fontSize: 12, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins", flex: 1 }} numberOfLines={1}>
                                     Pickup: {order.kitchen_name}
                                   </Text>
                                   {pickupDistance && (
-                                    <Text style={{ fontSize: 10.5, color: "#0B6B3A", fontFamily: "Nunito", fontWeight: "bold" }}>
+                                    <Text style={{ fontSize: 10, color: "#0B6B3A", fontFamily: "Nunito", fontWeight: "bold", flexShrink: 0 }}>
                                       {pickupDistance} km away
                                     </Text>
                                   )}
                                 </View>
-                                <Text style={{ fontSize: 11.5, color: "#555555", fontFamily: "Nunito", marginTop: 2, lineHeight: 16 }}>
+                                <Text style={{ fontSize: 11, color: "#6B7280", fontFamily: "Nunito", marginTop: 1, lineHeight: 15 }} numberOfLines={2}>
                                   {kitchenFullAddr || order.kitchen_address || "Address not provided"}
                                 </Text>
                               </View>
                             </View>
 
-                            <View style={{ flexDirection: "row", gap: 10, alignItems: "flex-start" }}>
+                            <View style={{ flexDirection: "row", gap: 8, alignItems: "flex-start" }}>
                               <View style={{ marginTop: 2 }}>
-                                <MapPin size={15} color="#FF6B00" />
+                                <MapPin size={14} color="#FF6B00" />
                               </View>
                               <View style={{ flex: 1 }}>
-                                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 4 }}>
-                                  <Text style={{ fontSize: 12.5, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins" }}>
+                                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                                  <Text style={{ fontSize: 12, fontWeight: "bold", color: "#1F1F1F", fontFamily: "Poppins", flex: 1 }} numberOfLines={1}>
                                     Drop: {order.customer_name || "Customer"}
                                   </Text>
                                   {dropDistance && (
-                                    <Text style={{ fontSize: 10.5, color: "#FF6B00", fontFamily: "Nunito", fontWeight: "bold" }}>
+                                    <Text style={{ fontSize: 10, color: "#FF6B00", fontFamily: "Nunito", fontWeight: "bold", flexShrink: 0 }}>
                                       {dropDistance} km delivery
                                     </Text>
                                   )}
                                 </View>
-                                <Text style={{ fontSize: 11.5, color: "#555555", fontFamily: "Nunito", marginTop: 2, lineHeight: 16 }}>
+                                <Text style={{ fontSize: 11, color: "#6B7280", fontFamily: "Nunito", marginTop: 1, lineHeight: 15 }} numberOfLines={2}>
                                   {customerFullAddr || order.delivery_address || "Address not provided"}
                                 </Text>
                               </View>
