@@ -3,7 +3,7 @@ import { View, Text, ScrollView, TouchableOpacity, Modal, ActivityIndicator, Key
 import * as Location from "expo-location"
 import { useRouter, useFocusEffect } from "expo-router"
 import { SafeAreaView } from "react-native-safe-area-context"
-import { Mail, Phone, MapPin, Pencil, LogOut, ChevronRight, X, ShoppingBag, Clock, User, Award, Check, Sparkles, Truck, ChefHat, Navigation, ShieldCheck, FileText, Trash2 } from "lucide-react-native"
+import { Mail, Phone, MapPin, Pencil, LogOut, ChevronRight, X, ShoppingBag, Clock, User, Award, Check, Sparkles, Truck, ChefHat, Navigation, ShieldCheck, FileText, Trash2, Headphones } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import Button from "../../../components/ui/Button"
 import Input from "../../../components/ui/Input"
@@ -169,15 +169,39 @@ export default function ProfileScreen() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
   const [detectingLocation, setDetectingLocation] = useState(false)
+  const [supportEmail, setSupportEmail] = useState("support@atleast80.com")
   const [deletionEmail, setDeletionEmail] = useState("liveatleast80@gmail.com")
 
   useEffect(() => {
     getContactSettings()
       .then((data) => {
+        if (data?.supportEmail) setSupportEmail(data.supportEmail)
         if (data?.accountDeletionEmail) setDeletionEmail(data.accountDeletionEmail)
       })
       .catch(() => {})
   }, [])
+
+  const handleSupportEmailPress = () => {
+    const emailToUse = supportEmail || "support@atleast80.com"
+    const subject = encodeURIComponent("Atleast80 Customer Support Request")
+    const body = encodeURIComponent(
+      `Hello Atleast80 Support Team,\n\nName: ${user?.name || ""}\nPhone: ${user?.phone || ""}\nEmail: ${user?.email || ""}\n\nIssue Description / Query:\n`
+    )
+    const mailtoUrl = `mailto:${emailToUse}?subject=${subject}&body=${body}`
+
+    Linking.openURL(mailtoUrl).catch(() => {
+      const params = new URLSearchParams({
+        view: "cm",
+        fs: "1",
+        to: emailToUse,
+        su: "Atleast80 Customer Support Request",
+        body: `Hello Atleast80 Support Team,\n\nName: ${user?.name || ""}\nPhone: ${user?.phone || ""}\n\nIssue Description:\n`,
+      })
+      Linking.openURL(`https://mail.google.com/mail/?${params.toString()}`).catch(() => {
+        Alert.alert("Customer Support", `Please email us at: ${emailToUse}`)
+      })
+    })
+  }
 
   const handleConfirmMapLocation = (data) => {
     if (data) {

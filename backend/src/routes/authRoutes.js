@@ -36,14 +36,14 @@ router.get("/contact", async (_req, res) => {
     if (rows.length === 0) {
       return res.json({
         supportPhone: "+91 40 3559 4439",
-        supportEmail: "contact@elifelo.com",
+        supportEmail: "support@atleast80.com",
         supportAddress: "Maharashtra, India",
       })
     }
     const row = rows[0]
     res.json({
       supportPhone: row.support_phone || "+91 40 3559 4439",
-      supportEmail: row.support_email || "contact@elifelo.com",
+      supportEmail: row.support_email || "support@atleast80.com",
       supportAddress: row.support_address || "Maharashtra, India",
     })
   } catch (error) {
