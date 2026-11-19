@@ -201,6 +201,10 @@ export function AuthProvider({ children }) {
         cash_collected: data.cashCollected,
         total_earnings: data.totalEarnings,
         total_deliveries: data.totalDeliveries,
+        vehicle_type: data.vehicleType ?? existing?.vehicle_type ?? null,
+        vehicle_number: data.vehicleNumber ?? existing?.vehicle_number ?? null,
+        driving_license_number: data.drivingLicenseNumber ?? existing?.driving_license_number ?? null,
+        created_at: data.createdAt ?? existing?.created_at ?? null,
       }
       setRider(riderUpdate)
       const updated = await patchStoredAuth({ rider: riderUpdate })
@@ -209,6 +213,23 @@ export function AuthProvider({ children }) {
       }
       return riderUpdate
     } catch (_) {}
+  }, [])
+
+  const updateSessionProfile = useCallback(async ({ user: nextUser, rider: nextRider }) => {
+    const stored = readStoredAuthSync()
+    if (!stored?.token) return null
+
+    const merged = {
+      token: stored.token,
+      user: nextUser ? { ...stored.user, ...nextUser } : stored.user,
+      kitchen: stored.kitchen ?? null,
+      rider: nextRider ? { ...(stored.rider || {}), ...nextRider } : stored.rider,
+    }
+
+    await writeStoredAuth(merged)
+    if (merged.user) setUser(merged.user)
+    setRider(merged.rider ?? null)
+    return merged
   }, [])
 
   useEffect(() => {
@@ -282,6 +303,7 @@ export function AuthProvider({ children }) {
         resetPassword,
         logout,
         refreshRider,
+        updateSessionProfile,
       }}
     >
       {children}

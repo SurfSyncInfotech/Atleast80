@@ -3,22 +3,27 @@ import { LayoutDashboard, User } from "lucide-react-native"
 import { Platform } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 
+const PRIMARY = "#0B6B3A"
+const INACTIVE = "#7A7A7A"
+
 export default function RiderTabsLayout() {
   const insets = useSafeAreaInsets()
+  const bottomInset = Platform.OS === "web" ? 8 : Math.max(insets.bottom, 8)
+  const tabBarHeight = 56 + bottomInset
 
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: "#FF6B00",
-        tabBarInactiveTintColor: "#7A7A7A",
+        tabBarActiveTintColor: PRIMARY,
+        tabBarInactiveTintColor: INACTIVE,
         tabBarStyle: {
           backgroundColor: "#FFFFFF",
           borderTopWidth: 1,
           borderTopColor: "#E8E8E8",
-          height: Platform.OS === "ios" ? 88 : Platform.OS === "web" ? 64 : Math.max(68, 60 + insets.bottom),
-          paddingBottom: Platform.OS === "ios" ? 28 : Platform.OS === "web" ? 8 : Math.max(8, insets.bottom + 4),
-          paddingTop: 8,
+          height: tabBarHeight,
+          paddingTop: 6,
+          paddingBottom: bottomInset,
           ...Platform.select({
             web: {
               boxShadow: "0px -2px 6px rgba(0, 0, 0, 0.03)",
@@ -32,11 +37,18 @@ export default function RiderTabsLayout() {
             },
           }),
         },
+        tabBarItemStyle: {
+          paddingVertical: 2,
+        },
         tabBarLabelStyle: {
           fontFamily: "Nunito",
           fontSize: 10,
           fontWeight: "600",
-          marginBottom: Platform.OS === "web" ? 2 : 0,
+          marginTop: 2,
+          marginBottom: 0,
+        },
+        tabBarIconStyle: {
+          marginTop: 0,
         },
       }}
     >

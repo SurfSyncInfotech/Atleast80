@@ -1092,6 +1092,9 @@ router.post("/rider/register", (req, res) => {
     }
 
     if (vehicleType !== "bicycle") {
+      if (!vehicleNumber || !String(vehicleNumber).trim()) {
+        return res.status(400).json({ message: "Vehicle number is required for motorized vehicles" })
+      }
       if (!drivingLicenseNumber || !dlFile) {
         return res.status(400).json({ message: "Driving license details and document are required for motorized vehicles" })
       }
@@ -1165,6 +1168,12 @@ router.post("/rider/register", (req, res) => {
 
       const userId = userResult.insertId
 
+      const finalVehicleType = String(vehicleType || "").trim().toLowerCase()
+      const finalVehicleNumber =
+        finalVehicleType === "bicycle" ? null : (vehicleNumber?.toString().trim().toUpperCase() || null)
+      const finalDrivingLicenseNumber =
+        finalVehicleType === "bicycle" ? null : (drivingLicenseNumber?.toString().trim().toUpperCase() || null)
+
       const [riderResult] = await connection.query(
         `INSERT INTO riders (
           user_id, vehicle_type, vehicle_number, driving_license_number,
@@ -1172,7 +1181,7 @@ router.post("/rider/register", (req, res) => {
           payout_mode, bank_account_name, bank_name, bank_account_number, bank_ifsc, upi_id, status
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
         [
-          userId, vehicleType, vehicleNumber || null, drivingLicenseNumber || null,
+          userId, finalVehicleType, finalVehicleNumber, finalDrivingLicenseNumber,
           aadhaarNumber, aadhaarCardUrl, aadhaarCardBackUrl, panNumber.toUpperCase(), panCardUrl, dlUrl,
           mode, finalBankAccountName, finalBankName, finalBankAccountNumber, finalBankIfsc, finalUpiId
         ]
@@ -1251,7 +1260,8 @@ router.post("/rider/login", async (req, res) => {
 
   try {
     const [users] = await pool.query(
-      `SELECT u.*, r.id AS rider_id, r.status AS rider_status, r.is_online AS rider_online
+      `SELECT u.*, r.id AS rider_id, r.status AS rider_status, r.is_online AS rider_online,
+              r.vehicle_type, r.vehicle_number, r.driving_license_number, r.created_at AS rider_created_at
        FROM users u
        JOIN riders r ON u.id = r.user_id
        WHERE (LOWER(u.email) = ? OR u.phone = ?) AND u.role = 'rider'`,
@@ -1298,7 +1308,15 @@ router.post("/rider/login", async (req, res) => {
       message: "Login successful",
       token,
       user: { id: user.id, name: user.name, email: user.email, phone: user.phone, role: "rider" },
-      rider: { id: user.rider_id, status: user.rider_status, is_online: user.rider_online },
+      rider: {
+        id: user.rider_id,
+        status: user.rider_status,
+        is_online: user.rider_online,
+        vehicle_type: user.vehicle_type || null,
+        vehicle_number: user.vehicle_number || null,
+        driving_license_number: user.driving_license_number || null,
+        created_at: user.rider_created_at || null,
+      },
     })
   } catch (error) {
     console.error("Rider login error:", error)
@@ -1319,7 +1337,8 @@ router.post("/rider/login/verify-otp", async (req, res) => {
 
   try {
     const [users] = await pool.query(
-      `SELECT u.*, r.id AS rider_id, r.status AS rider_status, r.is_online AS rider_online
+      `SELECT u.*, r.id AS rider_id, r.status AS rider_status, r.is_online AS rider_online,
+              r.vehicle_type, r.vehicle_number, r.driving_license_number, r.created_at AS rider_created_at
        FROM users u
        JOIN riders r ON u.id = r.user_id
        WHERE (LOWER(u.email) = ? OR u.phone = ?) AND u.role = 'rider'`,
@@ -1351,7 +1370,15 @@ router.post("/rider/login/verify-otp", async (req, res) => {
       message: "Login successful",
       token,
       user: { id: user.id, name: user.name, email: user.email, phone: user.phone, role: "rider" },
-      rider: { id: user.rider_id, status: user.rider_status, is_online: user.rider_online },
+      rider: {
+        id: user.rider_id,
+        status: user.rider_status,
+        is_online: user.rider_online,
+        vehicle_type: user.vehicle_type || null,
+        vehicle_number: user.vehicle_number || null,
+        driving_license_number: user.driving_license_number || null,
+        created_at: user.rider_created_at || null,
+      },
     })
   } catch (error) {
     console.error("Rider login verify OTP error:", error)

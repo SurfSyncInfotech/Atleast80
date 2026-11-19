@@ -12,6 +12,7 @@ export default function Input({
   keyboardType = "default",
   secureTextEntry = false,
   autoCapitalize = "none",
+  error = false,
   style: customStyle,
   ...props
 }) {
@@ -23,7 +24,8 @@ export default function Input({
       className={cn(
         "flex-row w-full px-4 rounded-xl border border-gray-light bg-cream/50",
         isMultiline ? "h-28 items-start py-2.5" : "h-[52] items-center",
-        isFocused && "border-primary bg-white",
+        isFocused && !error && "border-primary bg-white",
+        error && "border-error bg-red-50",
         className
       )}
     >

@@ -137,9 +137,14 @@ import {
   ChevronRight,
   X,
   KeyRound,
-  Copy
+  Copy,
+  Package,
+  Eye,
 } from "lucide-react-native"
 import { useAuth } from "../../../context/AuthContext"
+import { useToast } from "../../../context/ToastContext"
+import FieldError from "../../../components/ui/FieldError"
+import { getOtpFieldError } from "../../../lib/validation"
 import {
   api,
   getRiderDashboard,
@@ -1170,10 +1175,12 @@ function InAppNavigationScreen({
   onClose,
   handleOrderAction,
   onCompleteDeliveryPress,
+  onPickupPress,
   onCancelDoorstepPress,
   actionLoading,
   otpInput,
   setOtpInput,
+  otpFieldError,
   handleCall,
   updateRiderLocationOnServer
 }) {
@@ -1546,10 +1553,20 @@ function InAppNavigationScreen({
                 placeholder="Enter 4-digit Kitchen Code"
                 keyboardType="numeric"
                 maxLength={4}
-                style={{ borderWidth: 1.5, borderColor: "#E5E7EB", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, fontSize: 13.5, fontFamily: "Nunito" }}
+                style={{
+                  borderWidth: 1.5,
+                  borderColor: otpFieldError ? "#F44336" : "#E5E7EB",
+                  backgroundColor: otpFieldError ? "#FEF2F2" : "#FFFFFF",
+                  borderRadius: 10,
+                  paddingHorizontal: 12,
+                  paddingVertical: 8,
+                  fontSize: 13.5,
+                  fontFamily: "Nunito",
+                }}
               />
+              <FieldError message={otpFieldError} />
               <TouchableOpacity
-                onPress={() => handleOrderAction(order.id, "pickup", { pickupCode: otpInput })}
+                onPress={() => (onPickupPress ? onPickupPress(order.id) : handleOrderAction(order.id, "pickup", { pickupCode: otpInput }))}
                 disabled={actionLoading}
                 style={{ backgroundColor: "#FF6B00", height: 46, borderRadius: 12, alignItems: "center", justifyContent: "center" }}
               >
@@ -1588,8 +1605,18 @@ function InAppNavigationScreen({
                 placeholder="Enter 4-digit Customer Delivery OTP"
                 keyboardType="numeric"
                 maxLength={4}
-                style={{ borderWidth: 1.5, borderColor: "#E5E7EB", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, fontSize: 13.5, fontFamily: "Nunito" }}
+                style={{
+                  borderWidth: 1.5,
+                  borderColor: otpFieldError ? "#F44336" : "#E5E7EB",
+                  backgroundColor: otpFieldError ? "#FEF2F2" : "#FFFFFF",
+                  borderRadius: 10,
+                  paddingHorizontal: 12,
+                  paddingVertical: 8,
+                  fontSize: 13.5,
+                  fontFamily: "Nunito",
+                }}
               />
+              <FieldError message={otpFieldError} />
               <TouchableOpacity
                 onPress={onCompleteDeliveryPress || (() => handleOrderAction(order.id, "deliver", { deliveryOtp: otpInput }))}
                 disabled={actionLoading}
@@ -1644,12 +1671,15 @@ function InAppNavigationScreen({
 
 export default function RiderDashboardScreen() {
   const { user } = useAuth()
+  const toast = useToast()
   const insets = useSafeAreaInsets()
   const [metrics, setMetrics] = useState(null)
   const [loading, setLoading] = useState(true)
   const [broadcasts, setBroadcasts] = useState([])
   const [actionLoading, setActionLoading] = useState(false)
   const [otpInput, setOtpInput] = useState("")
+  const [otpFieldError, setOtpFieldError] = useState("")
+  const [utrFieldError, setUtrFieldError] = useState("")
   const [alertConfig, setAlertConfig] = useState(null)
   const [qrModalConfig, setQrModalConfig] = useState(null)
   const [depositUtrInput, setDepositUtrInput] = useState("")
@@ -1797,6 +1827,12 @@ export default function RiderDashboardScreen() {
   const [riderPayoutsLoading, setRiderPayoutsLoading] = useState(false)
   const [hasNewPayout, setHasNewPayout] = useState(false)
 
+  // Rider Orders Modal States
+  const [riderOrdersModalVisible, setRiderOrdersModalVisible] = useState(false)
+  const [riderOrdersList, setRiderOrdersList] = useState([])
+  const [riderOrdersLoading, setRiderOrdersLoading] = useState(false)
+  const [riderOrdersFilter, setRiderOrdersFilter] = useState("all")
+
   // Track if admin has settled a new payout that rider hasn't viewed yet
   useEffect(() => {
     async function checkUnseenPayout() {
@@ -1845,6 +1881,66 @@ export default function RiderDashboardScreen() {
       setRiderPayoutsLoading(false)
     }
   }
+
+  const handleOpenRiderOrdersModal = async () => {
+    setRiderOrdersModalVisible(true)
+    setRiderOrdersFilter("all")
+    setRiderOrdersLoading(true)
+    try {
+      const data = await api("/api/rider/me/orders")
+      setRiderOrdersList(data.orders || [])
+    } catch (err) {
+      console.log("Failed to load rider orders:", err)
+      toast.error(err.message || "Failed to load orders")
+      setRiderOrdersList([])
+    } finally {
+      setRiderOrdersLoading(false)
+    }
+  }
+
+  const getOrderStatusBucket = (order) => {
+    const status = String(order?.status || "").toLowerCase()
+    const deliveryStatus = String(order?.deliveryStatus || "").toLowerCase()
+
+    if (status === "delivered" || deliveryStatus === "delivered") return "delivered"
+    if (status === "cancelled") return "cancelled"
+    if (
+      ["out_for_delivery", "accepted", "preparing", "ready"].includes(status) ||
+      ["accepted", "arrived_kitchen", "picked_up", "arrived_customer"].includes(deliveryStatus)
+    ) {
+      return "in_progress"
+    }
+    return "other"
+  }
+
+  const getOrderStatusMeta = (order) => {
+    const bucket = getOrderStatusBucket(order)
+    if (bucket === "delivered") {
+      return { label: "Delivered", bg: "#D1FAE5", color: "#065F46" }
+    }
+    if (bucket === "cancelled") {
+      return { label: "Cancelled", bg: "#FEE2E2", color: "#991B1B" }
+    }
+    if (bucket === "in_progress") {
+      return { label: "In Progress", bg: "#FFEDD5", color: "#9A3412" }
+    }
+    const status = String(order?.status || "").toLowerCase()
+    return { label: status || "Order", bg: "#F3F4F6", color: "#374151" }
+  }
+
+  const filteredRiderOrders = useMemo(() => {
+    if (riderOrdersFilter === "all") return riderOrdersList
+    return riderOrdersList.filter((order) => getOrderStatusBucket(order) === riderOrdersFilter)
+  }, [riderOrdersList, riderOrdersFilter])
+
+  const riderOrderFilterCounts = useMemo(() => {
+    const counts = { all: riderOrdersList.length, in_progress: 0, delivered: 0, cancelled: 0 }
+    riderOrdersList.forEach((order) => {
+      const bucket = getOrderStatusBucket(order)
+      if (counts[bucket] !== undefined) counts[bucket] += 1
+    })
+    return counts
+  }, [riderOrdersList])
 
   const handleCancelUnreachable = async () => {
     if (!metrics?.activeOrder?.id) return
@@ -2279,6 +2375,7 @@ export default function RiderDashboardScreen() {
       const res = await performRiderDeliveryAction(orderId, action, extra)
       setMetrics((m) => ({ ...m, activeOrder: res.order }))
       setOtpInput("")
+      setOtpFieldError("")
 
       if (action === "pickup") {
         Alert.alert("Order Picked Up! 📦", "You have successfully picked up the food. Drive safely to the customer's drop location!")
@@ -2308,11 +2405,19 @@ export default function RiderDashboardScreen() {
     }
   }
 
+  const validateOtpInput = (value = otpInput) => {
+    const error = getOtpFieldError(value)
+    setOtpFieldError(error)
+    return !error
+  }
+
+  const handlePickupPress = (orderId) => {
+    if (!validateOtpInput(otpInput)) return
+    handleOrderAction(orderId, "pickup", { pickupCode: otpInput })
+  }
+
   const handleCompleteDeliveryPress = () => {
-    if (!otpInput || otpInput.trim().length !== 4) {
-      Alert.alert("Enter OTP", "Please enter the 4-digit customer delivery OTP first.")
-      return
-    }
+    if (!validateOtpInput(otpInput)) return
 
     const orderObj = metrics.activeOrder
     const remAmt = Number(orderObj?.remaining_amount || 0)
@@ -2371,8 +2476,9 @@ export default function RiderDashboardScreen() {
   }
 
   const submitCancellationOtp = () => {
-    if (!cancelOtpInput || cancelOtpInput.trim().length !== 4) {
-      setCancelOtpError("Please enter the valid 4-digit Cancellation OTP")
+    const error = getOtpFieldError(cancelOtpInput)
+    if (error) {
+      setCancelOtpError(error)
       return
     }
     setCancelOtpError("")
@@ -2494,7 +2600,7 @@ export default function RiderDashboardScreen() {
           ref={scrollViewRef}
           keyboardShouldPersistTaps="handled"
           nestedScrollEnabled={true}
-          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: Math.max(260, insets.bottom + 200) }}
+          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 24 }}
           showsVerticalScrollIndicator={true}
         >
         {/* Stats card */}
@@ -2593,6 +2699,67 @@ export default function RiderDashboardScreen() {
           </View>
         </View>
 
+        {/* My Orders Dedicated Card */}
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={handleOpenRiderOrdersModal}
+          style={{
+            flexDirection: "row",
+            backgroundColor: "#FFFFFF",
+            borderRadius: 20,
+            padding: 16,
+            marginBottom: 12,
+            alignItems: "center",
+            justifyContent: "space-between",
+            borderWidth: 1.5,
+            borderColor: "#E5E7EB",
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.04,
+            shadowRadius: 10,
+            elevation: 2,
+          }}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12, flex: 1, marginRight: 8 }}>
+            <View
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 14,
+                backgroundColor: "#ECFDF5",
+                alignItems: "center",
+                justifyContent: "center",
+                borderWidth: 1,
+                borderColor: "#A7F3D0",
+              }}
+            >
+              <Package size={22} color="#059669" />
+            </View>
+
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 13.5, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F" }} numberOfLines={1}>
+                My Orders
+              </Text>
+              <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#6B7280", marginTop: 2 }} numberOfLines={1}>
+                View assigned & completed deliveries
+              </Text>
+            </View>
+          </View>
+
+          <View
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              backgroundColor: "#0B5F3A",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Eye size={18} color="#FFFFFF" strokeWidth={2.2} />
+          </View>
+        </TouchableOpacity>
+
         {/* Payouts & Settlement History Dedicated Card */}
         <TouchableOpacity
           activeOpacity={0.85}
@@ -2669,10 +2836,17 @@ export default function RiderDashboardScreen() {
             </View>
           </View>
 
-          <View style={{ backgroundColor: "#059669", paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12 }}>
-            <Text style={{ fontSize: 11, fontWeight: "bold", fontFamily: "Poppins", color: "#FFFFFF" }}>
-              View History
-            </Text>
+          <View
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              backgroundColor: "#0B5F3A",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Eye size={18} color="#FFFFFF" strokeWidth={2.2} />
           </View>
         </TouchableOpacity>
 
@@ -3011,16 +3185,28 @@ export default function RiderDashboardScreen() {
                 <View style={{ gap: 10 }}>
                   <TextInput
                     value={otpInput}
-                    onChangeText={setOtpInput}
+                    onChangeText={(val) => {
+                      setOtpInput(val.replace(/[^\d]/g, "").slice(0, 4))
+                      if (otpFieldError) setOtpFieldError(getOtpFieldError(val.replace(/[^\d]/g, "").slice(0, 4)))
+                    }}
                     editable={!actionLoading}
                     placeholder="Enter 4-digit Kitchen Pick Up Code"
                     keyboardType="numeric"
                     maxLength={4}
                     onFocus={handleInputFocus}
-                    style={{ borderWidth: 1.5, borderColor: "#E8E8E8", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: actionLoading ? "#F5F5F5" : "#FFFFFF", fontFamily: "Nunito" }}
+                    style={{
+                      borderWidth: 1.5,
+                      borderColor: otpFieldError ? "#F44336" : "#E8E8E8",
+                      borderRadius: 12,
+                      paddingHorizontal: 14,
+                      paddingVertical: 10,
+                      backgroundColor: actionLoading ? "#F5F5F5" : otpFieldError ? "#FEF2F2" : "#FFFFFF",
+                      fontFamily: "Nunito",
+                    }}
                   />
+                  <FieldError message={otpFieldError} />
                   <TouchableOpacity
-                    onPress={() => handleOrderAction(metrics.activeOrder.id, "pickup", { pickupCode: otpInput })}
+                    onPress={() => handlePickupPress(metrics.activeOrder.id)}
                     disabled={actionLoading}
                     style={{ backgroundColor: "#FF6B00", paddingVertical: 14, borderRadius: 12, alignItems: "center", opacity: actionLoading ? 0.7 : 1 }}
                   >
@@ -3066,14 +3252,26 @@ export default function RiderDashboardScreen() {
                 <View style={{ gap: 10 }}>
                   <TextInput
                     value={otpInput}
-                    onChangeText={setOtpInput}
+                    onChangeText={(val) => {
+                      setOtpInput(val.replace(/[^\d]/g, "").slice(0, 4))
+                      if (otpFieldError) setOtpFieldError(getOtpFieldError(val.replace(/[^\d]/g, "").slice(0, 4)))
+                    }}
                     editable={!actionLoading}
                     placeholder="Enter 4-digit Customer Delivery OTP"
                     keyboardType="numeric"
                     maxLength={4}
                     onFocus={handleInputFocus}
-                    style={{ borderWidth: 1.5, borderColor: "#E8E8E8", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: actionLoading ? "#F5F5F5" : "#FFFFFF", fontFamily: "Nunito" }}
+                    style={{
+                      borderWidth: 1.5,
+                      borderColor: otpFieldError ? "#F44336" : "#E8E8E8",
+                      borderRadius: 12,
+                      paddingHorizontal: 14,
+                      paddingVertical: 10,
+                      backgroundColor: actionLoading ? "#F5F5F5" : otpFieldError ? "#FEF2F2" : "#FFFFFF",
+                      fontFamily: "Nunito",
+                    }}
                   />
+                  <FieldError message={otpFieldError} />
                   <TouchableOpacity
                     onPress={handleCompleteDeliveryPress}
                     disabled={actionLoading}
@@ -3335,10 +3533,16 @@ export default function RiderDashboardScreen() {
           onClose={() => setIsNavigatingInApp(false)}
           handleOrderAction={handleOrderAction}
           onCompleteDeliveryPress={handleCompleteDeliveryPress}
+          onPickupPress={handlePickupPress}
           onCancelDoorstepPress={handleCancelDoorstepPress}
           actionLoading={actionLoading}
           otpInput={otpInput}
-          setOtpInput={setOtpInput}
+          setOtpInput={(val) => {
+            const next = String(val || "").replace(/[^\d]/g, "").slice(0, 4)
+            setOtpInput(next)
+            if (otpFieldError) setOtpFieldError(getOtpFieldError(next))
+          }}
+          otpFieldError={otpFieldError}
           handleCall={handleCall}
           updateRiderLocationOnServer={updateRiderLocation}
         />
@@ -3538,14 +3742,19 @@ export default function RiderDashboardScreen() {
                   </Text>
                   <TextInput
                     value={depositUtrInput}
-                    onChangeText={setDepositUtrInput}
+                    onChangeText={(val) => {
+                      setDepositUtrInput(val)
+                      if (utrFieldError) {
+                        setUtrFieldError(String(val || "").trim() ? "" : "UTR / Reference number is required")
+                      }
+                    }}
                     placeholder="e.g. 981273918237"
                     placeholderTextColor="#9CA3AF"
                     style={{
                       width: "100%",
-                      backgroundColor: "#F9FAFB",
+                      backgroundColor: utrFieldError ? "#FEF2F2" : "#F9FAFB",
                       borderWidth: 1,
-                      borderColor: "#D1D5DB",
+                      borderColor: utrFieldError ? "#F44336" : "#D1D5DB",
                       borderRadius: 12,
                       paddingHorizontal: 12,
                       paddingVertical: 10,
@@ -3554,12 +3763,16 @@ export default function RiderDashboardScreen() {
                       color: "#111827",
                     }}
                   />
+                  <FieldError message={utrFieldError} />
                 </View>
               )}
 
               <View style={{ flexDirection: "row", gap: 10, width: "100%", marginTop: 4 }}>
                 <TouchableOpacity
-                  onPress={() => setQrModalConfig(null)}
+                  onPress={() => {
+                    setUtrFieldError("")
+                    setQrModalConfig(null)
+                  }}
                   style={{
                     flex: 1,
                     backgroundColor: "#F5F5F5",
@@ -3576,8 +3789,13 @@ export default function RiderDashboardScreen() {
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={() => {
+                    if (qrModalConfig?.requireUtr && !String(depositUtrInput || "").trim()) {
+                      setUtrFieldError("UTR / Reference number is required")
+                      return
+                    }
                     const onConfirm = qrModalConfig?.onConfirm
                     const utrVal = depositUtrInput
+                    setUtrFieldError("")
                     setQrModalConfig(null)
                     if (onConfirm) onConfirm(utrVal)
                   }}
@@ -3990,6 +4208,242 @@ export default function RiderDashboardScreen() {
             </View>
           </View>
         </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Rider Orders History Modal */}
+      <Modal
+        visible={riderOrdersModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setRiderOrdersModalVisible(false)}
+      >
+        <Pressable
+          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}
+          onPress={() => setRiderOrdersModalVisible(false)}
+        >
+          <Pressable
+            style={{
+              backgroundColor: "#FFFFFF",
+              borderTopLeftRadius: 28,
+              borderTopRightRadius: 28,
+              height: "78%",
+              width: "100%",
+              overflow: "hidden",
+            }}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={{ alignItems: "center", paddingTop: 10, paddingBottom: 4 }}>
+              <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: "#E5E7EB" }} />
+            </View>
+
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingTop: 8, paddingBottom: 14 }}>
+              <View style={{ flex: 1, paddingRight: 8 }}>
+                <Text style={{ fontSize: 17, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F" }}>
+                  My Orders
+                </Text>
+                <Text style={{ fontSize: 12, fontFamily: "Nunito", color: "#7A7A7A", marginTop: 3 }}>
+                  Your assigned and completed delivery orders
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setRiderOrdersModalVisible(false)}
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: 17,
+                  backgroundColor: "#F3F4F6",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <X size={16} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ borderBottomWidth: 1, borderBottomColor: "#F1F1EF" }}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 14, gap: 8 }}
+              >
+                {[
+                  { id: "all", label: "All" },
+                  { id: "in_progress", label: "In Progress" },
+                  { id: "delivered", label: "Delivered" },
+                  { id: "cancelled", label: "Cancelled" },
+                ].map((filter) => {
+                  const active = riderOrdersFilter === filter.id
+                  const count = riderOrderFilterCounts[filter.id] ?? 0
+                  return (
+                    <TouchableOpacity
+                      key={filter.id}
+                      onPress={() => setRiderOrdersFilter(filter.id)}
+                      style={{
+                        paddingHorizontal: 14,
+                        paddingVertical: 9,
+                        borderRadius: 999,
+                        backgroundColor: active ? "#0B6B3A" : "#F3F4F6",
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 6,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          fontFamily: "Poppins",
+                          fontWeight: "700",
+                          color: active ? "#FFFFFF" : "#4B5563",
+                        }}
+                      >
+                        {filter.label}
+                      </Text>
+                      <Text
+                        style={{
+                          fontSize: 11,
+                          fontFamily: "Poppins",
+                          fontWeight: "700",
+                          color: active ? "rgba(255,255,255,0.85)" : "#9CA3AF",
+                        }}
+                      >
+                        {count}
+                      </Text>
+                    </TouchableOpacity>
+                  )
+                })}
+              </ScrollView>
+            </View>
+
+            <ScrollView
+              style={{ flex: 1 }}
+              contentContainerStyle={{
+                padding: 20,
+                gap: 12,
+                paddingBottom: 40,
+                flexGrow: 1,
+              }}
+              showsVerticalScrollIndicator={false}
+            >
+              {riderOrdersLoading ? (
+                <View style={{ flex: 1, minHeight: 220, alignItems: "center", justifyContent: "center" }}>
+                  <ActivityIndicator size="large" color="#0B6B3A" />
+                </View>
+              ) : riderOrdersList.length === 0 ? (
+                <View style={{ flex: 1, minHeight: 220, alignItems: "center", justifyContent: "center", paddingHorizontal: 16 }}>
+                  <View
+                    style={{
+                      width: 72,
+                      height: 72,
+                      borderRadius: 22,
+                      backgroundColor: "#F3F4F6",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      marginBottom: 14,
+                    }}
+                  >
+                    <Package size={32} color="#C4C4C4" />
+                  </View>
+                  <Text style={{ fontSize: 15, fontFamily: "Poppins", fontWeight: "700", color: "#1F1F1F", textAlign: "center" }}>
+                    No orders found yet.
+                  </Text>
+                  <Text style={{ fontSize: 12, fontFamily: "Nunito", color: "#9CA3AF", textAlign: "center", marginTop: 6, lineHeight: 18 }}>
+                    Orders assigned to you will appear here.
+                  </Text>
+                </View>
+              ) : filteredRiderOrders.length === 0 ? (
+                <View style={{ flex: 1, minHeight: 220, alignItems: "center", justifyContent: "center", paddingHorizontal: 16 }}>
+                  <View
+                    style={{
+                      width: 72,
+                      height: 72,
+                      borderRadius: 22,
+                      backgroundColor: "#F3F4F6",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      marginBottom: 14,
+                    }}
+                  >
+                    <Package size={32} color="#C4C4C4" />
+                  </View>
+                  <Text style={{ fontSize: 15, fontFamily: "Poppins", fontWeight: "700", color: "#1F1F1F", textAlign: "center" }}>
+                    No orders in this filter.
+                  </Text>
+                  <Text style={{ fontSize: 12, fontFamily: "Nunito", color: "#9CA3AF", textAlign: "center", marginTop: 6, lineHeight: 18 }}>
+                    Try another status filter above.
+                  </Text>
+                </View>
+              ) : (
+                filteredRiderOrders.map((order) => {
+                  const statusMeta = getOrderStatusMeta(order)
+                  const dateLabel = order.updatedAt || order.createdAt
+                    ? new Date(order.updatedAt || order.createdAt).toLocaleString("en-IN", {
+                        day: "2-digit",
+                        month: "short",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })
+                    : "—"
+                  return (
+                    <View
+                      key={order.id}
+                      style={{
+                        backgroundColor: "#FFFFFF",
+                        borderRadius: 16,
+                        padding: 14,
+                        borderWidth: 1,
+                        borderColor: "#E5E7EB",
+                        gap: 10,
+                      }}
+                    >
+                      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                        <View style={{ flex: 1, marginRight: 8 }}>
+                          <Text style={{ fontSize: 13, fontWeight: "bold", fontFamily: "Poppins", color: "#1F1F1F" }}>
+                            #{order.orderNumber || order.id}
+                          </Text>
+                          <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#6B7280", marginTop: 2 }}>
+                            {dateLabel}
+                          </Text>
+                        </View>
+                        <View style={{ backgroundColor: statusMeta.bg, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }}>
+                          <Text style={{ fontSize: 10, fontWeight: "bold", fontFamily: "Poppins", color: statusMeta.color }}>
+                            {statusMeta.label}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <View style={{ backgroundColor: "#F9FAFB", borderRadius: 10, padding: 10, gap: 4 }}>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                          <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#4B5563" }}>Kitchen</Text>
+                          <Text style={{ fontSize: 11, fontFamily: "Poppins", fontWeight: "600", color: "#111827", maxWidth: "60%" }} numberOfLines={1}>
+                            {order.kitchenName}
+                          </Text>
+                        </View>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                          <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#4B5563" }}>Customer</Text>
+                          <Text style={{ fontSize: 11, fontFamily: "Poppins", fontWeight: "600", color: "#111827", maxWidth: "60%" }} numberOfLines={1}>
+                            {order.customerName}
+                          </Text>
+                        </View>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                          <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#4B5563" }}>Delivery Fee</Text>
+                          <Text style={{ fontSize: 11, fontFamily: "Poppins", fontWeight: "700", color: "#059669" }}>
+                            ₹{order.deliveryFee}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {order.deliveryAddress ? (
+                        <Text style={{ fontSize: 11, fontFamily: "Nunito", color: "#6B7280" }} numberOfLines={2}>
+                          {order.deliveryAddress}
+                        </Text>
+                      ) : null}
+                    </View>
+                  )
+                })
+              )}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
       </Modal>
 
       {/* Rider Payouts & Settlement History Modal */}

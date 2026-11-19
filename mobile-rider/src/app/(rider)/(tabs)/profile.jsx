@@ -6,8 +6,21 @@ import { useRouter, useFocusEffect } from "expo-router"
 import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing } from "react-native-reanimated"
 import { LogOut, Phone, Mail, Truck, ShieldCheck, Hash, Calendar, CheckCircle, Wallet, CreditCard, Building2, Edit3, X, User, FileText, ChevronRight } from "lucide-react-native"
 import PolicyModal from "../../../components/common/PolicyModal"
+import FieldError from "../../../components/ui/FieldError"
 import { useAuth } from "../../../context/AuthContext"
+import { useToast } from "../../../context/ToastContext"
 import { toggleRiderStatus, api } from "../../../lib/api"
+import {
+  getPayoutFieldErrors,
+  getPayoutFieldError,
+  hasFieldErrors,
+  isEmail,
+  isPhone,
+  isValidVehicleNumber,
+  isValidDrivingLicense,
+  normalizeVehicleNumber,
+  normalizeDrivingLicense,
+} from "../../../lib/validation"
 
 // Shared design tokens for this screen — one radius/typography scale used everywhere
 const RADIUS = 20
@@ -89,7 +102,8 @@ function DetailRow({ icon: Icon, label, value, valueStyle }) {
 
 export default function RiderProfileScreen() {
   const router = useRouter()
-  const { user, rider, logout, refreshRider } = useAuth()
+  const toast = useToast()
+  const { user, rider, logout, refreshRider, updateSessionProfile } = useAuth()
   const [dutyLoading, setDutyLoading] = useState(false)
   const [policyType, setPolicyType] = useState(null)
 
@@ -97,8 +111,21 @@ export default function RiderProfileScreen() {
   const [payoutLoading, setPayoutLoading] = useState(false)
   const [payoutModalVisible, setPayoutModalVisible] = useState(false)
   const [savingPayout, setSavingPayout] = useState(false)
-  const [payoutError, setPayoutError] = useState("")
+  const [payoutFieldErrors, setPayoutFieldErrors] = useState({})
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false)
+
+  const [profileModalVisible, setProfileModalVisible] = useState(false)
+  const [savingProfile, setSavingProfile] = useState(false)
+  const [logoutModalVisible, setLogoutModalVisible] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
+  const [profileFieldErrors, setProfileFieldErrors] = useState({})
+  const [profileForm, setProfileForm] = useState({
+    phone: "",
+    email: "",
+    vehicleType: "bicycle",
+    vehicleNumber: "",
+    drivingLicenseNumber: "",
+  })
 
   useEffect(() => {
     const showListener = Keyboard.addListener(
@@ -182,27 +209,122 @@ export default function RiderProfileScreen() {
     }, [])
   )
 
-  const handleSavePayoutSettings = async () => {
-    setPayoutError("")
-    if (payoutForm.payoutMode === "bank") {
-      if (!payoutForm.bankAccountName.trim() || !payoutForm.bankName.trim() || !payoutForm.bankAccountNumber.trim()) {
-        setPayoutError("Account Holder Name, Bank Name, and Account Number are required")
-        return
+  const openProfileEditor = () => {
+    setProfileForm({
+      phone: user?.phone || "",
+      email: user?.email || "",
+      vehicleType: rider?.vehicle_type || "bicycle",
+      vehicleNumber: rider?.vehicle_number || "",
+      drivingLicenseNumber: rider?.driving_license_number || "",
+    })
+    setProfileFieldErrors({})
+    setProfileModalVisible(true)
+  }
+
+  const getProfileFieldErrors = (form) => {
+    const errors = {}
+    const phone = String(form.phone || "").trim()
+    const email = String(form.email || "").trim()
+
+    if (!phone) errors.phone = "Phone number is required"
+    else if (!isPhone(phone)) errors.phone = "Enter a valid Indian mobile number"
+
+    if (!email) errors.email = "Email address is required"
+    else if (!isEmail(email)) errors.email = "Enter a valid email address"
+
+    if (!form.vehicleType) errors.vehicleType = "Please select a vehicle type"
+
+    if (form.vehicleType && form.vehicleType !== "bicycle") {
+      if (!String(form.vehicleNumber || "").trim()) {
+        errors.vehicleNumber = "Vehicle number is required"
+      } else if (!isValidVehicleNumber(form.vehicleNumber)) {
+        errors.vehicleNumber = "Enter a valid vehicle number (last 4 digits only)"
       }
-      if (payoutForm.bankAccountNumber.trim() !== payoutForm.confirmBankAccountNumber.trim()) {
-        setPayoutError("Account Number and Confirm Account Number do not match")
-        return
-      }
-      if (!payoutForm.bankIfsc.trim() || payoutForm.bankIfsc.trim().length !== 11) {
-        setPayoutError("Valid 11-character IFSC Code is required")
-        return
-      }
-    } else {
-      if (!payoutForm.upiId.trim() || !payoutForm.upiId.includes("@")) {
-        setPayoutError("Valid UPI ID / VPA is required (e.g. name@upi)")
-        return
+
+      if (String(form.drivingLicenseNumber || "").trim()) {
+        if (!isValidDrivingLicense(form.drivingLicenseNumber)) {
+          errors.drivingLicenseNumber = "DL number must be exactly 15 characters"
+        }
       }
     }
+
+    return errors
+  }
+
+  const updateProfileField = (field, value) => {
+    const nextForm = { ...profileForm, [field]: value }
+    if (field === "vehicleType" && value === "bicycle") {
+      nextForm.vehicleNumber = ""
+      nextForm.drivingLicenseNumber = ""
+    }
+    setProfileForm(nextForm)
+    setProfileFieldErrors((prev) => {
+      if (!prev[field] && !(field === "vehicleType")) return prev
+      const next = { ...prev }
+      const fresh = getProfileFieldErrors(nextForm)
+      ;["phone", "email", "vehicleType", "vehicleNumber", "drivingLicenseNumber"].forEach((key) => {
+        if (prev[key] || key === field) {
+          if (fresh[key]) next[key] = fresh[key]
+          else delete next[key]
+        }
+      })
+      if (value === "bicycle") {
+        delete next.vehicleNumber
+        delete next.drivingLicenseNumber
+      }
+      return next
+    })
+  }
+
+  const handleSaveProfile = async () => {
+    const errors = getProfileFieldErrors(profileForm)
+    setProfileFieldErrors(errors)
+    if (hasFieldErrors(errors)) return
+
+    setSavingProfile(true)
+    try {
+      const data = await api("/api/rider/me/profile", {
+        method: "PUT",
+        body: JSON.stringify({
+          phone: profileForm.phone.trim(),
+          email: profileForm.email.trim(),
+          vehicleType: profileForm.vehicleType,
+          vehicleNumber: normalizeVehicleNumber(profileForm.vehicleNumber),
+          drivingLicenseNumber: normalizeDrivingLicense(profileForm.drivingLicenseNumber),
+        }),
+      })
+      await updateSessionProfile({ user: data.user, rider: data.rider })
+      await refreshRider()
+      Keyboard.dismiss()
+      setProfileModalVisible(false)
+      toast.success("Profile updated successfully")
+    } catch (err) {
+      toast.error(err.message || "Failed to update profile")
+    } finally {
+      setSavingProfile(false)
+    }
+  }
+
+  const updatePayoutField = (field, value, linkedFields = []) => {
+    const nextForm = { ...payoutForm, [field]: value }
+    setPayoutForm(nextForm)
+    setPayoutFieldErrors((prev) => {
+      const keys = [field, ...linkedFields]
+      if (!keys.some((key) => prev[key])) return prev
+      const next = { ...prev }
+      keys.forEach((key) => {
+        const msg = getPayoutFieldError(key, nextForm)
+        if (msg) next[key] = msg
+        else delete next[key]
+      })
+      return next
+    })
+  }
+
+  const handleSavePayoutSettings = async () => {
+    const errors = getPayoutFieldErrors(payoutForm)
+    setPayoutFieldErrors(errors)
+    if (hasFieldErrors(errors)) return
 
     setSavingPayout(true)
     try {
@@ -220,33 +342,29 @@ export default function RiderProfileScreen() {
       await fetchPayoutSettings()
       Keyboard.dismiss()
       setPayoutModalVisible(false)
-      Alert.alert("Success", "Payout settings updated successfully")
+      setPayoutFieldErrors({})
+      toast.success("Payout settings updated successfully")
     } catch (err) {
-      setPayoutError(err.message || "Failed to update payout settings")
+      toast.error(err.message || "Failed to update payout settings")
     } finally {
       setSavingPayout(false)
     }
   }
 
-  const handleLogout = async () => {
-    if (Platform.OS === "web") {
-      const confirmLogout = window.confirm("Are you sure you want to log out?")
-      if (confirmLogout) {
-        await logout()
-        router.replace("/(rider)/login")
-      }
-    } else {
-      Alert.alert("Logout", "Are you sure you want to log out?", [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Logout",
-          style: "destructive",
-          onPress: async () => {
-            await logout()
-            router.replace("/(rider)/login")
-          },
-        },
-      ])
+  const handleLogout = () => {
+    setLogoutModalVisible(true)
+  }
+
+  const confirmLogout = async () => {
+    setLoggingOut(true)
+    try {
+      await logout()
+      setLogoutModalVisible(false)
+      router.replace("/(rider)/login")
+    } catch (err) {
+      toast.error(err.message || "Failed to sign out")
+    } finally {
+      setLoggingOut(false)
     }
   }
 
@@ -401,7 +519,24 @@ export default function RiderProfileScreen() {
             overflow: "hidden",
           }}
         >
-          <Text style={{ fontSize: 15, color: COLORS.value, padding: 20, paddingBottom: 4, ...TYPE.heading }}>Account Details</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 20, paddingBottom: 4 }}>
+            <Text style={{ fontSize: 15, color: COLORS.value, ...TYPE.heading }}>Account Details</Text>
+            <TouchableOpacity
+              onPress={openProfileEditor}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 4,
+                backgroundColor: "#EAF7EE",
+                paddingHorizontal: 10,
+                paddingVertical: 6,
+                borderRadius: 10,
+              }}
+            >
+              <Edit3 size={13} color="#0B6B3A" />
+              <Text style={{ fontSize: 11, color: "#0B6B3A", ...TYPE.heading }}>Edit</Text>
+            </TouchableOpacity>
+          </View>
 
           <View style={{ paddingHorizontal: 20, paddingBottom: 20, gap: 18, marginTop: 12 }}>
             <DetailRow icon={Phone} label="Phone Number" value={user?.phone || "—"} />
@@ -411,11 +546,29 @@ export default function RiderProfileScreen() {
             <DetailRow
               icon={Truck}
               label="Vehicle Type"
-              value={rider?.vehicle_type || "bicycle"}
+              value={rider?.vehicle_type ? String(rider.vehicle_type).replace(/_/g, " ") : "—"}
               valueStyle={{ textTransform: "capitalize" }}
             />
             <View style={{ height: 1, backgroundColor: COLORS.divider }} />
-            <DetailRow icon={Hash} label="Vehicle Number" value={rider?.vehicle_number || "—"} />
+            <DetailRow
+              icon={Hash}
+              label="Vehicle Number"
+              value={
+                rider?.vehicle_type === "bicycle"
+                  ? "Not required"
+                  : (rider?.vehicle_number || "—")
+              }
+            />
+            {rider?.vehicle_type && rider.vehicle_type !== "bicycle" ? (
+              <>
+                <View style={{ height: 1, backgroundColor: COLORS.divider }} />
+                <DetailRow
+                  icon={FileText}
+                  label="Driving License"
+                  value={rider?.driving_license_number || "—"}
+                />
+              </>
+            ) : null}
             <View style={{ height: 1, backgroundColor: COLORS.divider }} />
             <DetailRow icon={Calendar} label="Partner Since" value={formatPartnerSince(rider?.created_at)} />
           </View>
@@ -435,16 +588,16 @@ export default function RiderProfileScreen() {
             overflow: "hidden",
           }}
         >
-          <View style={{ flexDirection: "row", alignItems: "center", justifyBetween: "space-between", padding: 20, paddingBottom: 4 }}>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 15, color: COLORS.value, ...TYPE.heading }}>Payout & Earnings Account</Text>
+          <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", padding: 20, paddingBottom: 4, gap: 10 }}>
+            <View style={{ flex: 1, paddingRight: 4 }}>
+              <Text style={{ fontSize: 15, color: COLORS.value, ...TYPE.heading }}>Payout & Earnings</Text>
               <Text style={{ fontSize: 11, color: COLORS.label, marginTop: 2, ...TYPE.label }}>
                 Account used by Admin for delivery fee payouts
               </Text>
             </View>
             <TouchableOpacity
               onPress={() => {
-                setPayoutError("")
+                setPayoutFieldErrors({})
                 setPayoutModalVisible(true)
               }}
               style={{
@@ -455,6 +608,7 @@ export default function RiderProfileScreen() {
                 paddingHorizontal: 10,
                 paddingVertical: 6,
                 borderRadius: 10,
+                marginTop: 1,
               }}
             >
               <Edit3 size={13} color="#0B6B3A" />
@@ -893,7 +1047,7 @@ export default function RiderProfileScreen() {
           </View>
         </View>
 
-        {/* Logout Button */}
+        {/* Sign Out Button */}
         <TouchableOpacity
           onPress={handleLogout}
           activeOpacity={0.8}
@@ -902,26 +1056,369 @@ export default function RiderProfileScreen() {
             alignItems: "center",
             justifyContent: "center",
             gap: 10,
-            backgroundColor: "#FDF2F2",
+            backgroundColor: "#EAF7EE",
             paddingVertical: 15,
             borderRadius: RADIUS,
             borderWidth: 1,
-            borderColor: "#F8D7D7",
-            shadowColor: "#EF4444",
+            borderColor: "#C6EBD4",
+            shadowColor: "#0B6B3A",
             shadowOffset: { width: 0, height: 6 },
-            shadowOpacity: 0.14,
+            shadowOpacity: 0.1,
             shadowRadius: 12,
             elevation: 2,
           }}
         >
-          <LogOut size={16} color="#EF4444" />
-          <Text style={{ color: "#EF4444", fontSize: 14, ...TYPE.heading }}>Log Out</Text>
+          <LogOut size={16} color="#0B6B3A" />
+          <Text style={{ color: "#0B6B3A", fontSize: 14, ...TYPE.heading }}>Sign Out</Text>
         </TouchableOpacity>
 
         <Text style={{ fontSize: 10.5, color: "#B5B5B0", textAlign: "center", marginTop: 28, ...TYPE.label }}>
           Atleast80 Rider Partner App
         </Text>
       </ScrollView>
+
+      {/* Sign Out Confirm Modal */}
+      <Modal
+        visible={logoutModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!loggingOut) setLogoutModalVisible(false)
+        }}
+      >
+        <View style={{ flex: 1, backgroundColor: "rgba(15, 23, 15, 0.48)", justifyContent: "center", alignItems: "center", paddingHorizontal: 28 }}>
+          <View
+            style={{
+              width: "100%",
+              maxWidth: 340,
+              backgroundColor: "#FFFFFF",
+              borderRadius: 22,
+              paddingHorizontal: 22,
+              paddingTop: 24,
+              paddingBottom: 18,
+              borderWidth: 1,
+              borderColor: "#F1F1EF",
+              shadowColor: "#0B6B3A",
+              shadowOffset: { width: 0, height: 12 },
+              shadowOpacity: 0.12,
+              shadowRadius: 22,
+              elevation: 6,
+            }}
+          >
+            <View
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: 14,
+                backgroundColor: "#EAF7EE",
+                borderWidth: 1,
+                borderColor: "#C6EBD4",
+                alignItems: "center",
+                justifyContent: "center",
+                marginBottom: 14,
+              }}
+            >
+              <LogOut size={22} color="#0B6B3A" />
+            </View>
+            <Text style={{ fontSize: 17, color: COLORS.value, ...TYPE.heading }}>Sign out?</Text>
+            <Text style={{ fontSize: 13, color: COLORS.label, marginTop: 6, lineHeight: 19, ...TYPE.label }}>
+              Are you sure you want to sign out of your rider partner account?
+            </Text>
+
+            <View style={{ flexDirection: "row", gap: 10, marginTop: 22 }}>
+              <TouchableOpacity
+                onPress={() => setLogoutModalVisible(false)}
+                disabled={loggingOut}
+                style={{
+                  flex: 1,
+                  height: 46,
+                  borderRadius: 14,
+                  borderWidth: 1.5,
+                  borderColor: "#E5E7EB",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: "#FFFFFF",
+                  opacity: loggingOut ? 0.6 : 1,
+                }}
+              >
+                <Text style={{ fontSize: 13, color: "#7A7A7A", ...TYPE.heading }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={confirmLogout}
+                disabled={loggingOut}
+                style={{
+                  flex: 1,
+                  height: 46,
+                  borderRadius: 14,
+                  backgroundColor: "#0B6B3A",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  opacity: loggingOut ? 0.85 : 1,
+                }}
+              >
+                {loggingOut ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={{ fontSize: 13, color: "#FFFFFF", ...TYPE.heading }}>Sign Out</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Edit Profile Modal */}
+      <Modal
+        visible={profileModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          Keyboard.dismiss()
+          setProfileModalVisible(false)
+        }}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "padding"}
+          enabled={isKeyboardVisible}
+          style={{ flex: 1 }}
+        >
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
+            <TouchableOpacity
+              activeOpacity={1}
+              style={{ position: "absolute", top: 0, bottom: 0, left: 0, right: 0 }}
+              onPress={() => {
+                Keyboard.dismiss()
+                setProfileModalVisible(false)
+              }}
+            />
+            <View
+              style={{
+                backgroundColor: "#FFF",
+                borderTopLeftRadius: 24,
+                borderTopRightRadius: 24,
+                paddingHorizontal: 20,
+                paddingTop: 20,
+                paddingBottom: Platform.OS === "ios" ? 34 : 20,
+                maxHeight: isKeyboardVisible ? "75%" : "88%",
+              }}
+            >
+              <View
+                style={{
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 16,
+                  borderBottomWidth: 1,
+                  borderBottomColor: COLORS.divider,
+                  paddingBottom: 12,
+                }}
+              >
+                <Text style={{ fontSize: 16, color: COLORS.value, ...TYPE.heading }}>Update Account Details</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    Keyboard.dismiss()
+                    setProfileModalVisible(false)
+                  }}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <X size={20} color="#7A7A7A" />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
+                contentContainerStyle={{ paddingBottom: 16, gap: 14 }}
+              >
+                <View>
+                  <Text style={{ fontSize: 12, color: COLORS.value, marginBottom: 4, ...TYPE.heading }}>Phone Number *</Text>
+                  <TextInput
+                    value={profileForm.phone}
+                    onChangeText={(val) => updateProfileField("phone", val.replace(/[^0-9]/g, "").slice(0, 10))}
+                    placeholder="10-digit mobile number"
+                    keyboardType="phone-pad"
+                    maxLength={10}
+                    style={{
+                      borderWidth: 1,
+                      borderColor: profileFieldErrors.phone ? "#F44336" : COLORS.divider,
+                      backgroundColor: profileFieldErrors.phone ? "#FEF2F2" : "#FFFFFF",
+                      borderRadius: 12,
+                      paddingHorizontal: 14,
+                      paddingVertical: 12,
+                      fontSize: 14,
+                      fontFamily: "Nunito",
+                      color: COLORS.value,
+                    }}
+                  />
+                  <FieldError message={profileFieldErrors.phone} />
+                </View>
+
+                <View>
+                  <Text style={{ fontSize: 12, color: COLORS.value, marginBottom: 4, ...TYPE.heading }}>Email Address *</Text>
+                  <TextInput
+                    value={profileForm.email}
+                    onChangeText={(val) => updateProfileField("email", val.trimStart())}
+                    placeholder="you@example.com"
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    style={{
+                      borderWidth: 1,
+                      borderColor: profileFieldErrors.email ? "#F44336" : COLORS.divider,
+                      backgroundColor: profileFieldErrors.email ? "#FEF2F2" : "#FFFFFF",
+                      borderRadius: 12,
+                      paddingHorizontal: 14,
+                      paddingVertical: 12,
+                      fontSize: 14,
+                      fontFamily: "Nunito",
+                      color: COLORS.value,
+                    }}
+                  />
+                  <FieldError message={profileFieldErrors.email} />
+                </View>
+
+                <View>
+                  <Text style={{ fontSize: 12, color: COLORS.value, marginBottom: 8, ...TYPE.heading }}>Vehicle Type *</Text>
+                  <View style={{ flexDirection: "row", gap: 8 }}>
+                    {[
+                      { id: "bicycle", label: "Bicycle" },
+                      { id: "motorcycle", label: "Motorcycle" },
+                      { id: "scooter", label: "Scooter" },
+                    ].map((v) => (
+                      <TouchableOpacity
+                        key={v.id}
+                        onPress={() => updateProfileField("vehicleType", v.id)}
+                        style={{
+                          flex: 1,
+                          minHeight: 42,
+                          paddingVertical: 10,
+                          paddingHorizontal: 6,
+                          borderRadius: 999,
+                          borderWidth: 1.5,
+                          alignItems: "center",
+                          justifyContent: "center",
+                          backgroundColor: profileForm.vehicleType === v.id ? "#0B6B3A" : "#FFFFFF",
+                          borderColor: profileForm.vehicleType === v.id
+                            ? "#0B6B3A"
+                            : profileFieldErrors.vehicleType
+                              ? "#F44336"
+                              : "#E5E5E5",
+                        }}
+                      >
+                        <Text
+                          numberOfLines={1}
+                          style={{
+                            color: profileForm.vehicleType === v.id ? "#FFFFFF" : "#2E2E2E",
+                            fontFamily: "Poppins",
+                            fontWeight: "700",
+                            fontSize: 11,
+                          }}
+                        >
+                          {v.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <FieldError message={profileFieldErrors.vehicleType} />
+                </View>
+
+                {profileForm.vehicleType === "bicycle" ? (
+                  <View
+                    style={{
+                      backgroundColor: "#F0FBF4",
+                      borderWidth: 1,
+                      borderColor: "#C6EBD4",
+                      borderRadius: 14,
+                      padding: 14,
+                    }}
+                  >
+                    <Text style={{ fontFamily: "Nunito", fontSize: 12, color: "#0B6B3A", lineHeight: 18 }}>
+                      Bicycle selected — vehicle number and driving license are not required.
+                    </Text>
+                  </View>
+                ) : (
+                  <>
+                    <View>
+                      <Text style={{ fontSize: 12, color: COLORS.value, marginBottom: 4, ...TYPE.heading }}>Vehicle Number *</Text>
+                      <TextInput
+                        value={profileForm.vehicleNumber}
+                        onChangeText={(val) => updateProfileField("vehicleNumber", normalizeVehicleNumber(val))}
+                        placeholder="e.g. UP32 AB 1234"
+                        autoCapitalize="characters"
+                        maxLength={13}
+                        style={{
+                          borderWidth: 1,
+                          borderColor: profileFieldErrors.vehicleNumber ? "#F44336" : COLORS.divider,
+                          backgroundColor: profileFieldErrors.vehicleNumber ? "#FEF2F2" : "#FFFFFF",
+                          borderRadius: 12,
+                          paddingHorizontal: 14,
+                          paddingVertical: 12,
+                          fontSize: 14,
+                          fontFamily: "Nunito",
+                          color: COLORS.value,
+                        }}
+                      />
+                      <FieldError message={profileFieldErrors.vehicleNumber} />
+                      {!profileFieldErrors.vehicleNumber ? (
+                        <Text style={{ fontSize: 11, color: COLORS.label, marginTop: 4, ...TYPE.label }}>
+                          Last part must be 4 digits only — e.g. UP32 AB 1234
+                        </Text>
+                      ) : null}
+                    </View>
+
+                    <View>
+                      <Text style={{ fontSize: 12, color: COLORS.value, marginBottom: 4, ...TYPE.heading }}>Driving License</Text>
+                      <TextInput
+                        value={profileForm.drivingLicenseNumber}
+                        onChangeText={(val) => updateProfileField("drivingLicenseNumber", normalizeDrivingLicense(val))}
+                        placeholder="15-character DL number"
+                        autoCapitalize="characters"
+                        maxLength={15}
+                        style={{
+                          borderWidth: 1,
+                          borderColor: profileFieldErrors.drivingLicenseNumber ? "#F44336" : COLORS.divider,
+                          backgroundColor: profileFieldErrors.drivingLicenseNumber ? "#FEF2F2" : "#FFFFFF",
+                          borderRadius: 12,
+                          paddingHorizontal: 14,
+                          paddingVertical: 12,
+                          fontSize: 14,
+                          fontFamily: "Nunito",
+                          color: COLORS.value,
+                        }}
+                      />
+                      <FieldError message={profileFieldErrors.drivingLicenseNumber} />
+                      {!profileFieldErrors.drivingLicenseNumber ? (
+                        <Text style={{ fontSize: 11, color: COLORS.label, marginTop: 4, ...TYPE.label }}>
+                          Optional — must be exactly 15 characters if entered
+                        </Text>
+                      ) : null}
+                    </View>
+                  </>
+                )}
+              </ScrollView>
+
+              <TouchableOpacity
+                onPress={handleSaveProfile}
+                disabled={savingProfile}
+                style={{
+                  marginTop: 8,
+                  backgroundColor: "#0B6B3A",
+                  borderRadius: 14,
+                  paddingVertical: 14,
+                  alignItems: "center",
+                  opacity: savingProfile ? 0.7 : 1,
+                }}
+              >
+                {savingProfile ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={{ color: "#FFFFFF", fontSize: 14, ...TYPE.heading }}>Save Changes</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       {/* Edit Payout Modal */}
       <Modal
@@ -981,12 +1478,6 @@ export default function RiderProfileScreen() {
                 </TouchableOpacity>
               </View>
 
-              {payoutError ? (
-                <View style={{ backgroundColor: "#FDF2F2", padding: 12, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: "#F8D7D7" }}>
-                  <Text style={{ color: "#EF4444", fontSize: 12, ...TYPE.label }}>{payoutError}</Text>
-                </View>
-              ) : null}
-
               <ScrollView
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
@@ -994,53 +1485,74 @@ export default function RiderProfileScreen() {
                 contentContainerStyle={{ paddingBottom: 16 }}
               >
               {/* Mode Selector */}
-              <View style={{ flexDirection: "row", backgroundColor: "#F3F3F0", padding: 4, borderRadius: 14, marginBottom: 16 }}>
+              <View style={{ flexDirection: "row", backgroundColor: "#F3F4F6", padding: 4, borderRadius: 16, marginBottom: 16, borderWidth: 1, borderColor: "#E5E7EB", gap: 4 }}>
                 <TouchableOpacity
-                  onPress={() => setPayoutForm({ ...payoutForm, payoutMode: "upi" })}
+                  onPress={() => {
+                    setPayoutForm({ ...payoutForm, payoutMode: "upi" })
+                    setPayoutFieldErrors({})
+                  }}
                   style={{
                     flex: 1,
+                    minHeight: 44,
                     flexDirection: "row",
                     alignItems: "center",
                     justifyContent: "center",
                     paddingVertical: 10,
-                    borderRadius: 10,
+                    paddingHorizontal: 10,
+                    borderRadius: 12,
                     gap: 6,
                     backgroundColor: payoutForm.payoutMode === "upi" ? "#FFF" : "transparent",
+                    shadowColor: payoutForm.payoutMode === "upi" ? "#000" : "transparent",
+                    shadowOpacity: payoutForm.payoutMode === "upi" ? 0.08 : 0,
+                    shadowRadius: 4,
+                    shadowOffset: { width: 0, height: 1 },
+                    elevation: payoutForm.payoutMode === "upi" ? 2 : 0,
                   }}
                 >
                   <Wallet size={15} color={payoutForm.payoutMode === "upi" ? "#0B6B3A" : "#7A7A7A"} />
-                  <Text style={{ fontSize: 12, color: payoutForm.payoutMode === "upi" ? "#0B6B3A" : "#7A7A7A", ...TYPE.heading }}>Instant UPI VPA</Text>
+                  <Text numberOfLines={1} style={{ fontSize: 12, color: payoutForm.payoutMode === "upi" ? "#0B6B3A" : "#7A7A7A", ...TYPE.heading }}>UPI VPA</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  onPress={() => setPayoutForm({ ...payoutForm, payoutMode: "bank" })}
+                  onPress={() => {
+                    setPayoutForm({ ...payoutForm, payoutMode: "bank" })
+                    setPayoutFieldErrors({})
+                  }}
                   style={{
                     flex: 1,
+                    minHeight: 44,
                     flexDirection: "row",
                     alignItems: "center",
                     justifyContent: "center",
                     paddingVertical: 10,
-                    borderRadius: 10,
+                    paddingHorizontal: 10,
+                    borderRadius: 12,
                     gap: 6,
                     backgroundColor: payoutForm.payoutMode === "bank" ? "#FFF" : "transparent",
+                    shadowColor: payoutForm.payoutMode === "bank" ? "#000" : "transparent",
+                    shadowOpacity: payoutForm.payoutMode === "bank" ? 0.08 : 0,
+                    shadowRadius: 4,
+                    shadowOffset: { width: 0, height: 1 },
+                    elevation: payoutForm.payoutMode === "bank" ? 2 : 0,
                   }}
                 >
                   <Building2 size={15} color={payoutForm.payoutMode === "bank" ? "#0B6B3A" : "#7A7A7A"} />
-                  <Text style={{ fontSize: 12, color: payoutForm.payoutMode === "bank" ? "#0B6B3A" : "#7A7A7A", ...TYPE.heading }}>Bank Account</Text>
+                  <Text numberOfLines={1} style={{ fontSize: 12, color: payoutForm.payoutMode === "bank" ? "#0B6B3A" : "#7A7A7A", ...TYPE.heading }}>Bank Account</Text>
                 </TouchableOpacity>
               </View>
 
               {payoutForm.payoutMode === "upi" ? (
-                <View style={{ gap: 12 }}>
+                <View style={{ gap: 4 }}>
                   <Text style={{ fontSize: 12, color: COLORS.value, ...TYPE.heading }}>Primary UPI ID / VPA *</Text>
                   <TextInput
                     value={payoutForm.upiId}
-                    onChangeText={(val) => setPayoutForm({ ...payoutForm, upiId: val })}
+                    onChangeText={(val) => updatePayoutField("upiId", val)}
                     placeholder="e.g. 7378647099@ybl or nitesh@okaxis"
                     autoCapitalize="none"
                     style={{
                       borderWidth: 1,
-                      borderColor: COLORS.divider,
+                      borderColor: payoutFieldErrors.upiId ? "#F44336" : COLORS.divider,
+                      backgroundColor: payoutFieldErrors.upiId ? "#FEF2F2" : "#FFFFFF",
                       borderRadius: 12,
                       paddingHorizontal: 14,
                       paddingVertical: 12,
@@ -1049,9 +1561,12 @@ export default function RiderProfileScreen() {
                       color: COLORS.value,
                     }}
                   />
-                  <Text style={{ fontSize: 11, color: COLORS.label, ...TYPE.label }}>
-                    Delivery earnings will be sent to this UPI ID via GPay / PhonePe / Paytm.
-                  </Text>
+                  <FieldError message={payoutFieldErrors.upiId} />
+                  {!payoutFieldErrors.upiId ? (
+                    <Text style={{ fontSize: 11, color: COLORS.label, marginTop: 4, ...TYPE.label }}>
+                      Delivery earnings will be sent to this UPI ID via GPay / PhonePe / Paytm.
+                    </Text>
+                  ) : null}
                 </View>
               ) : (
                 <View style={{ gap: 12 }}>
@@ -1059,11 +1574,12 @@ export default function RiderProfileScreen() {
                     <Text style={{ fontSize: 12, color: COLORS.value, marginBottom: 4, ...TYPE.heading }}>Account Holder Name *</Text>
                     <TextInput
                       value={payoutForm.bankAccountName}
-                      onChangeText={(val) => setPayoutForm({ ...payoutForm, bankAccountName: val })}
+                      onChangeText={(val) => updatePayoutField("bankAccountName", val)}
                       placeholder="Full Name as per Bank Passbook"
                       style={{
                         borderWidth: 1,
-                        borderColor: COLORS.divider,
+                        borderColor: payoutFieldErrors.bankAccountName ? "#F44336" : COLORS.divider,
+                        backgroundColor: payoutFieldErrors.bankAccountName ? "#FEF2F2" : "#FFFFFF",
                         borderRadius: 12,
                         paddingHorizontal: 14,
                         paddingVertical: 10,
@@ -1072,17 +1588,19 @@ export default function RiderProfileScreen() {
                         color: COLORS.value,
                       }}
                     />
+                    <FieldError message={payoutFieldErrors.bankAccountName} />
                   </View>
 
                   <View>
                     <Text style={{ fontSize: 12, color: COLORS.value, marginBottom: 4, ...TYPE.heading }}>Bank Name *</Text>
                     <TextInput
                       value={payoutForm.bankName}
-                      onChangeText={(val) => setPayoutForm({ ...payoutForm, bankName: val })}
+                      onChangeText={(val) => updatePayoutField("bankName", val)}
                       placeholder="e.g. HDFC Bank / State Bank of India"
                       style={{
                         borderWidth: 1,
-                        borderColor: COLORS.divider,
+                        borderColor: payoutFieldErrors.bankName ? "#F44336" : COLORS.divider,
+                        backgroundColor: payoutFieldErrors.bankName ? "#FEF2F2" : "#FFFFFF",
                         borderRadius: 12,
                         paddingHorizontal: 14,
                         paddingVertical: 10,
@@ -1091,18 +1609,20 @@ export default function RiderProfileScreen() {
                         color: COLORS.value,
                       }}
                     />
+                    <FieldError message={payoutFieldErrors.bankName} />
                   </View>
 
                   <View>
                     <Text style={{ fontSize: 12, color: COLORS.value, marginBottom: 4, ...TYPE.heading }}>Account Number *</Text>
                     <TextInput
                       value={payoutForm.bankAccountNumber}
-                      onChangeText={(val) => setPayoutForm({ ...payoutForm, bankAccountNumber: val })}
+                      onChangeText={(val) => updatePayoutField("bankAccountNumber", val.replace(/[^\d]/g, "").slice(0, 18), ["confirmBankAccountNumber"])}
                       placeholder="Enter Bank Account Number"
                       keyboardType="numeric"
                       style={{
                         borderWidth: 1,
-                        borderColor: COLORS.divider,
+                        borderColor: payoutFieldErrors.bankAccountNumber ? "#F44336" : COLORS.divider,
+                        backgroundColor: payoutFieldErrors.bankAccountNumber ? "#FEF2F2" : "#FFFFFF",
                         borderRadius: 12,
                         paddingHorizontal: 14,
                         paddingVertical: 10,
@@ -1111,18 +1631,20 @@ export default function RiderProfileScreen() {
                         color: COLORS.value,
                       }}
                     />
+                    <FieldError message={payoutFieldErrors.bankAccountNumber} />
                   </View>
 
                   <View>
                     <Text style={{ fontSize: 12, color: COLORS.value, marginBottom: 4, ...TYPE.heading }}>Confirm Account Number *</Text>
                     <TextInput
                       value={payoutForm.confirmBankAccountNumber}
-                      onChangeText={(val) => setPayoutForm({ ...payoutForm, confirmBankAccountNumber: val })}
+                      onChangeText={(val) => updatePayoutField("confirmBankAccountNumber", val.replace(/[^\d]/g, "").slice(0, 18), ["bankAccountNumber"])}
                       placeholder="Re-enter Bank Account Number"
                       keyboardType="numeric"
                       style={{
                         borderWidth: 1,
-                        borderColor: COLORS.divider,
+                        borderColor: payoutFieldErrors.confirmBankAccountNumber ? "#F44336" : COLORS.divider,
+                        backgroundColor: payoutFieldErrors.confirmBankAccountNumber ? "#FEF2F2" : "#FFFFFF",
                         borderRadius: 12,
                         paddingHorizontal: 14,
                         paddingVertical: 10,
@@ -1131,19 +1653,21 @@ export default function RiderProfileScreen() {
                         color: COLORS.value,
                       }}
                     />
+                    <FieldError message={payoutFieldErrors.confirmBankAccountNumber} />
                   </View>
 
                   <View>
                     <Text style={{ fontSize: 12, color: COLORS.value, marginBottom: 4, ...TYPE.heading }}>IFSC Code *</Text>
                     <TextInput
                       value={payoutForm.bankIfsc}
-                      onChangeText={(val) => setPayoutForm({ ...payoutForm, bankIfsc: val.toUpperCase() })}
+                      onChangeText={(val) => updatePayoutField("bankIfsc", val.toUpperCase())}
                       placeholder="11-character IFSC (e.g. HDFC0001234)"
                       autoCapitalize="characters"
                       maxLength={11}
                       style={{
                         borderWidth: 1,
-                        borderColor: COLORS.divider,
+                        borderColor: payoutFieldErrors.bankIfsc ? "#F44336" : COLORS.divider,
+                        backgroundColor: payoutFieldErrors.bankIfsc ? "#FEF2F2" : "#FFFFFF",
                         borderRadius: 12,
                         paddingHorizontal: 14,
                         paddingVertical: 10,
@@ -1152,6 +1676,7 @@ export default function RiderProfileScreen() {
                         color: COLORS.value,
                       }}
                     />
+                    <FieldError message={payoutFieldErrors.bankIfsc} />
                   </View>
                 </View>
               )}

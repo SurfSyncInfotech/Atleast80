@@ -10,6 +10,7 @@ export default function PasswordInput({
   icon: Icon,
   className,
   inputClassName,
+  error = false,
   style: customStyle,
   ...props
 }) {
@@ -20,7 +21,8 @@ export default function PasswordInput({
     <View
       className={cn(
         "flex-row items-center w-full h-[52] px-4 rounded-xl border border-gray-light bg-cream/50",
-        isFocused && "border-primary bg-white",
+        isFocused && !error && "border-primary bg-white",
+        error && "border-error bg-red-50",
         className
       )}
     >

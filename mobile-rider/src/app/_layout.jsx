@@ -3,6 +3,7 @@ import { Platform } from "react-native"
 import React, { useEffect } from "react"
 import * as Notifications from "expo-notifications"
 import { AuthProvider } from "../context/AuthContext"
+import { ToastProvider } from "../context/ToastContext"
 import "../global.css"
 
 export default function RootLayout() {
@@ -35,10 +36,11 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
-      {Platform.OS === "web" &&
-        React.createElement("style", {
-          dangerouslySetInnerHTML: {
-            __html: `
+      <ToastProvider>
+        {Platform.OS === "web" &&
+          React.createElement("style", {
+            dangerouslySetInnerHTML: {
+              __html: `
               @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@300;400;500;600;700;800&family=Poppins:wght@300;400;500;600;700;800&display=swap');
               
               body, input, textarea, select, button, div, span, p, a {
@@ -61,12 +63,13 @@ export default function RootLayout() {
                 box-shadow: none !important;
               }
             `,
-          },
-        })}
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="index" />
-        <Stack.Screen name="(rider)" />
-      </Stack>
+            },
+          })}
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="index" />
+          <Stack.Screen name="(rider)" />
+        </Stack>
+      </ToastProvider>
     </AuthProvider>
   )
 }

@@ -78,6 +78,134 @@ router.get("/me/payout-settings", authRequired, requireRole("rider"), async (req
   }
 })
 
+// Update Rider Profile (phone, email, vehicle)
+router.put("/me/profile", authRequired, requireRole("rider"), async (req, res) => {
+  try {
+    const phone = req.body.phone?.toString().trim() || null
+    const email = req.body.email?.toString().trim().toLowerCase() || null
+    const vehicleType = req.body.vehicleType?.toString().trim().toLowerCase() || null
+    const vehicleNumberRaw = req.body.vehicleNumber?.toString().trim().toUpperCase() || null
+    const drivingLicenseRaw = req.body.drivingLicenseNumber?.toString().trim().toUpperCase() || null
+
+    if (!vehicleType || !["bicycle", "motorcycle", "scooter"].includes(vehicleType)) {
+      return res.status(400).json({ message: "Please select a valid vehicle type" })
+    }
+
+    if (!phone && !email) {
+      return res.status(400).json({ message: "Phone number or email is required" })
+    }
+
+    if (phone && !/^[6-9]\d{9}$/.test(phone)) {
+      return res.status(400).json({ message: "Enter a valid 10-digit Indian mobile number" })
+    }
+
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ message: "Enter a valid email address" })
+    }
+
+    let vehicleNumber = null
+    let drivingLicenseNumber = null
+
+    if (vehicleType !== "bicycle") {
+      const cleanedVehicle = (vehicleNumberRaw || "").replace(/[\s-]/g, "")
+      if (!cleanedVehicle) {
+        return res.status(400).json({ message: "Vehicle number is required for motorized vehicles" })
+      }
+      if (!/^[A-Z]{2}[0-9]{1,2}[A-Z]{1,3}[0-9]{4}$/.test(cleanedVehicle) &&
+          !/^[0-9]{2}BH[0-9]{4}[A-Z]{1,2}$/.test(cleanedVehicle)) {
+        return res.status(400).json({ message: "Enter a valid vehicle number (last part must be 4 digits)" })
+      }
+      vehicleNumber = vehicleNumberRaw
+
+      const cleanedDl = (drivingLicenseRaw || "").replace(/[\s-]/g, "")
+      if (cleanedDl) {
+        if (cleanedDl.length !== 15 || !/^[A-Z]{2}[0-9A-Z]{13}$/.test(cleanedDl)) {
+          return res.status(400).json({ message: "DL number must be exactly 15 characters" })
+        }
+        drivingLicenseNumber = cleanedDl
+      }
+    }
+
+    if (email) {
+      const [existingEmail] = await pool.query(
+        "SELECT id FROM users WHERE email = ? AND role = 'rider' AND id != ?",
+        [email, req.user.id]
+      )
+      if (existingEmail.length > 0) {
+        return res.status(409).json({ message: "This email is already registered with another rider" })
+      }
+    }
+
+    if (phone) {
+      const [existingPhone] = await pool.query(
+        "SELECT id FROM users WHERE phone = ? AND role = 'rider' AND id != ?",
+        [phone, req.user.id]
+      )
+      if (existingPhone.length > 0) {
+        return res.status(409).json({ message: "This phone number is already registered with another rider" })
+      }
+    }
+
+    await pool.query(
+      "UPDATE users SET phone = ?, email = ? WHERE id = ? AND role = 'rider'",
+      [phone, email, req.user.id]
+    )
+
+    await pool.query(
+      `UPDATE riders SET
+         vehicle_type = ?,
+         vehicle_number = ?,
+         driving_license_number = COALESCE(?, driving_license_number)
+       WHERE user_id = ? OR id = ?`,
+      [
+        vehicleType,
+        vehicleNumber,
+        vehicleType === "bicycle" ? null : drivingLicenseNumber,
+        req.user.id,
+        req.user.riderId || 0,
+      ]
+    )
+
+    if (vehicleType === "bicycle") {
+      await pool.query(
+        `UPDATE riders SET vehicle_number = NULL, driving_license_number = NULL
+         WHERE user_id = ? OR id = ?`,
+        [req.user.id, req.user.riderId || 0]
+      )
+    }
+
+    const [users] = await pool.query(
+      "SELECT id, name, email, phone, role FROM users WHERE id = ?",
+      [req.user.id]
+    )
+    const [riders] = await pool.query(
+      `SELECT id, status, is_online, vehicle_type, vehicle_number, driving_license_number, created_at
+       FROM riders WHERE user_id = ? OR id = ? LIMIT 1`,
+      [req.user.id, req.user.riderId || 0]
+    )
+
+    const rider = riders[0]
+    res.json({
+      message: "Profile updated successfully",
+      user: users[0] || null,
+      rider: rider
+        ? {
+            id: rider.id,
+            status: rider.status,
+            is_online: rider.is_online,
+            vehicle_type: rider.vehicle_type,
+            vehicle_number: rider.vehicle_number,
+            driving_license_number: rider.driving_license_number,
+            created_at: rider.created_at,
+          }
+        : null,
+    })
+  } catch (error) {
+    console.error("Update rider profile error:", error)
+    res.status(500).json({ message: "Failed to update profile" })
+  }
+})
+
 // Update Rider Payout Settings
 router.put("/me/payout-settings", authRequired, requireRole("rider"), async (req, res) => {
   try {
@@ -277,7 +405,9 @@ router.get("/dashboard", authRequired, requireRole("rider"), async (req, res) =>
   try {
     // Fetch rider profile
     const [riders] = await pool.query(
-      "SELECT is_online, cash_collected, status FROM riders WHERE id = ?",
+      `SELECT is_online, cash_collected, status, vehicle_type, vehicle_number,
+              driving_license_number, created_at
+       FROM riders WHERE id = ?`,
       [req.user.riderId]
     )
 
@@ -409,6 +539,10 @@ router.get("/dashboard", authRequired, requireRole("rider"), async (req, res) =>
       todayDeliveries: Number(stats.today_deliveries),
       activeOrder: formattedActiveOrder,
       remittanceStatus: remittanceObj,
+      vehicleType: rider.vehicle_type || null,
+      vehicleNumber: rider.vehicle_number || null,
+      drivingLicenseNumber: rider.driving_license_number || null,
+      createdAt: rider.created_at || null,
     })
   } catch (error) {
     console.error("Rider dashboard error:", error)
@@ -1056,6 +1190,49 @@ router.post("/deliveries/:id/dismiss-returned", authRequired, requireRole("rider
   } catch (error) {
     console.error("Rider dismiss returned order error:", error)
     res.status(500).json({ message: "Failed to dismiss returned order" })
+  }
+})
+
+// Rider order history (assigned / completed deliveries)
+router.get("/me/orders", authRequired, requireRole("rider"), async (req, res) => {
+  try {
+    const riderId = req.user.riderId
+
+    const [rows] = await pool.query(
+      `SELECT o.id, o.order_number, o.status, o.delivery_status, o.payment_method,
+              o.grand_total, o.delivery_fee, o.advance_amount, o.created_at, o.updated_at,
+              k.name AS kitchen_name, k.city AS kitchen_city,
+              u.name AS customer_name, o.delivery_address
+       FROM orders o
+       LEFT JOIN kitchens k ON o.kitchen_id = k.id
+       LEFT JOIN users u ON o.user_id = u.id
+       WHERE o.rider_id = ?
+       ORDER BY o.updated_at DESC, o.created_at DESC
+       LIMIT 100`,
+      [riderId]
+    )
+
+    res.json({
+      orders: rows.map((o) => ({
+        id: o.id,
+        orderNumber: o.order_number,
+        status: o.status,
+        deliveryStatus: o.delivery_status,
+        paymentMethod: o.payment_method,
+        grandTotal: Number(o.grand_total || 0),
+        deliveryFee: Number(o.delivery_fee || 0),
+        advanceAmount: Number(o.advance_amount || 0),
+        kitchenName: o.kitchen_name || "Kitchen",
+        kitchenCity: o.kitchen_city || null,
+        customerName: o.customer_name || "Customer",
+        deliveryAddress: o.delivery_address || null,
+        createdAt: o.created_at,
+        updatedAt: o.updated_at,
+      })),
+    })
+  } catch (error) {
+    console.error("Fetch rider orders error:", error)
+    res.status(500).json({ message: "Failed to fetch rider orders" })
   }
 })
 
