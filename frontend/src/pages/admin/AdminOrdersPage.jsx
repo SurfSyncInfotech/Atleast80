@@ -137,6 +137,46 @@ function OrderDetailModal({ order, onClose }) {
             </div>
           </div>
 
+          {/* Seller Food Dispatch Photos */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[10px] font-poppins font-bold uppercase tracking-wider text-gray">
+                Seller Dispatch Food Photos ({order.dispatchImages?.length || 0}/4)
+              </p>
+              {order.dispatchImages?.length > 0 && (
+                <span className="text-[10px] font-poppins font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                  Attached Before Dispatch
+                </span>
+              )}
+            </div>
+            {order.dispatchImages?.length > 0 ? (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                {order.dispatchImages.map((img, idx) => (
+                  <a
+                    key={idx}
+                    href={resolveMediaUrl(img)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="relative aspect-square rounded-xl overflow-hidden border border-gray-200 bg-gray-50 group shadow-xs hover:shadow-md transition-all block cursor-zoom-in"
+                  >
+                    <img
+                      src={resolveMediaUrl(img)}
+                      alt={`Food Dispatch Photo ${idx + 1}`}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                    />
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/25 transition-colors flex items-center justify-center">
+                      <Eye size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <div className="p-3.5 rounded-xl border border-dashed border-gray-200 bg-gray-50/60 text-center">
+                <p className="font-nunito text-xs text-gray">No dispatch photos uploaded yet by seller.</p>
+              </div>
+            )}
+          </div>
+
           {order.review && (
             <div className="rounded-xl bg-amber-50 border border-amber-100 p-4">
               <p className="text-[10px] font-poppins font-bold uppercase tracking-wider text-amber-700 mb-2">Customer review</p>
@@ -503,7 +543,14 @@ export default function AdminOrdersPage() {
                                   <p className="font-poppins font-medium text-sm truncate max-w-[120px]">{order.customerName}</p>
                                   {order.customerPhone && <p className="font-nunito text-[11px] text-gray">+91 {order.customerPhone}</p>}
                                 </td>
-                                <td className="px-4 py-3 font-nunito text-sm whitespace-nowrap">{itemCount} items</td>
+                                <td className="px-4 py-3 font-nunito text-sm whitespace-nowrap">
+                                  <div>{itemCount} items</div>
+                                  {order.dispatchImages?.length > 0 && (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-poppins font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 mt-0.5">
+                                      📷 {order.dispatchImages.length} photo{order.dispatchImages.length > 1 ? "s" : ""}
+                                    </span>
+                                  )}
+                                </td>
                                 <td className="px-4 py-3 font-poppins font-semibold text-sm text-primary whitespace-nowrap">₹{order.grandTotal}</td>
                                 <td className="px-4 py-3"><StatusBadge status={order.status} /></td>
                                 <td className="px-4 py-3 whitespace-nowrap">

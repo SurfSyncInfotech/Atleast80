@@ -5,6 +5,18 @@ import { requireApprovedKitchen } from "../middleware/kitchen.js"
 import { MIN_RATINGS_TO_SHOW } from "../utils/kitchenRating.js"
 import { sendPushToUser, sendPushToRider, broadcastNewOrderToRiders, broadcastRescueNotification } from "../utils/pushNotifications.js"
 import { getActiveFestivalOffer } from "../utils/mediaUrl.js"
+import { orderDispatchUpload, getOrderDispatchFileUrl } from "../middleware/upload.js"
+
+// Auto-ensure dispatch_images column exists on orders table
+pool.query("SELECT dispatch_images FROM orders LIMIT 1").catch(async () => {
+  try {
+    await pool.query("ALTER TABLE orders ADD COLUMN dispatch_images JSON NULL")
+  } catch (err) {
+    try {
+      await pool.query("ALTER TABLE orders ADD COLUMN dispatch_images TEXT NULL")
+    } catch (_) {}
+  }
+})
 
 const router = Router()
 
@@ -61,6 +73,16 @@ function mapOrder(row) {
     deliveryFee: Number(row.delivery_fee),
     grandTotal: Number(row.grand_total),
     deliveryAddress: row.delivery_address,
+    dispatchImages: (() => {
+      if (!row.dispatch_images) return []
+      if (Array.isArray(row.dispatch_images)) return row.dispatch_images
+      try {
+        const parsed = typeof row.dispatch_images === "string" ? JSON.parse(row.dispatch_images) : row.dispatch_images
+        return Array.isArray(parsed) ? parsed : []
+      } catch {
+        return typeof row.dispatch_images === "string" ? [row.dispatch_images] : []
+      }
+    })(),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     pickupCode: row.pickup_code || null,
@@ -271,8 +293,31 @@ router.get("/kitchen/:id", authRequired, requireRole("kitchen"), requireApproved
   }
 })
 
+router.post("/kitchen/:id/dispatch-images", authRequired, requireRole("kitchen"), requireApprovedKitchen, (req, res) => {
+  orderDispatchUpload.array("images", 4)(req, res, async (err) => {
+    if (err) {
+      return res.status(400).json({ message: err.message || "Failed to upload dispatch photos" })
+    }
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ message: "At least one dispatch photo is required" })
+    }
+    try {
+      const urls = req.files.map((file) => getOrderDispatchFileUrl(req, file.filename))
+      await pool.query("UPDATE orders SET dispatch_images = ? WHERE id = ? AND kitchen_id = ?", [
+        JSON.stringify(urls),
+        req.params.id,
+        req.kitchenId,
+      ])
+      res.json({ message: "Dispatch photos saved", dispatchImages: urls })
+    } catch (error) {
+      console.error("Order dispatch photos error:", error)
+      res.status(500).json({ message: "Failed to save dispatch photos" })
+    }
+  })
+})
+
 router.patch("/kitchen/:id/status", authRequired, requireRole("kitchen"), requireApprovedKitchen, async (req, res) => {
-  const { status: newStatus } = req.body
+  const { status: newStatus, dispatchImages } = req.body
   if (!newStatus) {
     return res.status(400).json({ message: "Status is required" })
   }
@@ -294,6 +339,11 @@ router.patch("/kitchen/:id/status", authRequired, requireRole("kitchen"), requir
       return res.status(400).json({
         message: `Cannot change status from "${currentStatus}" to "${newStatus}"`,
       })
+    }
+
+    if (dispatchImages && Array.isArray(dispatchImages)) {
+      const imgJson = JSON.stringify(dispatchImages.slice(0, 4))
+      await pool.query("UPDATE orders SET dispatch_images = ? WHERE id = ?", [imgJson, req.params.id])
     }
 
     if (newStatus === "out_for_delivery") {

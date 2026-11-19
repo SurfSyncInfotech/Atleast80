@@ -21,8 +21,8 @@ export default function CustomerTabsLayout() {
         tabBarStyle: {
           backgroundColor: "#FFFFFF",
           borderTopWidth: 0,
-          height: Platform.OS === "ios" ? 88 : Platform.OS === "web" ? 70 : Math.max(68, 60 + insets.bottom),
-          paddingBottom: Platform.OS === "ios" ? 28 : Platform.OS === "web" ? 12 : Math.max(8, insets.bottom + 4),
+          height: Platform.OS === "ios" ? 88 : Platform.OS === "web" ? 70 : Math.max(70, 60 + (insets.bottom || 0)),
+          paddingBottom: Platform.OS === "ios" ? 28 : Platform.OS === "web" ? 12 : Math.max(14, (insets.bottom || 0) + 6),
           paddingTop: 8,
           ...Platform.select({
             web: {

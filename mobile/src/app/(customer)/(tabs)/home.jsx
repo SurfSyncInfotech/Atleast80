@@ -3,9 +3,12 @@ import {
   View, Text, ScrollView, Image, TouchableOpacity, Platform,
   Animated, useWindowDimensions, RefreshControl, Modal, Pressable, ActivityIndicator, Alert, TextInput
 } from "react-native"
+import AsyncStorage from "@react-native-async-storage/async-storage"
+import { useAuth } from "../../../context/AuthContext"
 import * as Location from "expo-location"
 import * as Notifications from "expo-notifications"
 import { useRouter, useFocusEffect } from "expo-router"
+import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { SafeAreaView } from "react-native-safe-area-context"
 import { LinearGradient } from "expo-linear-gradient"
 import {
@@ -108,9 +111,7 @@ const categories = [
   { id: 4, name: "Tiffin", icon: Package, color: "#8B5CF6", bg: "#F5EEF8", image: require("../../../../assets/images/categories/cat_tiffin.jpg") },
   { id: 5, name: "Curry", icon: Soup, color: "#EF4444", bg: "#FDEDEC", image: require("../../../../assets/images/categories/cat_curry.jpg") },
   { id: 6, name: "Dairy", icon: Milk, color: "#06B6D4", bg: "#ECFEFF", image: require("../../../../assets/images/categories/cat_dairy.jpg") },
-  { id: 7, name: "Snacks", icon: Cookie, color: "#F59E0B", bg: "#FEF3C7", image: require("../../../../assets/images/categories/cat_snacks.jpg") },
   { id: 8, name: "Pickles", icon: Flame, color: "#F97316", bg: "#FFEDD5", image: require("../../../../assets/images/categories/cat_pickles.jpg") },
-  { id: 9, name: "Sweets", icon: Candy, color: "#EC4899", bg: "#FCE4EC", image: require("../../../../assets/images/categories/cat_sweets.jpg") },
   { id: 10, name: "Breakfast", icon: Egg, color: "#EAB308", bg: "#FEF9E7", image: require("../../../../assets/images/categories/cat_breakfast.jpg") },
 ]
 
@@ -200,10 +201,72 @@ function FestivalOfferThumb({ uri, style, resizeMode = "cover" }) {
 
 export default function HomeScreen() {
   const router = useRouter()
+  const insets = useSafeAreaInsets()
   const [selectedCategory, setSelectedCategory] = useState(null)
   const { width: windowWidth } = useWindowDimensions()
   const carouselWidth = windowWidth - 32 // Margin horizontal is 16 on each side
   const { itemCount } = useCart()
+  const { user } = useAuth()
+  const [showNewUserPopup, setShowNewUserPopup] = useState(false)
+  const popupAutoCloseTimerRef = useRef(null)
+  const popupCheckedRef = useRef(false)
+
+  const handleClosePopup = () => {
+    if (popupAutoCloseTimerRef.current) {
+      clearTimeout(popupAutoCloseTimerRef.current)
+      popupAutoCloseTimerRef.current = null
+    }
+    setShowNewUserPopup(false)
+  }
+
+  // 15-Day Once-a-Day Popup for New Users (Stays for 3 seconds)
+  useFocusEffect(
+    useCallback(() => {
+      let initTimer
+      const checkAndShowPopup = async () => {
+        if (popupCheckedRef.current) return
+        try {
+          const todayStr = new Date().toISOString().slice(0, 10)
+          const lastShown = await AsyncStorage.getItem("@popup_shown_day")
+          if (lastShown === todayStr) {
+            popupCheckedRef.current = true
+            return
+          }
+
+          let firstOpenDate = await AsyncStorage.getItem("@app_first_open_date")
+          if (!firstOpenDate) {
+            firstOpenDate = new Date().toISOString()
+            await AsyncStorage.setItem("@app_first_open_date", firstOpenDate)
+          }
+
+          const diffDays = (Date.now() - new Date(firstOpenDate).getTime()) / (1000 * 60 * 60 * 24)
+          if (diffDays <= 15) {
+            popupCheckedRef.current = true
+            setShowNewUserPopup(true)
+            await AsyncStorage.setItem("@popup_shown_day", todayStr)
+
+            // Stay for exactly 3 seconds, then auto-close
+            if (popupAutoCloseTimerRef.current) clearTimeout(popupAutoCloseTimerRef.current)
+            popupAutoCloseTimerRef.current = setTimeout(() => {
+              setShowNewUserPopup(false)
+            }, 3000)
+          }
+        } catch (err) {
+          setShowNewUserPopup(true)
+          if (popupAutoCloseTimerRef.current) clearTimeout(popupAutoCloseTimerRef.current)
+          popupAutoCloseTimerRef.current = setTimeout(() => {
+            setShowNewUserPopup(false)
+          }, 3000)
+        }
+      }
+
+      initTimer = setTimeout(checkAndShowPopup, 300)
+
+      return () => {
+        if (initTimer) clearTimeout(initTimer)
+      }
+    }, [])
+  )
 
   // Alerts states & handlers
   const [alerts, setAlerts] = useState([])
@@ -1039,7 +1102,7 @@ export default function HomeScreen() {
                   }}
                 >
                   <View className="flex-row items-center justify-between">
-                    <View className="flex-1 pr-3">
+                    <View className="flex-1">
                       <Text className="text-[10px] font-poppins font-semibold uppercase tracking-[0.24em] text-secondary/80">
                         Fresh today
                       </Text>
@@ -1060,13 +1123,6 @@ export default function HomeScreen() {
                           Explore kitchens
                         </Text>
                       </PressableScale>
-                    </View>
-                    <View className="w-14 h-14 rounded-2xl border border-white/20 items-center justify-center bg-white/10">
-                      <Image
-                        source={require("../../../../assets/images/logo.png")}
-                        style={{ width: 44, height: 44, borderRadius: 22 }}
-                        resizeMode="cover"
-                      />
                     </View>
                   </View>
                 </LinearGradient>
@@ -1423,7 +1479,7 @@ export default function HomeScreen() {
                 </View>
                 <View className="flex-1 flex-row gap-2.5">
                   <PressableScale
-                    onPress={() => router.push({ pathname: "/(customer)/search", params: { category: "Snacks" } })}
+                    onPress={() => router.push({ pathname: "/(customer)/search", params: { category: "Grocery" } })}
                     className="flex-1 rounded-[18px] overflow-hidden border border-white relative bg-white shadow-sm"
                     style={Platform.select({
                       web: { boxShadow: "0px 4px 8px rgba(0,0,0,0.03)" },
@@ -1431,7 +1487,7 @@ export default function HomeScreen() {
                     })}
                   >
                     <Image
-                      source={require("../../../../assets/images/snacks_namkeen.png")}
+                      source={require("../../../../assets/images/grocery.png")}
                       style={{ width: "100%", height: "100%" }}
                       resizeMode="cover"
                     />
@@ -1439,11 +1495,11 @@ export default function HomeScreen() {
                       colors={["transparent", "rgba(0,0,0,0.5)"]}
                       className="absolute inset-x-0 bottom-0 h-10 justify-end p-2"
                     >
-                      <Text className="text-white font-poppins font-bold text-[9px]">Snacks</Text>
+                      <Text className="text-white font-poppins font-bold text-[9px]">Grocery</Text>
                     </LinearGradient>
                   </PressableScale>
                   <PressableScale
-                    onPress={() => router.push({ pathname: "/(customer)/search", params: { category: "Sweets" } })}
+                    onPress={() => router.push({ pathname: "/(customer)/search", params: { category: "Grocery" } })}
                     className="flex-1 rounded-[18px] overflow-hidden border border-white relative bg-white shadow-sm"
                     style={Platform.select({
                       web: { boxShadow: "0px 4px 8px rgba(0,0,0,0.03)" },
@@ -1451,7 +1507,7 @@ export default function HomeScreen() {
                     })}
                   >
                     <Image
-                      source={require("../../../../assets/images/indian_sweets.png")}
+                      source={require("../../../../assets/images/categories/cat_grocery.jpg")}
                       style={{ width: "100%", height: "100%" }}
                       resizeMode="cover"
                     />
@@ -1459,7 +1515,7 @@ export default function HomeScreen() {
                       colors={["transparent", "rgba(0,0,0,0.5)"]}
                       className="absolute inset-x-0 bottom-0 h-10 justify-end p-2"
                     >
-                      <Text className="text-white font-poppins font-bold text-[9px]">Sweets</Text>
+                      <Text className="text-white font-poppins font-bold text-[9px]">Essentials</Text>
                     </LinearGradient>
                   </PressableScale>
                 </View>
@@ -1896,7 +1952,7 @@ export default function HomeScreen() {
                 borderTopRightRadius: 32,
                 paddingHorizontal: 24,
                 paddingTop: 24,
-                paddingBottom: Platform.OS === "ios" ? 44 : 16,
+                paddingBottom: Platform.OS === "ios" ? 44 : Math.max(24, insets.bottom + 12),
                 maxHeight: "88%",
                 width: "100%"
               }}
@@ -2355,6 +2411,85 @@ export default function HomeScreen() {
         initialLat={location.lat || null}
         initialLng={location.lng || null}
       />
+
+      {/* 15-Day Once-a-Day New User Banner Modal */}
+      <Modal
+        visible={showNewUserPopup}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={handleClosePopup}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0, 0, 0, 0.72)",
+            justifyContent: "center",
+            alignItems: "center",
+            padding: 16,
+          }}
+        >
+          {/* Backdrop dismiss touch target */}
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={handleClosePopup}
+            style={{
+              position: "absolute",
+              top: 0,
+              bottom: 0,
+              left: 0,
+              right: 0,
+            }}
+          />
+
+          {/* Modal Card Content (Above Backdrop) */}
+          <View
+            style={{
+              width: "100%",
+              maxWidth: 380,
+              backgroundColor: "#FFFFFF",
+              borderRadius: 24,
+              overflow: "hidden",
+              position: "relative",
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 10 },
+              shadowOpacity: 0.35,
+              shadowRadius: 20,
+              elevation: 12,
+            }}
+          >
+            {/* Close Button on top */}
+            <TouchableOpacity
+              onPress={handleClosePopup}
+              activeOpacity={0.8}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              style={{
+                position: "absolute",
+                top: 12,
+                right: 12,
+                zIndex: 40,
+                width: 32,
+                height: 32,
+                borderRadius: 16,
+                backgroundColor: "rgba(0, 0, 0, 0.65)",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <X size={18} color="#FFFFFF" strokeWidth={2.5} />
+            </TouchableOpacity>
+
+            {/* Pop-up Image */}
+            <Image
+              source={require("../../../../assets/images/pop_up.png")}
+              style={{
+                width: "100%",
+                height: 255,
+              }}
+              resizeMode="contain"
+            />
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   )
 }

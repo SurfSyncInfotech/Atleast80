@@ -30,7 +30,7 @@ function calculateDeliveryCharge(distanceKm) {
 import { useState, useEffect } from "react"
 import { View, Text, ScrollView, TouchableOpacity, Image, ActivityIndicator, Modal, Platform } from "react-native"
 import { useLocalSearchParams, useRouter } from "expo-router"
-import { SafeAreaView } from "react-native-safe-area-context"
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { ArrowLeft, MapPin, Clock, CreditCard, Wallet, CheckCircle, X, QrCode, ShieldCheck, User, LogIn } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import Button from "../../components/ui/Button"
@@ -51,6 +51,7 @@ if (Platform.OS !== "web") {
 
 export default function CheckoutScreen() {
   const router = useRouter()
+  const insets = useSafeAreaInsets()
   const params = useLocalSearchParams()
   const { user } = useAuth()
   const { cart, clearCart, clearKitchenCart, removeClosedOfferItems, closedOfferItems, syncAvailability } = useCart()
@@ -468,7 +469,7 @@ export default function CheckoutScreen() {
         <Text className="font-poppins font-bold text-lg text-dark">Checkout</Text>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} className="flex-grow px-4 mt-4">
+      <ScrollView showsVerticalScrollIndicator={false} className="flex-grow px-4 mt-4" contentContainerStyle={{ paddingBottom: Math.max(140, 110 + insets.bottom) }}>
         {hasUnavailableItems ? (
           <View className="mb-4 rounded-2xl border border-red-200 bg-red-50 p-4">
             <Text className="font-poppins font-bold text-sm text-red-800 mb-1">⚠️ Items Unavailable</Text>
@@ -719,7 +720,7 @@ export default function CheckoutScreen() {
       </ScrollView>
 
       {/* Place Order CTA Bottom bar */}
-      <View className="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-100 p-4 z-50 shadow-2xl">
+      <View className="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-100 p-4 z-50 shadow-2xl" style={{ paddingBottom: Math.max(24, (insets.bottom || 0) + 14) }}>
         <Button onPress={handlePlaceOrder} size="lg" className="w-full h-12" loading={loading} disabled={loading || isDeliveryUnavailable || hasUnavailableItems}>
           <Text className="text-white text-base font-bold">
             {!user
@@ -740,7 +741,7 @@ export default function CheckoutScreen() {
       {/* UPI / Google Pay Payment Modal */}
       <Modal visible={upiModalVisible} animationType="slide" transparent={true} onRequestClose={() => setUpiModalVisible(false)}>
         <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" }}>
-          <View style={{ backgroundColor: "#FFFFFF", borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24 }}>
+          <View style={{ backgroundColor: "#FFFFFF", borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: Math.max(24, insets.bottom + 16) }}>
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
                 <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: "#EAF7EE", alignItems: "center", justifyContent: "center" }}>

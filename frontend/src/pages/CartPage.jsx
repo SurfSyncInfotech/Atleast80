@@ -485,7 +485,7 @@ export default function CartPage() {
                         <p className="text-xs text-gray mt-0.5">{opt.desc}</p>
                       </div>
                       <span className="font-poppins font-semibold text-sm text-dark">
-                        {opt.id === "self" ? "Free" : `+₹${calculatedDoorstepFee}`}
+                        {opt.price === 0 ? "Free" : `+₹${opt.price}`}
                       </span>
                     </button>
                   ))}
@@ -517,7 +517,7 @@ export default function CartPage() {
                           <p className="text-xs text-gray mt-0.5">{opt.desc}</p>
                         </div>
                         <span className="font-poppins font-semibold text-sm text-dark">
-                          {opt.price === 0 ? "Free" : `+₹${opt.price}`}
+                          {opt.id === "self" ? "Free" : `+₹${calculatedDoorstepFee}`}
                         </span>
                       </button>
                     )

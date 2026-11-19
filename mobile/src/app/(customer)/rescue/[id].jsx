@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react"
 import { View, Text, ScrollView, TouchableOpacity, Image, ActivityIndicator, Platform } from "react-native"
 import { useLocalSearchParams, useRouter } from "expo-router"
-import { SafeAreaView } from "react-native-safe-area-context"
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { ArrowLeft, MapPin, ChefHat, Bike, Heart } from "lucide-react-native"
 import { api } from "../../../lib/api"
 import { useAuth } from "../../../context/AuthContext"
@@ -20,6 +20,7 @@ const Alert = {
 
 export default function RescueDetailsScreen() {
   const router = useRouter()
+  const insets = useSafeAreaInsets()
   const { id } = useLocalSearchParams()
   const { user } = useAuth()
   
@@ -120,7 +121,7 @@ export default function RescueDetailsScreen() {
         <Text style={{ fontSize: 18, fontWeight: "bold", marginLeft: 16, color: "#1F1F1F", fontFamily: "Poppins" }}>Claim Food Rescue</Text>
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 16 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: Math.max(36, insets.bottom + 24) }} showsVerticalScrollIndicator={false}>
         {/* Banner */}
         <View style={{ backgroundColor: "#EAF7EE", borderWidth: 1.5, borderColor: "#A3D3B8", borderRadius: 16, padding: 16, flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 16 }}>
           <Text style={{ fontSize: 24 }}>🍕</Text>

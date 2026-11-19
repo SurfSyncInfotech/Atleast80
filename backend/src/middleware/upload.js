@@ -307,3 +307,26 @@ export function getGroceryPresetFileUrl(req, filename) {
 export function getTrainingVideoFileUrl(req, filename) {
   return `${getPublicBaseUrl(req)}/uploads/agreements/${filename}`
 }
+
+export const ORDERS_UPLOADS_DIR = path.join(__dirname, "../../uploads/orders")
+if (!fs.existsSync(ORDERS_UPLOADS_DIR)) fs.mkdirSync(ORDERS_UPLOADS_DIR, { recursive: true })
+
+const orderDispatchStorage = multer.diskStorage({
+  destination(_req, _file, cb) {
+    cb(null, ORDERS_UPLOADS_DIR)
+  },
+  filename(_req, file, cb) {
+    const ext = path.extname(file.originalname).toLowerCase() || ".jpg"
+    cb(null, `dispatch-${Date.now()}-${Math.random().toString(36).slice(2, 9)}${ext}`)
+  },
+})
+
+export const orderDispatchUpload = multer({
+  storage: orderDispatchStorage,
+  fileFilter: imageOnlyFilter,
+  limits: { fileSize: 10 * 1024 * 1024 },
+})
+
+export function getOrderDispatchFileUrl(req, filename) {
+  return `${getPublicBaseUrl(req)}/uploads/orders/${filename}`
+}

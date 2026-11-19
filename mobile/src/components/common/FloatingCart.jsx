@@ -1,20 +1,61 @@
-import React from "react"
-import { View, Text, TouchableOpacity, Platform } from "react-native"
+import React, { useState, useEffect, useRef } from "react"
+import { View, Text, TouchableOpacity, Platform, Animated } from "react-native"
 import { ShoppingCart, ChevronRight } from "lucide-react-native"
+import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useCart } from "../../context/CartContext"
 import { useAuth } from "../../context/AuthContext"
 
 export default function FloatingCart({ onNavigateToCart }) {
   const { itemCount, total } = useCart()
   const { isCustomer } = useAuth()
+  const insets = useSafeAreaInsets()
+  const bottomOffset = Math.max(20, (insets.bottom || 0) + 14)
 
-  if (itemCount <= 0) return null
+  const [visible, setVisible] = useState(false)
+  const prevCountRef = useRef(itemCount)
+  const timerRef = useRef(null)
+  const fadeAnim = useRef(new Animated.Value(0)).current
+
+  useEffect(() => {
+    // Show only when item is added to cart
+    if (itemCount > prevCountRef.current && itemCount > 0) {
+      if (timerRef.current) clearTimeout(timerRef.current)
+      setVisible(true)
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 180,
+        useNativeDriver: true,
+      }).start()
+
+      // Stay for 2 seconds, then smoothly hide
+      timerRef.current = setTimeout(() => {
+        Animated.timing(fadeAnim, {
+          toValue: 0,
+          duration: 250,
+          useNativeDriver: true,
+        }).start(() => {
+          setVisible(false)
+        })
+      }, 2000)
+    } else if (itemCount <= 0) {
+      setVisible(false)
+      fadeAnim.setValue(0)
+    }
+    prevCountRef.current = itemCount
+
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
+  }, [itemCount])
+
+  if (!visible || itemCount <= 0) return null
 
   return (
-    <View 
+    <Animated.View 
       className="absolute left-4 right-4 z-50 shadow-2xl"
       style={{ 
-        bottom: Platform.OS === "ios" ? 98 : 82,
+        bottom: bottomOffset,
+        opacity: fadeAnim,
         shadowColor: "#0B6B3A",
         shadowOffset: { width: 0, height: 6 },
         shadowOpacity: 0.12,
@@ -47,6 +88,6 @@ export default function FloatingCart({ onNavigateToCart }) {
           <ChevronRight size={16} color="#FFFFFF" />
         </View>
       </TouchableOpacity>
-    </View>
+    </Animated.View>
   )
 }

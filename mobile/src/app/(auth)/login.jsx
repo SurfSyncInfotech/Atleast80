@@ -4,6 +4,7 @@ import { useLocalSearchParams, useRouter } from "expo-router"
 import { ArrowLeft, Mail, Lock, ArrowRight, Eye, EyeOff, AtSign } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import { useAuth } from "../../context/AuthContext"
+import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Svg, { Path } from "react-native-svg"
 
 function WheatBackground() {
@@ -188,6 +189,7 @@ function PremiumButton({ onPress, label, loading }) {
 }
 
 export default function LoginPage() {
+  const insets = useSafeAreaInsets()
   const router = useRouter()
   const params = useLocalSearchParams()
   const successMessage = params?.message
@@ -373,7 +375,7 @@ export default function LoginPage() {
               borderTopRightRadius: 36,
               paddingHorizontal: 24,
               paddingTop: 24,
-              paddingBottom: Platform.OS === "ios" ? 44 : 28,
+              paddingBottom: Platform.OS === "ios" ? 44 : Math.max(28, insets.bottom + 20),
               shadowColor: "#000000",
               shadowOffset: { width: 0, height: -4 },
               shadowOpacity: 0.04,

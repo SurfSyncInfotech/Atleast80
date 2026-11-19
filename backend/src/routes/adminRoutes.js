@@ -67,6 +67,16 @@ function mapAdminOrder(row) {
     deliveryFee: Number(row.delivery_fee),
     grandTotal: Number(row.grand_total),
     deliveryAddress: row.delivery_address,
+    dispatchImages: (() => {
+      if (!row.dispatch_images) return []
+      if (Array.isArray(row.dispatch_images)) return row.dispatch_images
+      try {
+        const parsed = typeof row.dispatch_images === "string" ? JSON.parse(row.dispatch_images) : row.dispatch_images
+        return Array.isArray(parsed) ? parsed : []
+      } catch {
+        return typeof row.dispatch_images === "string" ? [row.dispatch_images] : []
+      }
+    })(),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     review: row.review_id

@@ -248,7 +248,7 @@ export default function MenuItemDetailModal({ item, onClose, onNavigateToCart, o
           <View 
             className="flex-row items-center justify-between p-5 px-6 border-t border-gray-100 bg-white"
             style={{
-              paddingBottom: Math.max(20, insets.bottom + 8),
+              paddingBottom: Math.max(20, insets.bottom + 12),
             }}
           >
             <View>

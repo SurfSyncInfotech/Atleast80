@@ -40,6 +40,7 @@ app.use("/uploads/stories", express.static(path.join(__dirname, "../uploads/stor
 app.use("/uploads/hygiene", express.static(path.join(__dirname, "../uploads/hygiene")))
 app.use("/uploads/quotations", express.static(path.join(__dirname, "../uploads/quotations")))
 app.use("/uploads/agreements", express.static(path.join(__dirname, "../uploads/agreements")))
+app.use("/uploads/orders", express.static(path.join(__dirname, "../uploads/orders")))
 
 app.get("/", (_req, res) => {
   res.json({ message: "Atleast80 API is running" })

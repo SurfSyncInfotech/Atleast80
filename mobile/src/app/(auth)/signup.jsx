@@ -5,6 +5,7 @@ import { useRouter } from "expo-router"
 import { ArrowLeft, Mail, Lock, User, Phone, ArrowRight, Eye, EyeOff, Check, FileText, ExternalLink, X } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import { useAuth } from "../../context/AuthContext"
+import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { checkPhoneAvailability, getUserAgreement } from "../../lib/api"
 import { resolveMediaUrl } from "../../lib/media"
 import Svg, { Path } from "react-native-svg"
@@ -202,6 +203,7 @@ function PremiumButton({ onPress, label, loading }) {
 import { CheckCircle } from "lucide-react-native"
 
 export default function SignupPage() {
+  const insets = useSafeAreaInsets()
   const router = useRouter()
   const { signupCustomer, verifySignupOtp, resendSignupOtp, loginCustomer } = useAuth()
   
@@ -398,7 +400,7 @@ export default function SignupPage() {
               borderTopRightRadius: 36,
               paddingHorizontal: 24,
               paddingTop: 24,
-              paddingBottom: Platform.OS === "ios" ? 44 : 24,
+              paddingBottom: Platform.OS === "ios" ? 44 : Math.max(28, insets.bottom + 20),
               shadowColor: "#000000",
               shadowOffset: { width: 0, height: -12 },
               shadowOpacity: 0.05,

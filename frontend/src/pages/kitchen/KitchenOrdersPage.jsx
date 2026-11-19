@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Package, Clock, Phone, MapPin, RefreshCw, Star,
-  Eye, X, ChevronRight,
+  Eye, X, ChevronRight, Camera,
 } from "lucide-react"
 import KitchenLayout from "../../components/layout/KitchenLayout"
 import Button from "../../components/ui/Button"
@@ -93,7 +93,7 @@ function StatusBadge({ status, showCancelledAlert }) {
   )
 }
 
-function OrderDetailModal({ order, onClose, onStatusUpdate, onOpenOtpModal, onAcknowledge, updating }) {
+function OrderDetailModal({ order, onClose, onStatusUpdate, onOpenOtpModal, onOpenDispatchModal, onAcknowledge, updating }) {
   if (!order) return null
   const next = getNextAction(order)
 
@@ -223,6 +223,21 @@ function OrderDetailModal({ order, onClose, onStatusUpdate, onOpenOtpModal, onAc
             </div>
           )}
 
+          {order.dispatchImages?.length > 0 && (
+            <div className="rounded-xl border border-gray-100 p-4">
+              <p className="text-[10px] font-poppins font-bold uppercase tracking-wider text-gray mb-2">
+                Attached Dispatch Photos ({order.dispatchImages.length}/4)
+              </p>
+              <div className="grid grid-cols-4 gap-2">
+                {order.dispatchImages.map((img, idx) => (
+                  <a key={idx} href={img} target="_blank" rel="noreferrer" className="aspect-square rounded-lg overflow-hidden border border-gray-200">
+                    <img src={img} alt="" className="w-full h-full object-cover" />
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
           {order.showCancelledAlert ? (
             <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex flex-col items-center gap-3 w-full">
               <p className="text-sm font-poppins font-bold text-red-700 text-center">⚠️ This order was cancelled by the customer.</p>
@@ -244,6 +259,8 @@ function OrderDetailModal({ order, onClose, onStatusUpdate, onOpenOtpModal, onAc
                   onClick={() => {
                     if (next.requiresOtp) {
                       onOpenOtpModal(order)
+                    } else if (next.status === "out_for_delivery") {
+                      onOpenDispatchModal(order)
                     } else {
                       onStatusUpdate(order.id, next.status)
                     }
@@ -261,6 +278,138 @@ function OrderDetailModal({ order, onClose, onStatusUpdate, onOpenOtpModal, onAc
   )
 }
 
+function DispatchPhotosModal({ order, onClose, onSubmit, updating }) {
+  const [selectedFiles, setSelectedFiles] = useState([])
+  const [previews, setPreviews] = useState([])
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState("")
+
+  const handleFileChange = (e) => {
+    const files = Array.from(e.target.files || [])
+    if (selectedFiles.length + files.length > 4) {
+      setError("Maximum 4 photos allowed.")
+      return
+    }
+    setError("")
+    const combined = [...selectedFiles, ...files].slice(0, 4)
+    setSelectedFiles(combined)
+    setPreviews(combined.map((f) => URL.createObjectURL(f)))
+  }
+
+  const handleRemovePhoto = (index) => {
+    const nextFiles = selectedFiles.filter((_, i) => i !== index)
+    const nextPreviews = previews.filter((_, i) => i !== index)
+    setSelectedFiles(nextFiles)
+    setPreviews(nextPreviews)
+  }
+
+  const handleDispatch = async () => {
+    if (selectedFiles.length === 0) {
+      setError("Please attach at least 1 photo of the packed food before dispatching.")
+      return
+    }
+    setSubmitting(true)
+    setError("")
+    try {
+      await onSubmit(order.id, selectedFiles)
+      onClose()
+    } catch (err) {
+      setError(err.message || "Failed to dispatch order")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 bg-black/45 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ y: 40, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        exit={{ y: 40, opacity: 0 }}
+        onClick={(e) => e.stopPropagation()}
+        className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-md p-5 shadow-2xl space-y-4"
+      >
+        <div className="flex items-start justify-between border-b border-gray-100 pb-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <Camera size={18} className="text-primary" />
+              <p className="font-poppins font-bold text-base text-dark">Upload Dispatch Photos</p>
+            </div>
+            <p className="font-nunito text-xs text-gray mt-0.5">Order #{order.orderNumber} · Max 4 photos</p>
+          </div>
+          <button type="button" onClick={onClose} className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center hover:bg-gray-200 cursor-pointer">
+            <X size={16} />
+          </button>
+        </div>
+
+        <p className="font-nunito text-xs text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-xl p-3 leading-relaxed">
+          📸 Dispatch karne se pehle food parcel ki clear photos attach karein (max 4). Ye photos admin console me verify hongi.
+        </p>
+
+        {error && (
+          <p className="text-xs font-nunito font-semibold text-red-600 bg-red-50 p-2.5 rounded-xl border border-red-100">
+            {error}
+          </p>
+        )}
+
+        <div className="grid grid-cols-2 gap-2.5">
+          {previews.map((src, i) => (
+            <div key={i} className="relative aspect-video rounded-xl overflow-hidden border border-gray-200 bg-gray-50">
+              <img src={src} alt="" className="w-full h-full object-cover" />
+              <button
+                type="button"
+                onClick={() => handleRemovePhoto(i)}
+                className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-red-600 text-white flex items-center justify-center shadow cursor-pointer hover:bg-red-700"
+              >
+                <X size={13} />
+              </button>
+              <span className="absolute bottom-1 left-1.5 bg-black/60 text-white text-[9px] font-poppins font-bold px-1.5 py-0.5 rounded">
+                Photo {i + 1}
+              </span>
+            </div>
+          ))}
+
+          {selectedFiles.length < 4 && (
+            <label className="relative aspect-video rounded-xl border-2 border-dashed border-gray-300 hover:border-primary bg-gray-50/70 hover:bg-primary/5 flex flex-col items-center justify-center cursor-pointer transition-colors p-2 text-center">
+              <Camera size={22} className="text-primary mb-1" />
+              <span className="font-poppins font-bold text-xs text-dark">Add Photo</span>
+              <span className="font-nunito text-[10px] text-gray">({selectedFiles.length}/4)</span>
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleFileChange}
+                className="hidden"
+              />
+            </label>
+          )}
+        </div>
+
+        <div className="flex gap-2 pt-2 border-t border-gray-100">
+          <Button variant="secondary" className="flex-1" onClick={onClose} disabled={submitting || updating}>
+            Cancel
+          </Button>
+          <Button
+            className="flex-1 bg-primary text-white"
+            onClick={handleDispatch}
+            disabled={submitting || updating}
+          >
+            {submitting ? "Uploading & Dispatching..." : "Confirm & Dispatch"}
+          </Button>
+        </div>
+      </motion.div>
+    </motion.div>
+  )
+}
+  )
+}
+
 export default function KitchenOrdersPage() {
   const navigate = useNavigate()
   const [allOrders, setAllOrders] = useState([])
@@ -273,6 +422,7 @@ export default function KitchenOrdersPage() {
   const [pageSize, setPageSize] = useState(15)
   const [otpModalOrder, setOtpModalOrder] = useState(null)
   const [pickupOtpInput, setPickupOtpInput] = useState("")
+  const [dispatchModalOrder, setDispatchModalOrder] = useState(null)
 
   const loadOrders = useCallback(async () => {
     try {
@@ -358,11 +508,12 @@ export default function KitchenOrdersPage() {
     loadOrders()
   }
 
-  const handleStatusUpdate = async (orderId, newStatus, otp = null) => {
+  const handleStatusUpdate = async (orderId, newStatus, otp = null, dispatchImages = null) => {
     setUpdating(true)
     try {
       const payload = { status: newStatus }
       if (otp) payload.otp = otp
+      if (dispatchImages) payload.dispatchImages = dispatchImages
       const data = await api(
         `/api/orders/kitchen/${orderId}/status`,
         { method: "PATCH", body: JSON.stringify(payload) },
@@ -390,6 +541,28 @@ export default function KitchenOrdersPage() {
         alert(err.message || "Failed to update status")
       }
       return false
+    } finally {
+      setUpdating(false)
+    }
+  }
+
+  const handleDispatchWithPhotos = async (orderId, files) => {
+    setUpdating(true)
+    try {
+      const formData = new FormData()
+      files.forEach((file) => formData.append("images", file))
+
+      const uploadData = await api(
+        `/api/orders/kitchen/${orderId}/dispatch-images`,
+        { method: "POST", body: formData },
+        "kitchen"
+      )
+
+      await handleStatusUpdate(orderId, "out_for_delivery", null, uploadData.dispatchImages)
+      setDispatchModalOrder(null)
+    } catch (err) {
+      alert(err.message || "Failed to upload dispatch photos")
+      throw err
     } finally {
       setUpdating(false)
     }
@@ -573,6 +746,8 @@ export default function KitchenOrdersPage() {
                                     if (next.requiresOtp) {
                                       setPickupOtpInput("")
                                       setOtpModalOrder(order)
+                                    } else if (next.status === "out_for_delivery") {
+                                      setDispatchModalOrder(order)
                                     } else {
                                       handleStatusUpdate(order.id, next.status)
                                     }
@@ -613,7 +788,19 @@ export default function KitchenOrdersPage() {
               setPickupOtpInput("")
               setOtpModalOrder(ord)
             }}
+            onOpenDispatchModal={(ord) => setDispatchModalOrder(ord)}
             onAcknowledge={handleAcknowledgeCancellation}
+            updating={updating}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {dispatchModalOrder && (
+          <DispatchPhotosModal
+            order={dispatchModalOrder}
+            onClose={() => setDispatchModalOrder(null)}
+            onSubmit={handleDispatchWithPhotos}
             updating={updating}
           />
         )}

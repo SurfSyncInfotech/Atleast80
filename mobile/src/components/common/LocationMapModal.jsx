@@ -19,6 +19,7 @@ import {
 } from "react-native"
 import * as Location from "expo-location"
 import { X, Search, MapPin, Navigation, Check, Edit3 } from "lucide-react-native"
+import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { api } from "../../lib/api"
 
 let WebView = null
@@ -40,6 +41,7 @@ export default function LocationMapModal({
   initialLat = null,
   initialLng = null
 }) {
+  const insets = useSafeAreaInsets()
   const webViewRef = useRef(null)
 
   const [searchQuery, setSearchQuery] = useState("")
@@ -555,7 +557,7 @@ export default function LocationMapModal({
         </View>
 
         {/* Footer: Editable Address Input & Confirm Button */}
-        <View style={styles.footer}>
+        <View style={[styles.footer, { paddingBottom: Math.max(14, (insets?.bottom || 0) + 10) }]}>
           <View style={styles.footerLabelRow}>
             <Text style={styles.footerLabel}>Selected Address (Edit manually if needed)</Text>
             <Text style={styles.editableBadge}>Editable</Text>

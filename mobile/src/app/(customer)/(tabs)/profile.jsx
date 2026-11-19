@@ -183,24 +183,25 @@ export default function ProfileScreen() {
 
   const handleSupportEmailPress = () => {
     const emailToUse = supportEmail || "support@atleast80.com"
-    const subject = encodeURIComponent("Atleast80 Customer Support Request")
-    const body = encodeURIComponent(
-      `Hello Atleast80 Support Team,\n\nName: ${user?.name || ""}\nPhone: ${user?.phone || ""}\nEmail: ${user?.email || ""}\n\nIssue Description / Query:\n`
-    )
-    const mailtoUrl = `mailto:${emailToUse}?subject=${subject}&body=${body}`
-
-    Linking.openURL(mailtoUrl).catch(() => {
-      const params = new URLSearchParams({
-        view: "cm",
-        fs: "1",
-        to: emailToUse,
-        su: "Atleast80 Customer Support Request",
-        body: `Hello Atleast80 Support Team,\n\nName: ${user?.name || ""}\nPhone: ${user?.phone || ""}\n\nIssue Description:\n`,
-      })
-      Linking.openURL(`https://mail.google.com/mail/?${params.toString()}`).catch(() => {
-        Alert.alert("Customer Support", `Please email us at: ${emailToUse}`)
-      })
+    const body = `Hello Atleast80 Support Team,\n\nName: ${user?.name || ""}\nPhone: ${user?.phone || ""}\nRegistered email: ${user?.email || ""}\n\nIssue Description:\n`
+    const params = new URLSearchParams({
+      view: "cm",
+      fs: "1",
+      to: emailToUse,
+      su: "Atleast80 Customer Support Request",
+      body,
     })
+    const gmailUrl = `https://mail.google.com/mail/?${params.toString()}`
+
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      window.open(gmailUrl, "_blank")
+    } else {
+      Linking.openURL(gmailUrl).catch(() => {
+        Linking.openURL(`mailto:${emailToUse}`).catch(() => {
+          Alert.alert("Customer Support", `Please email us at: ${emailToUse}`)
+        })
+      })
+    }
   }
 
   const handleConfirmMapLocation = (data) => {

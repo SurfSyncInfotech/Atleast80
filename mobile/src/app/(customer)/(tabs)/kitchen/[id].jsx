@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react"
 import { View, Text, ScrollView, Image, TouchableOpacity, ActivityIndicator, Platform, Linking, Modal, TextInput, Pressable, Alert, Keyboard, useWindowDimensions, KeyboardAvoidingView } from "react-native"
 import { useLocalSearchParams, useRouter } from "expo-router"
-import { SafeAreaView } from "react-native-safe-area-context"
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { ArrowLeft, Star, ShieldCheck, Clock, Share2, MapPin, Phone, UtensilsCrossed, ShoppingBag, Sparkles, X, ChefHat, ArrowRight, ClipboardList, CheckCircle, MessageSquare, Send, RotateCw, ChevronLeft, ChevronRight, FileText, Download, ExternalLink } from "lucide-react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import MenuListItem from "../../../../components/common/MenuListItem"
@@ -93,6 +93,7 @@ function FestivalOfferThumb({ uri, style, resizeMode = "cover", blurRadius = 0 }
 }
 
 export default function KitchenDetailScreen() {
+  const insets = useSafeAreaInsets()
   const { id, selectedItemId, dishName } = useLocalSearchParams()
   const router = useRouter()
   const chatScrollViewRef = useRef(null)
@@ -716,7 +717,7 @@ export default function KitchenDetailScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-[#E9ECF0]" edges={["top"]}>
-      <ScrollView showsVerticalScrollIndicator={false} className="flex-1 bg-[#E9ECF0]">
+      <ScrollView showsVerticalScrollIndicator={false} className="flex-1 bg-[#E9ECF0]" contentContainerStyle={{ paddingBottom: Math.max(120, 90 + insets.bottom) }}>
         {/* Banner section */}
         <View className="relative h-56 bg-primary-dark" style={{ overflow: "hidden" }}>
           {coverUrl ? (
@@ -1758,7 +1759,7 @@ export default function KitchenDetailScreen() {
                   alignItems: "center", 
                   paddingHorizontal: 16, 
                   paddingVertical: 12, 
-                  paddingBottom: (Platform.OS === "android" ? keyboardHeight : 0) + 12,
+                  paddingBottom: (Platform.OS === "android" ? keyboardHeight : 0) + Math.max(14, insets.bottom + 8),
                   borderTopWidth: 1, 
                   borderTopColor: "#F1F1EF", 
                   backgroundColor: "#FFFFFF",
@@ -1835,7 +1836,7 @@ export default function KitchenDetailScreen() {
               contentContainerStyle={{ 
                 paddingHorizontal: 20, 
                 paddingTop: 16, 
-                paddingBottom: (Platform.OS === "android" ? keyboardHeight : 0) + (Platform.OS === "ios" ? 34 : 24) 
+                paddingBottom: (Platform.OS === "android" ? keyboardHeight : 0) + (Platform.OS === "ios" ? 34 : Math.max(24, insets.bottom + 16)) 
               }}
             >
               {!hasActiveEnquiry ? (

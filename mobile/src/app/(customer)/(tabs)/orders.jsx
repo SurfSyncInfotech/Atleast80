@@ -118,7 +118,7 @@ export default function OrdersScreen() {
         </Text>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} className="flex-1 px-4 mt-4">
+      <ScrollView showsVerticalScrollIndicator={false} className="flex-1 px-4 mt-4" contentContainerStyle={{ paddingBottom: 40 }}>
         {currentOrder ? (
           <View className="mb-6">
             <Text className="font-poppins font-semibold text-sm text-primary mb-3 flex-row items-center gap-2">

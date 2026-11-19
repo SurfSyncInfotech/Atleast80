@@ -8,8 +8,10 @@ import {
   Linking,
   Platform,
   Modal,
-  TextInput
+  TextInput,
+  Image,
 } from "react-native"
+import * as ImagePicker from "expo-image-picker"
 
 const Alert = {
   alert: (title, message, buttons) => {
@@ -33,7 +35,8 @@ import {
   MapPin,
   RefreshCw,
   Star,
-  X
+  X,
+  Camera,
 } from "lucide-react-native"
 import { api } from "../../../lib/api"
 import { cn } from "../../../lib/utils"
@@ -135,6 +138,9 @@ export default function KitchenOrdersScreen() {
   const [otpModalOrder, setOtpModalOrder] = useState(null)
   const [pickupOtpInput, setPickupOtpInput] = useState("")
   const [verifyingOtp, setVerifyingOtp] = useState(false)
+  const [dispatchModalOrder, setDispatchModalOrder] = useState(null)
+  const [dispatchPhotos, setDispatchPhotos] = useState([])
+  const [uploadingDispatch, setUploadingDispatch] = useState(false)
 
   const loadOrders = useCallback(async () => {
     try {
@@ -198,11 +204,12 @@ export default function KitchenOrdersScreen() {
     loadOrders(false)
   }
 
-  const handleStatusUpdate = async (orderId, newStatus, otp = null) => {
+  const handleStatusUpdate = async (orderId, newStatus, otp = null, dispatchImages = null) => {
     setUpdating(true)
     try {
       const body = { status: newStatus }
       if (otp) body.otp = otp
+      if (dispatchImages) body.dispatchImages = dispatchImages
       const data = await api(`/api/orders/kitchen/${orderId}/status`, {
         method: "PATCH",
         body: JSON.stringify(body),
@@ -246,6 +253,76 @@ export default function KitchenOrdersScreen() {
       }
     } finally {
       setUpdating(false)
+    }
+  }
+
+  const handlePickDispatchPhoto = async () => {
+    if (dispatchPhotos.length >= 4) {
+      Alert.alert("Limit Reached", "You can only attach a maximum of 4 photos.")
+      return
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsMultipleSelection: true,
+      selectionLimit: 4 - dispatchPhotos.length,
+      quality: 0.8,
+    })
+    if (!result.canceled && result.assets?.length > 0) {
+      const newUris = result.assets.map((a) => a.uri)
+      setDispatchPhotos((prev) => [...prev, ...newUris].slice(0, 4))
+    }
+  }
+
+  const handleTakeDispatchPhoto = async () => {
+    if (dispatchPhotos.length >= 4) {
+      Alert.alert("Limit Reached", "You can only attach a maximum of 4 photos.")
+      return
+    }
+    const { status } = await ImagePicker.requestCameraPermissionsAsync()
+    if (status !== "granted") {
+      Alert.alert("Permission Denied", "Camera permission is required to click dispatch photos.")
+      return
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ["images"],
+      quality: 0.8,
+    })
+    if (!result.canceled && result.assets?.length > 0) {
+      setDispatchPhotos((prev) => [...prev, result.assets[0].uri].slice(0, 4))
+    }
+  }
+
+  const handleDispatchWithPhotos = async (orderId) => {
+    if (dispatchPhotos.length === 0) {
+      Alert.alert("Photo Required", "Please attach at least 1 photo of the packed food before dispatching.")
+      return
+    }
+    setUploadingDispatch(true)
+    try {
+      const formData = new FormData()
+      dispatchPhotos.forEach((uri, idx) => {
+        const filename = uri.split("/").pop() || `dispatch_${idx}.jpg`
+        const match = /\.(\w+)$/.exec(filename)
+        const type = match ? `image/${match[1]}` : `image/jpeg`
+        formData.append("images", {
+          uri: Platform.OS === "android" ? uri : uri.replace("file://", ""),
+          name: filename,
+          type,
+        })
+      })
+
+      const uploadRes = await api(`/api/orders/kitchen/${orderId}/dispatch-images`, {
+        method: "POST",
+        body: formData,
+      })
+
+      await handleStatusUpdate(orderId, "out_for_delivery", null, uploadRes.dispatchImages)
+      setDispatchModalOrder(null)
+      setDispatchPhotos([])
+    } catch (err) {
+      Alert.alert("Dispatch Failed", err.message || "Failed to upload photos and dispatch order")
+    } finally {
+      setUploadingDispatch(false)
     }
   }
 
@@ -512,7 +589,7 @@ export default function KitchenOrdersScreen() {
                                setPickupOtpInput("")
                                setOtpModalOrder(order)
                              } else {
-                               handleStatusUpdate(order.id, next.status)
+                               if (next.status === "out_for_delivery") { setDispatchPhotos([]); setDispatchModalOrder(order); } else { handleStatusUpdate(order.id, next.status); }
                              }
                            }}
                            disabled={updating}
@@ -740,7 +817,7 @@ export default function KitchenOrdersScreen() {
                             setPickupOtpInput("")
                             setOtpModalOrder(detailOrder)
                           } else {
-                            handleStatusUpdate(detailOrder.id, detailNext.status)
+                            if (detailNext.status === "out_for_delivery") { setDispatchPhotos([]); setDispatchModalOrder(detailOrder); } else { handleStatusUpdate(detailOrder.id, detailNext.status); }
                           }
                         }}
                         disabled={updating}
@@ -865,6 +942,117 @@ export default function KitchenOrdersScreen() {
                   ) : (
                     <Text style={{ fontFamily: "Poppins", fontWeight: "bold", fontSize: 13, color: "#FFFFFF" }}>
                       Verify & Complete
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+      {/* Dispatch Photos Upload Modal */}
+      {dispatchModalOrder && (
+        <Modal
+          visible={true}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => {
+            if (!uploadingDispatch) {
+              setDispatchModalOrder(null)
+              setDispatchPhotos([])
+            }
+          }}
+        >
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" }}>
+            <View style={{ backgroundColor: "#FFFFFF", borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 22, maxHeight: "85%" }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                  <View style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: "#EAF7EE", alignItems: "center", justifyContent: "center" }}>
+                    <Camera size={22} color="#0B6B3A" />
+                  </View>
+                  <View>
+                    <Text style={{ fontFamily: "Poppins", fontWeight: "bold", fontSize: 16, color: "#1F2937" }}>
+                      Upload Dispatch Photos
+                    </Text>
+                    <Text style={{ fontFamily: "Nunito", fontSize: 11, color: "#6B7280" }}>
+                      Order #{dispatchModalOrder.orderNumber} • Max 4 photos
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  onPress={() => {
+                    if (!uploadingDispatch) {
+                      setDispatchModalOrder(null)
+                      setDispatchPhotos([])
+                    }
+                  }}
+                  style={{ padding: 6 }}
+                >
+                  <X size={20} color="#9CA3AF" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={{ backgroundColor: "#EAF7EE", borderRadius: 14, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: "#D1E6E3" }}>
+                <Text style={{ fontFamily: "Nunito", fontSize: 12, color: "#0B6B3A", lineHeight: 18 }}>
+                  📸 Dispatch karne se pehle food parcel / packaging ki clear photos attach karein (max 4). Ye photos admin console me check hongi.
+                </Text>
+              </View>
+
+              {/* Photos Grid */}
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
+                {dispatchPhotos.map((uri, idx) => (
+                  <View key={idx} style={{ width: 75, height: 75, borderRadius: 12, overflow: "hidden", position: "relative", borderWidth: 1, borderColor: "#E5E7EB" }}>
+                    <Image source={{ uri }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
+                    <TouchableOpacity
+                      onPress={() => setDispatchPhotos(prev => prev.filter((_, i) => i !== idx))}
+                      style={{ position: "absolute", top: 4, right: 4, width: 20, height: 20, borderRadius: 10, backgroundColor: "#EF4444", alignItems: "center", justifyContent: "center" }}
+                    >
+                      <X size={12} color="#FFFFFF" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+
+                {dispatchPhotos.length < 4 && (
+                  <View style={{ flexDirection: "row", gap: 8 }}>
+                    <TouchableOpacity
+                      onPress={handleTakeDispatchPhoto}
+                      style={{ width: 75, height: 75, borderRadius: 12, borderWidth: 1.5, borderStyle: "dashed", borderColor: "#0B6B3A", backgroundColor: "#F0FDF4", alignItems: "center", justifyContent: "center" }}
+                    >
+                      <Camera size={20} color="#0B6B3A" />
+                      <Text style={{ fontSize: 9, fontFamily: "Poppins", fontWeight: "bold", color: "#0B6B3A", marginTop: 4 }}>Camera</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={handlePickDispatchPhoto}
+                      style={{ width: 75, height: 75, borderRadius: 12, borderWidth: 1.5, borderStyle: "dashed", borderColor: "#9CA3AF", backgroundColor: "#F9FAFB", alignItems: "center", justifyContent: "center" }}
+                    >
+                      <Text style={{ fontSize: 18, color: "#6B7280" }}>+</Text>
+                      <Text style={{ fontSize: 9, fontFamily: "Poppins", fontWeight: "bold", color: "#6B7280", marginTop: 2 }}>Gallery</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setDispatchModalOrder(null)
+                    setDispatchPhotos([])
+                  }}
+                  disabled={uploadingDispatch}
+                  style={{ flex: 1, paddingVertical: 14, borderRadius: 14, borderWidth: 1, borderColor: "#D1D5DB", alignItems: "center", justifyContent: "center", backgroundColor: "#F9FAFB" }}
+                >
+                  <Text style={{ fontFamily: "Poppins", fontWeight: "bold", fontSize: 13, color: "#4B5563" }}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => handleDispatchWithPhotos(dispatchModalOrder.id)}
+                  disabled={uploadingDispatch || dispatchPhotos.length === 0}
+                  style={{ flex: 2, paddingVertical: 14, borderRadius: 14, backgroundColor: dispatchPhotos.length === 0 ? "#9CA3AF" : "#0B6B3A", alignItems: "center", justifyContent: "center" }}
+                >
+                  {uploadingDispatch ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={{ fontFamily: "Poppins", fontWeight: "bold", fontSize: 13, color: "#FFFFFF" }}>
+                      Confirm & Dispatch ({dispatchPhotos.length}/4)
                     </Text>
                   )}
                 </TouchableOpacity>

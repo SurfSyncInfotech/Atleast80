@@ -28,9 +28,7 @@ const categories = [
   { id: 4, name: "Tiffin", icon: Package },
   { id: 5, name: "Curry", icon: Soup },
   { id: 6, name: "Dairy", icon: Milk },
-  { id: 7, name: "Snacks", icon: Cookie },
   { id: 8, name: "Pickles", icon: Cherry },
-  { id: 9, name: "Sweets", icon: Candy },
   { id: 10, name: "Breakfast", icon: Coffee },
 ]
 

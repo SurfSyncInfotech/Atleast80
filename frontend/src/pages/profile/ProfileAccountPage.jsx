@@ -215,8 +215,19 @@ export default function ProfileAccountPage() {
         </button>
       )}
 
-      <a
-        href={`mailto:${supportEmail || "support@atleast80.com"}?subject=${encodeURIComponent("Atleast80 Customer Support Request")}&body=${encodeURIComponent(`Hello Atleast80 Support Team,\n\nName: ${user?.name || ""}\nPhone: ${user?.phone || ""}\nEmail: ${user?.email || ""}\n\nIssue Description:\n`)}`}
+      <button
+        type="button"
+        onClick={() => {
+          const body = `Hello Atleast80 Support Team,\n\nName: ${user?.name || ""}\nPhone: ${user?.phone || ""}\nEmail: ${user?.email || ""}\n\nIssue Description:\n`
+          const params = new URLSearchParams({
+            view: "cm",
+            fs: "1",
+            to: supportEmail || "support@atleast80.com",
+            su: "Atleast80 Customer Support Request",
+            body,
+          })
+          window.open(`https://mail.google.com/mail/?${params.toString()}`, "_blank")
+        }}
         className="mt-6 w-full flex items-center justify-between gap-3 p-4 rounded-2xl border border-emerald-100 bg-emerald-50/70 hover:bg-emerald-50 transition-colors text-left cursor-pointer"
       >
         <div className="flex items-center gap-3 min-w-0">
@@ -229,7 +240,7 @@ export default function ProfileAccountPage() {
           </div>
         </div>
         <ChevronRight size={16} className="text-gray flex-shrink-0" />
-      </a>
+      </button>
 
       <button
         type="button"

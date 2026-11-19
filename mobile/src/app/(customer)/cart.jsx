@@ -283,7 +283,7 @@ export default function CartScreen() {
         </View>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} className="flex-grow px-4 mt-4">
+      <ScrollView showsVerticalScrollIndicator={false} className="flex-grow px-4 mt-4" contentContainerStyle={{ paddingBottom: isMultiKitchen ? Math.max(40, insets.bottom + 24) : Math.max(130, 100 + insets.bottom) }}>
         {hasUnavailableItems && (
           <View className="mb-4 bg-red-50 border border-red-200 rounded-2xl p-3.5 flex-row items-center gap-2.5">
             <AlertCircle size={18} color="#B91C1C" />
@@ -466,7 +466,7 @@ export default function CartScreen() {
                   <Text className="text-xs text-gray mt-0.5 font-nunito">{opt.desc}</Text>
                 </View>
                 <Text className="font-poppins font-bold text-sm text-dark">
-                  {opt.id === "self" ? "Free" : `+₹${calculatedDoorstepFee}`}
+                  {opt.price === 0 ? "Free" : `+₹${opt.price}`}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -497,7 +497,7 @@ export default function CartScreen() {
                     <Text className="text-xs text-gray mt-0.5 font-nunito">{opt.desc}</Text>
                   </View>
                   <Text className="font-poppins font-bold text-sm text-dark">
-                    {opt.price === 0 ? "Free" : `+₹${opt.price}`}
+                    {opt.id === "self" ? "Free" : `+₹${calculatedDoorstepFee}`}
                   </Text>
                 </TouchableOpacity>
               )
@@ -550,7 +550,7 @@ export default function CartScreen() {
         <View 
           className="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-100 px-4 pt-3 flex-row items-center justify-between shadow-2xl z-50"
           style={{
-            paddingBottom: Math.max(16, insets.bottom + 8)
+            paddingBottom: Math.max(24, (insets.bottom || 0) + 14)
           }}
         >
           <View>
